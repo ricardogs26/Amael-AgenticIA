@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: amael-agentic-configmap
+  namespace: amael-ia
+data:
+  # ── LLM (Ollama) ──────────────────────────────────────────────────────────
+  OLLAMA_BASE_URL:     "http://ollama-service:11434"
+  LLM_MODEL:           "qwen2.5:14b"
+  LLM_EMBED_MODEL:     "nomic-embed-text"
+  LLM_VISION_MODEL:    "qwen2.5-vl:7b"
+
+  # ── Servicios internos ────────────────────────────────────────────────────
+  K8S_AGENT_URL:              "http://k8s-agent-service:8002"
+  PRODUCTIVITY_SERVICE_URL:   "http://productivity-service:8001"
+  WHATSAPP_BRIDGE_URL:        "http://whatsapp-bridge-service:3000"
+  WHATSAPP_PERSONAL_URL:      "http://whatsapp-personal-service:3001"
+
+  # ── PostgreSQL ────────────────────────────────────────────────────────────
+  POSTGRES_HOST:      "postgres-service"
+  POSTGRES_PORT:      "5432"
+  POSTGRES_DB:        "amael_db"
+  POSTGRES_USER:      "amael_user"
+  POSTGRES_POOL_MIN:  "2"
+  POSTGRES_POOL_MAX:  "10"
+
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB:   "0"
+
+  # ── Qdrant ────────────────────────────────────────────────────────────────
+  QDRANT_URL: "http://qdrant-service:6333"
+
+  # ── MinIO ─────────────────────────────────────────────────────────────────
+  MINIO_ENDPOINT: "minio-service:9000"
+  MINIO_BUCKET:   "amael-uploads"
+  MINIO_SECURE:   "false"
+
+  # ── Observabilidad ────────────────────────────────────────────────────────
+  OTEL_SERVICE_NAME:            "amael-agentic-backend"
+  OTEL_EXPORTER_OTLP_ENDPOINT:  "http://otel-collector.observability.svc.cluster.local:4317"
+  PROMETHEUS_PORT:               "8000"
+
+  # ── Prometheus (para PrometheusTool y SRE) ────────────────────────────────
+  PROMETHEUS_URL: "http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090"
+
+  # ── Grafana (para GrafanaTool) ────────────────────────────────────────────
+  GRAFANA_URL:  "http://kube-prometheus-stack-grafana.observability.svc.cluster.local"
+
+  # ── Rate Limiting ─────────────────────────────────────────────────────────
+  RATE_LIMIT_MAX:    "15"
+  RATE_LIMIT_WINDOW: "60"
+
+  # ── SRE loop ──────────────────────────────────────────────────────────────
+  SRE_LOOP_ENABLED:           "true"
+  SRE_LOOP_INTERVAL:          "60"
+  SRE_NAMESPACE:              "amael-ia"
+  SRE_OBSERVE_NAMESPACES:     "amael-ia,vault,observability,kong"
+  SRE_CONFIDENCE_THRESHOLD:   "0.7"
+  SRE_MAX_RESTARTS_PER_HOUR:  "3"
+  SRE_CB_THRESHOLD:           "5"
+  SRE_CB_RESET_SECONDS:       "300"
+  SRE_AUTO_HEAL_MIN_SEVERITY: "HIGH"
+  SRE_PROTECTED_DEPLOYMENTS:  "postgres-deployment,ollama-deployment,vault-0"
+  SRE_LEASE_NAME:             "sre-agentic-leader"
+  SRE_MIN_ALERT_SEVERITY:     "MEDIUM"
+  SRE_ALERT_PHONE:            "5219993437008"
+
+  # ── SLO targets ───────────────────────────────────────────────────────────
+  SLO_TARGETS_JSON: |
+    [
+      {"handler": "/api/chat",           "target": 0.995, "window_hours": 24},
+      {"handler": "/api/conversations.*", "target": 0.990, "window_hours": 24}
+    ]
+
+  # ── Vault ─────────────────────────────────────────────────────────────────
+  VAULT_ADDR: "http://vault.vault.svc.cluster.local:8200"
+  VAULT_ROLE: "amael-productivity"
+
+  # ── OAuth ─────────────────────────────────────────────────────────────────
+  GOOGLE_REDIRECT_URI: "https://amael-ia.richardx.dev/auth/callback"
+
+  # ── Entorno ───────────────────────────────────────────────────────────────
+  ENVIRONMENT: "production"
+  LOG_LEVEL:   "INFO"
+  APP_VERSION: "1.0.0"
+
+  # ── Usuarios permitidos (sync con allowed-users-configmap existente) ──────
+  # Se sobreescriben via envFrom del ConfigMap shared si es necesario
+  ADMIN_PHONE: "5219993437008"

@@ -1,0 +1,192 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amael-agentic-deployment
+  namespace: amael-ia
+  labels:
+    app: amael-agentic-backend
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: amael-agentic-backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0    # nunca bajar por debajo de 1 réplica durante el update
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: amael-agentic-backend
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8000"
+        prometheus.io/path:   "/metrics"
+    spec:
+      serviceAccountName: amael-agentic-sa
+
+      # Esperar a que PostgreSQL y Redis estén listos antes de arrancar
+      initContainers:
+      - name: wait-for-postgres
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          until nc -z postgres-service 5432; do
+            echo "Esperando PostgreSQL..."; sleep 3
+          done
+          echo "PostgreSQL listo."
+      - name: wait-for-redis
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          until nc -z redis-service 6379; do
+            echo "Esperando Redis..."; sleep 3
+          done
+          echo "Redis listo."
+
+      containers:
+      - name: amael-agentic-backend
+        image: registry.richardx.dev/amael-agentic-backend:1.4.5
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8000
+
+        # ── Variables de entorno ───────────────────────────────────────────
+        envFrom:
+        - configMapRef:
+            name: amael-agentic-configmap
+        - configMapRef:
+            name: allowed-users-configmap    # ALLOWED_EMAILS_CSV, K8S_ALLOWED_USERS_CSV
+
+        env:
+        # Secrets compartidos con backend-ia
+        - name: JWT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: google-auth-secret
+              key: jwt_secret_key
+        - name: SESSION_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: google-auth-secret
+              key: session_secret_key
+        - name: INTERNAL_API_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: google-auth-secret
+              key: internal_api_secret
+        - name: GOOGLE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: google-auth-secret
+              key: client_id
+        - name: GOOGLE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: google-auth-secret
+              key: client_secret
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: amael-secrets
+              key: POSTGRES_PASSWORD
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: amael-secrets
+              key: MINIO_ACCESS_KEY
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: amael-secrets
+              key: MINIO_ROOT_PASSWORD
+
+        # Secrets exclusivos del nuevo backend
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: amael-agentic-secrets
+              key: GITHUB_TOKEN
+              optional: true    # GithubTool funciona sin token (rate limit reducido)
+        - name: GRAFANA_USER
+          valueFrom:
+            secretKeyRef:
+              name: amael-agentic-secrets
+              key: GRAFANA_USER
+              optional: true
+        - name: GRAFANA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: amael-agentic-secrets
+              key: GRAFANA_PASSWORD
+              optional: true
+
+        # Identidad del pod para Lease leader election (SRE)
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+
+        # ── Recursos ──────────────────────────────────────────────────────
+        resources:
+          requests:
+            cpu:    "250m"
+            memory: "512Mi"
+          limits:
+            cpu:    "1000m"
+            memory: "1Gi"
+
+        # ── Probes ────────────────────────────────────────────────────────
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60    # tiempo para que el lifespan complete
+          periodSeconds:       30
+          failureThreshold:    3
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds:       15
+          failureThreshold:    3
+
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          failureThreshold: 20    # 20 * 10s = 3m20s max startup time
+          periodSeconds:    10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: amael-agentic-service
+  namespace: amael-ia
+  labels:
+    app:     amael-agentic-backend
+    monitor: amael-metrics
+spec:
+  selector:
+    app: amael-agentic-backend
+  ports:
+  - name:       http
+    protocol:   TCP
+    port:        8000
+    targetPort: 8000
+  type: ClusterIP

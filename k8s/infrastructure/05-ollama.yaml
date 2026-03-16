@@ -1,0 +1,112 @@
+# ── Ollama — inferencia LLM local con GPU ─────────────────────────────────────
+# Modelos requeridos (pull manual después del primer despliegue):
+#   ollama pull qwen2.5:14b         # LLM principal de chat
+#   ollama pull nomic-embed-text    # Embeddings RAG (768 dims)
+#   ollama pull qwen2.5-vl:7b      # Visión (Grafana screenshots) — opcional
+#
+# GPU: nvidia.com/gpu: 1 — asignada exclusivamente a este pod
+# ⚠️  IMPORTANTE: Usar strategy: Recreate o kubectl delete pod (NO rollout restart)
+#     Con RollingUpdate el pod nuevo queda Pending esperando la GPU única
+#
+# Restart correcto:
+#   kubectl delete pod -l app=ollama -n amael-ia
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-pvc
+  namespace: amael-ia
+  labels:
+    app: ollama
+    app.kubernetes.io/part-of: amael-ia
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi   # qwen2.5:14b ~9GB + nomic-embed-text ~274MB + qwen2.5-vl:7b ~5GB
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama-deployment
+  namespace: amael-ia
+  labels:
+    app: ollama
+    app.kubernetes.io/part-of: amael-ia
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # GPU única — no puede haber dos pods simultáneos
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      containers:
+      - name: ollama
+        image: ollama/ollama:0.4.6
+        ports:
+        - containerPort: 11434
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "4Gi"
+            nvidia.com/gpu: 1
+          limits:
+            cpu: "4000m"
+            memory: "16Gi"
+            nvidia.com/gpu: 1
+        env:
+        - name: OLLAMA_HOST
+          value: "0.0.0.0"
+        - name: OLLAMA_KEEP_ALIVE
+          value: "24h"     # mantener modelos en VRAM entre requests
+        volumeMounts:
+        - name: ollama-storage
+          mountPath: /root/.ollama
+        livenessProbe:
+          httpGet:
+            path: /api/tags
+            port: 11434
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/tags
+            port: 11434
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+      volumes:
+      - name: ollama-storage
+        persistentVolumeClaim:
+          claimName: ollama-pvc
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-service
+  namespace: amael-ia
+  labels:
+    app: ollama
+spec:
+  selector:
+    app: ollama
+  ports:
+  - protocol: TCP
+    port: 11434
+    targetPort: 11434
+  type: ClusterIP

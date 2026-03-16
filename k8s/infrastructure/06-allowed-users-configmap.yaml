@@ -1,0 +1,28 @@
+# ── Whitelist de usuarios autorizados ─────────────────────────────────────────
+# Controla quién puede usar el sistema:
+#   ALLOWED_EMAILS_CSV   — emails de Google OAuth autorizados
+#   ALLOWED_NUMBERS_CSV  — números WhatsApp autorizados (formato: 521XXXXXXXXXX)
+#   K8S_ALLOWED_USERS_CSV — usuarios con acceso a K8S_TOOL (subset de los anteriores)
+#
+# Este ConfigMap se actualiza sin redesplegar el backend:
+#   kubectl apply -f k8s/infrastructure/06-allowed-users-configmap.yaml
+#   kubectl rollout restart deployment/amael-agentic-deployment -n amael-ia
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: allowed-users-configmap
+  namespace: amael-ia
+  labels:
+    app.kubernetes.io/part-of: amael-ia
+data:
+  # Emails de Google OAuth autorizados (separados por coma, sin espacios)
+  ALLOWED_EMAILS_CSV: "ricardogs26@gmail.com,rguzmans@bancobase.com"
+
+  # Números WhatsApp autorizados (formato internacional: 521XXXXXXXXXX)
+  ALLOWED_NUMBERS_CSV: "5219993437008"
+
+  # Usuarios con acceso a K8S_TOOL — pueden consultar el clúster Kubernetes
+  # Subset de ALLOWED_EMAILS_CSV + ALLOWED_NUMBERS_CSV
+  K8S_ALLOWED_USERS_CSV: "ricardogs26@gmail.com,rguzmans@bancobase.com,5219993437008"

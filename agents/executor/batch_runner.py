@@ -1,0 +1,233 @@
+"""
+Lógica de ejecución paralela de batches del plan.
+
+Migrado desde backend-ia/agents/executor.py.
+Responsabilidad única: ejecutar un batch de pasos (paralelo o secuencial).
+"""
+from __future__ import annotations
+
+import logging
+import re
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Dict, List, Tuple
+
+from langchain_ollama import ChatOllama, OllamaLLM
+
+from agents.executor.step_handlers import STEP_HANDLERS
+from observability.metrics import (
+    EXECUTOR_CONTEXT_TRUNCATIONS_TOTAL,
+    EXECUTOR_ERRORS_TOTAL,
+    EXECUTOR_ESTIMATED_PROMPT_TOKENS,
+    EXECUTOR_PARALLEL_BATCH_SIZE,
+    EXECUTOR_PARALLEL_BATCHES_TOTAL,
+    EXECUTOR_STEP_LATENCY_SECONDS,
+    EXECUTOR_STEPS_TOTAL,
+)
+from observability.tracing import tracer
+
+logger = logging.getLogger("agents.executor.batch_runner")
+
+MAX_CONTEXT_CHARS = 12_000
+MAX_ANSWER_CHARS = 8_000
+
+# Pattern para tags de media embebidos (imágenes Grafana, etc.)
+_MEDIA_PATTERN = re.compile(r"\[MEDIA:[^\]]+\]", re.DOTALL)
+
+# Singleton LLM para REASONING — ChatOllama para control de idioma via SystemMessage
+_llm_reasoning: ChatOllama | None = None
+
+
+def _get_llm_reasoning() -> ChatOllama:
+    global _llm_reasoning
+    if _llm_reasoning is None:
+        from config.settings import settings
+        _llm_reasoning = ChatOllama(
+            model=settings.llm_model,
+            base_url=settings.ollama_base_url,
+        )
+    return _llm_reasoning
+
+
+def _truncate(text: str, max_chars: int, label: str) -> str:
+    if len(text) <= max_chars:
+        return text
+    EXECUTOR_CONTEXT_TRUNCATIONS_TOTAL.inc()
+    logger.warning(f"[executor] '{label}' truncado {len(text)} → {max_chars} chars.")
+    return (
+        "[...contexto anterior truncado para ajustar a la ventana del LLM...]\n"
+        + text[-max_chars:]
+    )
+
+
+def _step_type(step: str) -> str:
+    return step.split(":")[0].strip().upper()
+
+
+def run_tool_step(
+    step: str, state: Dict[str, Any], tools_map: Dict[str, Any]
+) -> str:
+    """
+    Ejecuta un único paso de herramienta (no-REASONING).
+    Thread-safe: solo lee state, nunca lo escribe.
+    """
+    stype = _step_type(step)
+    query = step[len(stype) + 1:].strip()  # quita "TYPE: "
+    t0 = time.time()
+
+    with tracer.start_as_current_span(f"agent.executor.{stype.lower()}") as span:
+        span.set_attribute("agent.step_type", stype)
+        span.set_attribute("agent.step", step[:200])
+        try:
+            handler = STEP_HANDLERS.get(stype)
+            if handler:
+                result = handler(query, state, tools_map)
+            else:
+                EXECUTOR_ERRORS_TOTAL.labels(step_type=stype).inc()
+                result = f"Error: Tipo de paso '{stype}' no reconocido."
+        except Exception as exc:
+            EXECUTOR_ERRORS_TOTAL.labels(step_type=stype).inc()
+            logger.error(f"[executor] Error en {stype}: {exc}", exc_info=True)
+            span.record_exception(exc)
+            result = f"Error en {stype}: {str(exc)[:200]}"
+
+        elapsed = time.time() - t0
+        EXECUTOR_STEP_LATENCY_SECONDS.labels(step_type=stype).observe(elapsed)
+        EXECUTOR_STEPS_TOTAL.labels(step_type=stype).inc()
+        span.set_attribute("agent.step_latency_seconds", elapsed)
+
+    return result
+
+
+_ES_MARKERS = {"el", "la", "los", "las", "de", "en", "que", "es", "un", "una",
+               "por", "para", "con", "del", "se", "no", "y", "a", "su", "al",
+               "lo", "le", "me", "te", "más", "si", "ya", "hay", "como", "pero"}
+_EN_MARKERS = {"the", "is", "are", "and", "of", "to", "a", "in", "that", "it",
+               "for", "on", "with", "as", "be", "this", "was", "by", "or", "an",
+               "at", "from", "which", "have", "were", "they", "their", "about"}
+
+
+def _detect_language(text: str) -> str:
+    """
+    Heurística rápida: detecta si el texto es mayormente español ('es') o inglés ('en').
+    Compara cuántos marcadores de cada idioma aparecen en las primeras 80 palabras.
+    """
+    words = set(text.lower().split()[:80])
+    es_score = len(words & _ES_MARKERS)
+    en_score = len(words & _EN_MARKERS)
+    if es_score > en_score:
+        return "es"
+    if en_score > es_score:
+        return "en"
+    return "und"  # undetermined
+
+
+def run_reasoning_step(
+    step: str, state: Dict[str, Any]
+) -> Tuple[str, str]:
+    """
+    Ejecuta un paso REASONING: sintetiza el contexto acumulado con el LLM.
+    Retorna (nueva_respuesta, contexto_sin_cambios).
+    """
+    reasoning_task = step[len("REASONING:"):].strip()
+    current_answer = state.get("final_answer", "") or ""
+    context = state.get("context", "") or ""
+
+    # Extrae tags de media ANTES de truncar (se restauran al final)
+    all_media = _MEDIA_PATTERN.findall(current_answer)
+    if all_media:
+        current_answer = _MEDIA_PATTERN.sub("[SYSTEM_MEDIA_MARKER]", current_answer)
+
+    context_for_llm = _truncate(current_answer, MAX_ANSWER_CHARS, "final_answer")
+
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    user_question = state.get("question", "")
+
+    system_prompt = (
+        "Eres un asistente inteligente. "
+        "REGLA ABSOLUTA DE IDIOMA: Responde SIEMPRE en el mismo idioma que usó el usuario "
+        "en su pregunta. Si la pregunta está en español, tu respuesta DEBE ser en español, "
+        "aunque el contexto o los documentos estén en inglés — en ese caso traduce y sintetiza "
+        "el contenido al español. Si la pregunta está en inglés, responde en inglés.\n"
+        "REGLAS DE FORMATO:\n"
+        "1. Si el contexto contiene un bloque ```bash o ```yaml, CÓPIALO EXACTAMENTE sin modificarlo.\n"
+        "2. NUNCA pongas análisis ni texto dentro de un bloque ```bash o ```yaml.\n"
+        "3. Tu análisis va FUERA de los bloques, como texto normal.\n"
+        "4. NO conviertas datos tabulares de kubectl en tablas markdown.\n"
+        "5. Si generas scripts bash o manifiestos YAML nuevos, envuélvelos en ```bash o ```yaml.\n"
+        "6. SI EL CONTEXTO TIENE [SYSTEM_MEDIA_MARKER], menciona que has analizado la imagen adjunta "
+        "pero NO incluyas el marcador en tu respuesta final.\n"
+        "7. REGLA ANTI-ALUCINACIONES: Si el contexto NO contiene información técnica específica, "
+        "responde claramente que no se encontró información en lugar de inventar pasos genéricos."
+    )
+
+    human_prompt = (
+        f"Pregunta del usuario: {user_question}\n\n"
+        f"Contexto recuperado:\n{context_for_llm}\n\n"
+        f"Tarea: {reasoning_task}"
+    )
+
+    estimated_tokens = (len(system_prompt) + len(human_prompt)) // 4
+    EXECUTOR_ESTIMATED_PROMPT_TOKENS.labels(step_type="REASONING").observe(estimated_tokens)
+
+    response = _get_llm_reasoning().invoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=human_prompt),
+    ])
+    new_answer = response.content if hasattr(response, "content") else str(response)
+
+    # Post-traducción: si el usuario preguntó en español pero la respuesta salió en inglés,
+    # forzar traducción con un prompt dedicado (más confiable que instrucciones en el mismo prompt)
+    if user_question and _detect_language(user_question) == "es" and _detect_language(new_answer) == "en":
+        logger.info("[executor] Respuesta en inglés detectada para pregunta en español — traduciendo")
+        trans_response = _get_llm_reasoning().invoke([
+            SystemMessage(content="Eres un traductor experto de inglés a español. Traduce el siguiente texto al español de forma natural y fluida, conservando el formato (bloques de código, listas, etc.) exactamente igual."),
+            HumanMessage(content=new_answer),
+        ])
+        new_answer = trans_response.content if hasattr(trans_response, "content") else str(trans_response)
+
+    if all_media:
+        new_answer += "\n\n" + "\n".join(all_media)
+
+    return new_answer, context
+
+
+def run_parallel_batch(
+    batch: List[str], state: Dict[str, Any], tools_map: Dict[str, Any]
+) -> Tuple[str, str]:
+    """
+    Ejecuta todos los pasos del batch de forma concurrente con ThreadPoolExecutor.
+    Solo válido para batches de herramientas (no-REASONING).
+    Retorna (respuesta_combinada, contexto_acumulado).
+    """
+    EXECUTOR_PARALLEL_BATCHES_TOTAL.inc()
+    EXECUTOR_PARALLEL_BATCH_SIZE.observe(len(batch))
+
+    results: Dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+        future_to_step = {
+            pool.submit(run_tool_step, step, state, tools_map): step
+            for step in batch
+        }
+        for future in as_completed(future_to_step):
+            step = future_to_step[future]
+            try:
+                results[step] = future.result()
+            except Exception as exc:
+                stype = _step_type(step)
+                EXECUTOR_ERRORS_TOTAL.labels(step_type=stype).inc()
+                results[step] = f"Error en {stype}: {str(exc)[:200]}"
+
+    # Combina preservando el orden original del batch
+    parts = []
+    new_context = state.get("context", "") or ""
+    for step in batch:
+        stype = _step_type(step)
+        result = results.get(step, "")
+        parts.append(f"--- {stype} ---\n{result}")
+        if stype == "RAG_RETRIEVAL":
+            combined = (new_context + "\n" + result).strip() if new_context else result
+            new_context = _truncate(combined, MAX_CONTEXT_CHARS, "rag_context")
+
+    return "\n\n".join(parts), new_context

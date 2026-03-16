@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: amael-agentic-day-planner
+  namespace: amael-ia
+spec:
+  # Lunes a viernes a las 7:00am hora de México
+  schedule: "0 7 * * 1-5"
+  timeZone: "America/Mexico_City"
+  concurrencyPolicy: Forbid          # no lanzar dos en paralelo
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300     # 5min máximo
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: day-planner
+            image: curlimages/curl:8.6.0
+            command:
+            - sh
+            - -c
+            - |
+              curl -sf \
+                -X POST \
+                -H "Authorization: Bearer ${INTERNAL_API_SECRET}" \
+                -H "Content-Type: application/json" \
+                http://amael-agentic-service:8000/api/planner/daily \
+              && echo "Day Planner OK" \
+              || (echo "Day Planner FALLÓ" && exit 1)
+            env:
+            - name: INTERNAL_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: google-auth-secret
+                  key: internal_api_secret

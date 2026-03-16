@@ -1,0 +1,84 @@
+# RBAC para amael-agentic-backend
+#
+# El nuevo backend incorpora el SRE loop autónomo (agents/sre/) por lo que
+# necesita los mismos permisos que el k8s-agent actual:
+#   - ClusterRole sre-agent-observer (ya existe — creado por k8s-agent)
+#   - Role sre-agent-healer en amael-ia (ya existe — creado por k8s-agent)
+#
+# Sólo se crean los Bindings para el nuevo SA.
+# Si se despliega en un clúster limpio, descomentar los ClusterRole/Role.
+
+# ── ClusterRoleBinding: observer (lectura global) ─────────────────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: amael-agentic-observer-binding
+subjects:
+- kind: ServiceAccount
+  name: amael-agentic-sa
+  namespace: amael-ia
+roleRef:
+  kind: ClusterRole
+  name: sre-agent-observer      # ClusterRole creado por k8s-agent
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ── RoleBinding: healer (escritura en amael-ia) ───────────────────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: amael-agentic-healer-binding
+  namespace: amael-ia
+subjects:
+- kind: ServiceAccount
+  name: amael-agentic-sa
+  namespace: amael-ia
+roleRef:
+  kind: Role
+  name: sre-agent-healer         # Role creado por k8s-agent
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ── ClusterRole + Role de referencia (para cluster limpio) ────────────────────
+# Descomentar si se despliega sin el k8s-agent previo.
+#
+# apiVersion: rbac.authorization.k8s.io/v1
+# kind: ClusterRole
+# metadata:
+#   name: sre-agent-observer
+# rules:
+# - apiGroups: [""]
+#   resources: ["pods", "nodes", "namespaces", "events", "services",
+#                "endpoints", "configmaps", "persistentvolumeclaims"]
+#   verbs: ["get", "list", "watch"]
+# - apiGroups: [""]
+#   resources: ["pods/log"]
+#   verbs: ["get", "list", "watch"]
+# - apiGroups: ["apps"]
+#   resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+#   verbs: ["get", "list", "watch"]
+# - apiGroups: ["batch"]
+#   resources: ["jobs", "cronjobs"]
+#   verbs: ["get", "list", "watch"]
+# - apiGroups: ["metrics.k8s.io"]
+#   resources: ["pods", "nodes"]
+#   verbs: ["get", "list"]
+# ---
+# apiVersion: rbac.authorization.k8s.io/v1
+# kind: Role
+# metadata:
+#   name: sre-agent-healer
+#   namespace: amael-ia
+# rules:
+# - apiGroups: [""]
+#   resources: ["pods"]
+#   verbs: ["delete"]
+# - apiGroups: [""]
+#   resources: ["pods/exec"]
+#   verbs: ["create", "get"]
+# - apiGroups: ["apps"]
+#   resources: ["deployments"]
+#   verbs: ["patch"]
+# - apiGroups: ["coordination.k8s.io"]
+#   resources: ["leases"]
+#   verbs: ["get", "create", "update"]

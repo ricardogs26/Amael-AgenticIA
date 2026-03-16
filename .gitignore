@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Secrets (NEVER commit)
+*.key
+*.pem
+*.crt
+*.p12
+vault.root
+secrets.yaml
+*-secret.yaml
+*secrets*.yaml
+
+# Logs
+*.log
+logs/
+
+# Docker
+.dockerignore
+
+# Node (whatsapp-bridge)
+node_modules/
+npm-debug.log*
+
+# Local dev
+*.local
+.cache/
+tmp/

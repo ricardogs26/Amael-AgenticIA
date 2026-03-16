@@ -1,0 +1,104 @@
+# ── Qdrant — base de datos vectorial ──────────────────────────────────────────
+# Colecciones:
+#   {email_sanitized}   — RAG per-usuario (nomic-embed-text, 768 dims, Cosine)
+#   sre_runbooks        — Runbooks SRE indexados al startup
+#   memory_{user_id}    — Memoria episódica (Roadmap Phase 8)
+#
+# Versión: pinear a una versión específica, NO usar latest
+# (v1.7+ eliminó search() — usar query_points())
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qdrant-pvc
+  namespace: amael-ia
+  labels:
+    app: qdrant
+    app.kubernetes.io/part-of: amael-ia
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qdrant
+  namespace: amael-ia
+  labels:
+    app: qdrant
+    app.kubernetes.io/part-of: amael-ia
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # PVC ReadWriteOnce — no puede montarse en dos pods
+  selector:
+    matchLabels:
+      app: qdrant
+  template:
+    metadata:
+      labels:
+        app: qdrant
+    spec:
+      containers:
+      - name: qdrant
+        image: qdrant/qdrant:v1.9.4
+        ports:
+        - containerPort: 6333
+          name: http
+        - containerPort: 6334
+          name: grpc
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+        volumeMounts:
+        - name: qdrant-storage
+          mountPath: /qdrant/storage
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 6333
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 6333
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+      volumes:
+      - name: qdrant-storage
+        persistentVolumeClaim:
+          claimName: qdrant-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant-service
+  namespace: amael-ia
+  labels:
+    app: qdrant
+spec:
+  selector:
+    app: qdrant
+  ports:
+  - name: http
+    protocol: TCP
+    port: 6333
+    targetPort: 6333
+  - name: grpc
+    protocol: TCP
+    port: 6334
+    targetPort: 6334
+  type: ClusterIP
