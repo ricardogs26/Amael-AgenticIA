@@ -164,6 +164,57 @@ class ContextFactory:
             skill_names=["rag", "web", "llm"],
         )
 
+    @classmethod
+    def build_cto_context(
+        cls,
+        user_id: str,
+        request_id: str = "",
+        conversation_id: str = "",
+    ) -> AgentContext:
+        """
+        Contexto optimizado para CTOAgent: rag + web + llm skills.
+        """
+        return cls.build_context(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            request_id=request_id,
+            skill_names=["rag", "web", "llm"],
+        )
+
+    @classmethod
+    def build_dev_context(
+        cls,
+        user_id: str,
+        request_id: str = "",
+        conversation_id: str = "",
+    ) -> AgentContext:
+        """
+        Contexto optimizado para DevAgent: rag + web + llm skills.
+        """
+        return cls.build_context(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            request_id=request_id,
+            skill_names=["rag", "web", "llm"],
+        )
+
+    @classmethod
+    def build_arch_context(
+        cls,
+        user_id: str,
+        request_id: str = "",
+        conversation_id: str = "",
+    ) -> AgentContext:
+        """
+        Contexto optimizado para ArchAgent: rag + llm skills.
+        """
+        return cls.build_context(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            request_id=request_id,
+            skill_names=["rag", "llm"],
+        )
+
     # ── Helpers privados ──────────────────────────────────────────────────────
 
     @classmethod
