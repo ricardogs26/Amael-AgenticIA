@@ -103,7 +103,7 @@ async def chat(
 
         result_dict = await dispatch(
             question=question,
-            user_id=user_id,
+            user_id=effective_user,   # usar el usuario real, no el JWT del bot
             tools_map=tools_map,
             routing_decision=decision,
             request_id=request_id,
