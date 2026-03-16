@@ -18,6 +18,8 @@ import asyncio
 import logging
 import os
 import time
+import urllib.request
+import urllib.error
 from typing import Any, Dict
 
 from pydantic import BaseModel
@@ -71,12 +73,14 @@ async def readiness() -> HealthResponse:
     checks = await asyncio.gather(
         _check_postgres(),
         _check_redis(),
+        _check_qdrant(),
+        _check_ollama(),
         _check_skills(),
         _check_tools(),
         return_exceptions=True,
     )
 
-    postgres_result, redis_result, skills_results, tools_results = checks
+    postgres_result, redis_result, qdrant_result, ollama_result, skills_results, tools_results = checks
 
     components: Dict[str, Any] = {}
     all_storage_ok = True
@@ -84,7 +88,12 @@ async def readiness() -> HealthResponse:
     any_tool_fail  = False
 
     # Storage
-    for label, result in [("postgres", postgres_result), ("redis", redis_result)]:
+    for label, result in [
+        ("postgres", postgres_result),
+        ("redis",    redis_result),
+        ("qdrant",   qdrant_result),
+        ("ollama",   ollama_result),
+    ]:
         if isinstance(result, Exception):
             components[label] = ComponentHealth(name=label, healthy=False, detail=str(result))
             all_storage_ok = False
@@ -169,6 +178,50 @@ async def _check_redis() -> ComponentHealth:
         logger.warning(f"[health] redis check failed: {exc}")
         return ComponentHealth(
             name="redis",
+            healthy=False,
+            latency_ms=round((time.monotonic() - t0) * 1000, 1),
+            detail=str(exc),
+        )
+
+
+async def _check_qdrant() -> ComponentHealth:
+    t0 = time.monotonic()
+    url = os.environ.get("QDRANT_URL", "http://qdrant-service:6333")
+    try:
+        def _ping():
+            urllib.request.urlopen(f"{url}/healthz", timeout=3)
+        await asyncio.to_thread(_ping)
+        return ComponentHealth(
+            name="qdrant",
+            healthy=True,
+            latency_ms=round((time.monotonic() - t0) * 1000, 1),
+        )
+    except Exception as exc:
+        logger.warning(f"[health] qdrant check failed: {exc}")
+        return ComponentHealth(
+            name="qdrant",
+            healthy=False,
+            latency_ms=round((time.monotonic() - t0) * 1000, 1),
+            detail=str(exc),
+        )
+
+
+async def _check_ollama() -> ComponentHealth:
+    t0 = time.monotonic()
+    url = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
+    try:
+        def _ping():
+            urllib.request.urlopen(f"{url}/api/tags", timeout=5)
+        await asyncio.to_thread(_ping)
+        return ComponentHealth(
+            name="ollama",
+            healthy=True,
+            latency_ms=round((time.monotonic() - t0) * 1000, 1),
+        )
+    except Exception as exc:
+        logger.warning(f"[health] ollama check failed: {exc}")
+        return ComponentHealth(
+            name="ollama",
             healthy=False,
             latency_ms=round((time.monotonic() - t0) * 1000, 1),
             detail=str(exc),
