@@ -172,7 +172,7 @@ class AgentDispatcher:
             )
             task = {"query": question, "user_email": user_id}
 
-        elif intent in ("cto", "coding"):
+        elif intent == "cto":
             ctx = ContextFactory.build_cto_context(
                 user_id=user_id,
                 request_id=request_id,
@@ -180,7 +180,7 @@ class AgentDispatcher:
             )
             task = {"query": question, "user_email": user_id}
 
-        elif intent == "dev":
+        elif intent in ("dev", "coding"):
             ctx = ContextFactory.build_dev_context(
                 user_id=user_id,
                 request_id=request_id,

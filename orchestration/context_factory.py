@@ -173,12 +173,12 @@ class ContextFactory:
     ) -> AgentContext:
         """
         Contexto optimizado para CTOAgent: rag + web + llm skills.
+        Alias de build_researcher_context — mismo skill set.
         """
-        return cls.build_context(
+        return cls.build_researcher_context(
             user_id=user_id,
             conversation_id=conversation_id,
             request_id=request_id,
-            skill_names=["rag", "web", "llm"],
         )
 
     @classmethod
@@ -190,12 +190,12 @@ class ContextFactory:
     ) -> AgentContext:
         """
         Contexto optimizado para DevAgent: rag + web + llm skills.
+        Alias de build_researcher_context — mismo skill set.
         """
-        return cls.build_context(
+        return cls.build_researcher_context(
             user_id=user_id,
             conversation_id=conversation_id,
             request_id=request_id,
-            skill_names=["rag", "web", "llm"],
         )
 
     @classmethod

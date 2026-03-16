@@ -16,7 +16,8 @@ import logging
 from typing import Any, Dict
 
 from agents.base.agent_registry import AgentRegistry
-from core.agent_base import AgentContext, AgentResult, BaseAgent
+from agents.base.llm_utils import build_prompt, invoke_llm, retrieve_rag_context
+from core.agent_base import AgentResult, BaseAgent
 
 logger = logging.getLogger("agents.dev.agent")
 
@@ -67,28 +68,17 @@ class DevAgent(BaseAgent):
         user_email = task.get("user_email", "")
 
         if not query:
-            return AgentResult(
-                success=False,
-                output=None,
-                agent_name=self.name,
-                error="query vacía",
-            )
+            return AgentResult(success=False, output=None, agent_name=self.name, error="query vacía")
 
-        # 1. Recuperar contexto del proyecto via RAG
-        rag_context = ""
-        if user_email:
-            try:
-                from agents.researcher.rag_retriever import retrieve_documents
-                rag_context = retrieve_documents(user_email, query, k=4) or ""
-            except Exception as exc:
-                logger.debug(f"[dev] RAG no disponible: {exc}")
+        rag_context = await retrieve_rag_context(user_email, query, k=4, agent_name=self.name)
+        prompt      = build_prompt(
+            _SYSTEM_PROMPT, query, rag_context,
+            context_header="## Contexto del proyecto",
+            question_header="## Tarea",
+        )
 
-        # 2. Construir prompt
-        prompt = _build_prompt(_SYSTEM_PROMPT, query, rag_context)
-
-        # 3. Invocar LLM
         try:
-            response = await _invoke_llm(prompt, self.context)
+            response = await invoke_llm(prompt, self.context, self.name)
             return AgentResult(
                 success=True,
                 output={"response": response, "source": "dev_agent"},
@@ -97,55 +87,4 @@ class DevAgent(BaseAgent):
             )
         except Exception as exc:
             logger.error(f"[dev] LLM error: {exc}")
-            return AgentResult(
-                success=False,
-                output=None,
-                agent_name=self.name,
-                error=str(exc),
-            )
-
-
-def _build_prompt(system: str, question: str, rag_context: str) -> str:
-    parts = [system, ""]
-    if rag_context:
-        parts += ["## Contexto del proyecto", rag_context, ""]
-    parts += ["## Tarea", question]
-    return "\n".join(parts)
-
-
-async def _invoke_llm(prompt: str, context: AgentContext) -> str:
-    """Invoca el LLM disponible en el contexto o via ChatOllama directamente."""
-    import asyncio
-    import os
-
-    try:
-        from langchain_ollama import ChatOllama
-        from langchain_core.messages import HumanMessage, SystemMessage
-
-        llm = ChatOllama(
-            model=os.environ.get("MODEL_NAME", "qwen2.5:14b"),
-            base_url=os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434"),
-        )
-        lines = prompt.split("\n")
-        system_lines, rest_lines = [], []
-        in_system = True
-        for line in lines:
-            if in_system and line.startswith("##"):
-                in_system = False
-            (system_lines if in_system else rest_lines).append(line)
-
-        system_text   = "\n".join(system_lines).strip()
-        question_text = "\n".join(rest_lines).strip()
-
-        messages = [SystemMessage(content=system_text), HumanMessage(content=question_text)]
-        result   = await asyncio.to_thread(llm.invoke, messages)
-        return result.content if hasattr(result, "content") else str(result)
-
-    except Exception as exc:
-        logger.debug(f"[dev] ChatOllama falló, intentando OllamaLLM: {exc}")
-
-    if context.llm is not None:
-        result = await asyncio.to_thread(context.llm.invoke, prompt)
-        return str(result)
-
-    raise RuntimeError("No hay LLM disponible en el contexto")
+            return AgentResult(success=False, output=None, agent_name=self.name, error=str(exc))
