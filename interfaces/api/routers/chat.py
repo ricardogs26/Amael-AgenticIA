@@ -67,7 +67,14 @@ async def chat(
     """
     # Si el caller es el bot de servicio, usar el user_id del body (usuario real)
     _BOT_USER = "bot-amael@richardx.dev"
-    effective_user = body.user_id if (body.user_id and user_id == _BOT_USER) else user_id
+    if body.user_id and user_id == _BOT_USER:
+        from config.settings import settings
+        if body.user_id not in settings.full_whitelist:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail="Usuario no autorizado")
+        effective_user = body.user_id
+    else:
+        effective_user = user_id
 
     # Rate limit
     check_rate_limit(effective_user)
