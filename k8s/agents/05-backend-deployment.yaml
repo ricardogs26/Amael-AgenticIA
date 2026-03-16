@@ -163,6 +163,7 @@ spec:
             port: 8000
           initialDelaySeconds: 30
           periodSeconds:       15
+          timeoutSeconds:      10    # /ready verifica Qdrant (3s) + Ollama (5s) en paralelo
           failureThreshold:    3
 
         startupProbe:
