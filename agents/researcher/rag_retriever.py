@@ -176,8 +176,10 @@ def retrieve_documents(
 
     Retorna texto con cabeceras de fuente para que el LLM cite correctamente.
     """
-    from observability.metrics import RAG_HITS_TOTAL, RAG_MISS_TOTAL
+    import time
+    from observability.metrics import RAG_HITS_TOTAL, RAG_MISS_TOTAL, RAG_LATENCY_SECONDS
 
+    _t0 = time.monotonic()
     try:
         effective_filter = filename_filter or _detect_filename_filter(query, user_email)
         vectorstore = get_user_vectorstore(user_email)
@@ -234,6 +236,7 @@ def retrieve_documents(
 
         if not docs:
             RAG_MISS_TOTAL.inc()
+            RAG_LATENCY_SECONDS.observe(time.monotonic() - _t0)
             return ""
 
         RAG_HITS_TOTAL.inc()
@@ -245,11 +248,13 @@ def retrieve_documents(
             page = doc.metadata.get("page", "")
             header = f"[Fuente: {src}, pág. {page}]" if page != "" else f"[Fuente: {src}]"
             parts.append(f"{header}\n{doc.page_content}")
+        RAG_LATENCY_SECONDS.observe(time.monotonic() - _t0)
         return "\n\n".join(parts)
 
     except Exception as exc:
         logger.error(f"[rag] retrieve_documents error: {exc}")
         RAG_MISS_TOTAL.inc()
+        RAG_LATENCY_SECONDS.observe(time.monotonic() - _t0)
         return ""
 
 
