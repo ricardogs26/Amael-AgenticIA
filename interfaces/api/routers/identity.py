@@ -54,12 +54,13 @@ def check_access(
     if not value:
         return AccessCheckResponse(allowed=False, identifier="")
 
-    # Fuente de verdad: tabla user_identities + user_profile activo
-    # El Admin panel gestiona los usuarios en la DB — el ConfigMap no es relevante aquí.
+    # Fuente de verdad única: user_identities + user_profile en DB
+    # El email principal también vive en user_profile.user_id
     try:
         from storage.postgres.client import get_connection
         with get_connection() as conn:
             with conn.cursor() as cur:
+                # Buscar por identidad secundaria (whatsapp, teléfono)
                 cur.execute(
                     """
                     SELECT ui.canonical_user_id
@@ -72,19 +73,25 @@ def check_access(
                 )
                 row = cur.fetchone()
                 if row:
-                    logger.debug(f"[identity] check: {value!r} → allowed (DB)")
+                    logger.debug(f"[identity] check: {value!r} → allowed (identity)")
+                    return AccessCheckResponse(
+                        allowed=True, identifier=value,
+                        canonical_user_id=row[0], allow_requests=False,
+                    )
+                # Buscar por email directo (user_id = email)
+                cur.execute(
+                    "SELECT user_id FROM user_profile WHERE user_id = %s AND status = 'active'",
+                    (value,),
+                )
+                row = cur.fetchone()
+                if row:
+                    logger.debug(f"[identity] check: {value!r} → allowed (profile)")
                     return AccessCheckResponse(
                         allowed=True, identifier=value,
                         canonical_user_id=row[0], allow_requests=False,
                     )
     except Exception as exc:
-        # Si la DB falla, caer a la whitelist del ConfigMap como último recurso
-        logger.warning(f"[identity] DB check failed, fallback to ConfigMap: {exc}")
-        if value in settings.full_whitelist:
-            return AccessCheckResponse(
-                allowed=True, identifier=value,
-                canonical_user_id=value, allow_requests=False,
-            )
+        logger.error(f"[identity] DB check failed para {value!r}: {exc}")
 
     logger.debug(f"[identity] check: {value!r} → denied")
     return AccessCheckResponse(
@@ -97,7 +104,17 @@ def check_access(
 def get_me(
     user_id: Annotated[str, Depends(get_current_user)],
 ) -> UserInfoResponse:
-    """Retorna el user_id del JWT activo y si está en la whitelist."""
-    from config.settings import settings
-    allowed = user_id in settings.full_whitelist
+    """Retorna el user_id del JWT activo y si tiene status='active' en la DB."""
+    try:
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM user_profile WHERE user_id = %s AND status = 'active'",
+                    (user_id,),
+                )
+                allowed = cur.fetchone() is not None
+    except Exception as exc:
+        logger.warning(f"[identity] /me DB check failed para {user_id!r}: {exc}")
+        allowed = False
     return UserInfoResponse(user_id=user_id, allowed=allowed)

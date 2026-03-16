@@ -250,6 +250,7 @@ def _ensure_schema() -> None:
     from storage.postgres.client import get_connection
     with get_connection() as conn:
         with conn.cursor() as cur:
+            # ── Conversaciones y mensajes ──────────────────────────────────
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS conversations (
                     id          TEXT PRIMARY KEY,
@@ -276,6 +277,42 @@ def _ensure_schema() -> None:
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_messages_conversation
                 ON messages (conversation_id, created_at ASC)
+            """)
+
+            # ── Usuarios — fuente de verdad para control de acceso ─────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_profile (
+                    user_id      TEXT PRIMARY KEY,
+                    display_name TEXT,
+                    role         TEXT NOT NULL DEFAULT 'user',
+                    status       TEXT NOT NULL DEFAULT 'active',
+                    timezone     TEXT DEFAULT 'America/Mexico_City',
+                    preferences  JSONB DEFAULT '{}',
+                    updated_at   TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_identities (
+                    id                SERIAL PRIMARY KEY,
+                    canonical_user_id TEXT NOT NULL REFERENCES user_profile(user_id) ON DELETE CASCADE,
+                    identity_type     TEXT NOT NULL,
+                    identity_value    TEXT NOT NULL,
+                    created_at        TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE (identity_type, identity_value)
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_user_identities_value
+                ON user_identities (identity_value)
+            """)
+
+            # ── Configuración de la plataforma ─────────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS platform_settings (
+                    key        TEXT PRIMARY KEY,
+                    value      TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
             """)
 
 

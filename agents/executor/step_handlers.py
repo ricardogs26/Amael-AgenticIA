@@ -7,7 +7,6 @@ Migrado desde backend-ia/agents/executor.py, separado por responsabilidad.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Dict
 
 from observability.metrics import EXECUTOR_ERRORS_TOTAL
@@ -15,22 +14,38 @@ from observability.metrics import EXECUTOR_ERRORS_TOTAL
 logger = logging.getLogger("agents.executor.handlers")
 
 
-def _get_k8s_allowed_users() -> list[str]:
-    """Lee la whitelist de K8s desde settings (lazy para evitar import circular)."""
+def _user_can_use_k8s(user_id: str) -> bool:
+    """Verifica que el usuario tiene role='admin' en user_profile."""
     try:
-        from config.settings import settings
-        return settings.k8s_allowed_users
-    except Exception:
-        csv = os.environ.get("K8S_ALLOWED_USERS_CSV", "")
-        return [u.strip() for u in csv.split(",") if u.strip()]
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM user_profile WHERE user_id = %s AND role = 'admin' AND status = 'active'",
+                    (user_id,),
+                )
+                if cur.fetchone():
+                    return True
+                # También buscar por identidad (número WhatsApp → canonical_user_id admin)
+                cur.execute(
+                    """
+                    SELECT 1 FROM user_identities ui
+                    JOIN user_profile up ON up.user_id = ui.canonical_user_id
+                    WHERE ui.identity_value = %s AND up.role = 'admin' AND up.status = 'active'
+                    """,
+                    (user_id,),
+                )
+                return cur.fetchone() is not None
+    except Exception as exc:
+        logger.error(f"[executor] DB check K8s para {user_id!r}: {exc}")
+        return False
 
 
 def handle_k8s_tool(query: str, state: Dict[str, Any], tools_map: Dict[str, Any]) -> str:
     """Ejecuta una consulta K8s/infraestructura."""
-    k8s_allowed = _get_k8s_allowed_users()
     user_id = state.get("user_id", "unknown")
 
-    if k8s_allowed and user_id not in k8s_allowed:
+    if not _user_can_use_k8s(user_id):
         logger.warning(f"[executor] K8S_TOOL bloqueado para user={user_id}")
         return "Lo siento, tu usuario no cuenta con los privilegios de administrador requeridos."
 

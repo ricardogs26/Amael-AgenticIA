@@ -79,10 +79,8 @@ class Settings(BaseSettings):
         alias="GOOGLE_REDIRECT_URI",
     )
 
-    # ── Usuarios permitidos (desde ConfigMap) ─────────────────────────────────
-    allowed_emails_csv: str = Field(default="", alias="ALLOWED_EMAILS_CSV")
-    allowed_numbers_csv: str = Field(default="", alias="ALLOWED_NUMBERS_CSV")
-    k8s_allowed_users_csv: str = Field(default="", alias="K8S_ALLOWED_USERS_CSV")
+    # Control de acceso gestionado en PostgreSQL (user_profile + user_identities)
+    # El admin_phone se usa en el day-planner para notificaciones WhatsApp
     admin_phone: str = Field(default="5219993437008", alias="ADMIN_PHONE")
 
     # ── PostgreSQL ────────────────────────────────────────────────────────────
@@ -154,23 +152,6 @@ class Settings(BaseSettings):
     }
 
     # ── Propiedades derivadas ─────────────────────────────────────────────────
-
-    @property
-    def allowed_emails(self) -> List[str]:
-        return [e.strip() for e in self.allowed_emails_csv.split(",") if e.strip()]
-
-    @property
-    def allowed_numbers(self) -> List[str]:
-        return [n.strip() for n in self.allowed_numbers_csv.split(",") if n.strip()]
-
-    @property
-    def full_whitelist(self) -> List[str]:
-        return self.allowed_emails + self.allowed_numbers
-
-    @property
-    def k8s_allowed_users(self) -> List[str]:
-        users = [u.strip() for u in self.k8s_allowed_users_csv.split(",") if u.strip()]
-        return users if users else self.full_whitelist
 
     @property
     def postgres_dsn(self) -> str:
