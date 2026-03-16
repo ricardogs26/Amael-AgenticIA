@@ -33,10 +33,14 @@ _DIRECT_DISPATCH: Dict[str, str] = {
     "sre":          "sre",
     "productivity": "productivity",
     "research":     "researcher",
+    "cto":          "cto",
+    "dev":          "dev",
+    "arch":         "arch",
+    "coding":       "dev",     # alias legacy
 }
 
 # Intents que pasan por el pipeline LangGraph completo
-_PIPELINE_INTENTS = {"general", "kubernetes", "monitoring", "coding", "qa", "memory"}
+_PIPELINE_INTENTS = {"general", "kubernetes", "monitoring", "qa", "memory"}
 
 
 class AgentDispatcher:
@@ -162,6 +166,30 @@ class AgentDispatcher:
 
         elif intent == "research":
             ctx = ContextFactory.build_researcher_context(
+                user_id=user_id,
+                request_id=request_id,
+                conversation_id=conversation_id,
+            )
+            task = {"query": question, "user_email": user_id}
+
+        elif intent in ("cto", "coding"):
+            ctx = ContextFactory.build_cto_context(
+                user_id=user_id,
+                request_id=request_id,
+                conversation_id=conversation_id,
+            )
+            task = {"query": question, "user_email": user_id}
+
+        elif intent == "dev":
+            ctx = ContextFactory.build_dev_context(
+                user_id=user_id,
+                request_id=request_id,
+                conversation_id=conversation_id,
+            )
+            task = {"query": question, "user_email": user_id}
+
+        elif intent == "arch":
+            ctx = ContextFactory.build_arch_context(
                 user_id=user_id,
                 request_id=request_id,
                 conversation_id=conversation_id,

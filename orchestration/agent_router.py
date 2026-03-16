@@ -46,9 +46,15 @@ _KEYWORD_RULES = [
     # Productividad
     (r"\b(calendar|meeting|email|gmail|schedule|event|agenda|correo|cita|reunion)\b",
      "productivity", ["productivity"]),
-    # Código
-    (r"\b(code|function|class|refactor|implement|bug|error|exception|debug|script)\b",
-     "coding", ["coder"]),
+    # CTO / estrategia tecnológica (antes que coding para evitar falsos positivos)
+    (r"\b(estrategia|roadmap|visi[oó]n\s*t[eé]cn|tech\s*lead|cto|planificaci[oó]n\s*t[eé]cn|decisi[oó]n\s*t[eé]cn)\b",
+     "cto", ["cto"]),
+    # Arquitectura de software (antes que coding)
+    (r"\b(adr|architecture\s*decision|dise[nñ]o\s*de\s*sistema|hexagonal|clean\s*arch|domain.driven|patr[oó]n\s*de\s*dise[nñ]o|contrato\s*api|api\s*contract)\b",
+     "arch", ["arch"]),
+    # Código / desarrollo
+    (r"\b(code|function|class|refactor|implement|bug|error|exception|debug|script|pull\s*request|\bpr\b|commit)\b",
+     "dev", ["dev"]),
     # Investigación / documentos
     (r"\b(search|find|look\s*up|documentation|explain|buscar|documento|pdf|docx)\b",
      "research", ["researcher"]),
@@ -66,7 +72,10 @@ _INTENT_TO_AGENTS = {
     "kubernetes":   ["devops", "sre"],
     "monitoring":   ["sre", "devops"],
     "productivity": ["productivity"],
-    "coding":       ["coder"],
+    "cto":          ["cto"],
+    "dev":          ["dev"],
+    "arch":         ["arch"],
+    "coding":       ["dev"],        # alias legacy → dev
     "research":     ["researcher"],
     "memory":       ["memory"],
     "qa":           ["qa"],
@@ -74,14 +83,16 @@ _INTENT_TO_AGENTS = {
 }
 
 _LLM_ROUTING_PROMPT = """Clasifica la siguiente pregunta en uno de estos intents:
-sre, kubernetes, monitoring, productivity, coding, research, memory, qa, general
+sre, kubernetes, monitoring, productivity, cto, dev, arch, research, memory, qa, general
 
 Reglas:
 - sre: incidentes, anomalías, circuit breaker, postmortem, SLO
 - kubernetes: pods, deployments, namespaces, kubectl, cluster, nodos
 - monitoring: prometheus, grafana, métricas, alertas, latencia, dashboards
 - productivity: calendario, eventos, emails, gmail, agenda, organizar día
-- coding: código, función, clase, bug, implementar, refactorizar, script
+- cto: estrategia tecnológica, roadmap, visión, decisiones ejecutivas, planificación tech
+- dev: código, función, clase, bug, implementar, refactorizar, script, pull request, commit
+- arch: diseño de sistema, ADR, patrones de diseño, arquitectura hexagonal, contrato API
 - research: buscar, documentos, PDF, explicar, investigar, búsqueda web
 - memory: recordar, historial, conversación anterior
 - qa: validar, probar, verificar, test
