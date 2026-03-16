@@ -18,7 +18,7 @@ metadata:
     app.kubernetes.io/part-of: amael-ia
 data:
   # Emails de Google OAuth autorizados (separados por coma, sin espacios)
-  ALLOWED_EMAILS_CSV: "ricardogs26@gmail.com,rguzmans@bancobase.com"
+  ALLOWED_EMAILS_CSV: "lucero.ahumada26@gmail.com,ricardogs26@gmail.com,rguzmans@bancobase.com,admin@gmail.com,test@example.com,bot-amael@richardx.dev"
 
   # Números WhatsApp autorizados (formato internacional: 521XXXXXXXXXX)
   ALLOWED_NUMBERS_CSV: "5219993437008"
