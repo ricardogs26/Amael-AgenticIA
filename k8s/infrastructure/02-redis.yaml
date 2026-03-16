@@ -1,0 +1,71 @@
+# ── Redis — caché y mensajería en tiempo real ─────────────────────────────────
+# Usos:
+#   - Rate limiting por usuario (rate_limit:{user_id}, TTL 60s)
+#   - Feedback del supervisor (lista supervisor:feedback)
+#   - Deduplicación de anomalías SRE (sre:dedup:{hash}, TTL 5min)
+#   - Ventana de mantenimiento SRE (sre:maintenance)
+#   - Circuit breaker SRE (sre:cb:failures, sre:cb:open)
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: amael-ia
+  labels:
+    app: redis
+    app.kubernetes.io/part-of: amael-ia
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          exec:
+            command: ["redis-cli", "ping"]
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          timeoutSeconds: 3
+        readinessProbe:
+          exec:
+            command: ["redis-cli", "ping"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 2
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: amael-ia
+  labels:
+    app: redis
+spec:
+  selector:
+    app: redis
+  ports:
+  - protocol: TCP
+    port: 6379
+    targetPort: 6379
+  type: ClusterIP

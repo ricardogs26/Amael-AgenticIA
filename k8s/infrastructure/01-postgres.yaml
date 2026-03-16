@@ -1,0 +1,105 @@
+# ── PostgreSQL — base de datos principal ──────────────────────────────────────
+# Almacena: conversations, messages, user_documents, sre_incidents, sre_postmortems
+#
+# Credenciales:
+#   POSTGRES_DB:       amael_db      (en amael-agentic-configmap)
+#   POSTGRES_USER:     amael_user    (en amael-agentic-configmap)
+#   POSTGRES_PASSWORD: desde Secret amael-secrets → POSTGRES_PASSWORD
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: amael-ia
+  labels:
+    app: postgres
+    app.kubernetes.io/part-of: amael-ia
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: amael-ia
+  labels:
+    app: postgres
+    app.kubernetes.io/part-of: amael-ia
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # Evita conflictos de PVC con RollingUpdate
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:16-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: amael_db
+        - name: POSTGRES_USER
+          value: amael_user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: amael-secrets
+              key: POSTGRES_PASSWORD
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        livenessProbe:
+          exec:
+            command: ["pg_isready", "-U", "amael_user", "-d", "amael_db"]
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "amael_user", "-d", "amael_db"]
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: amael-ia
+  labels:
+    app: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+  - protocol: TCP
+    port: 5432
+    targetPort: 5432
+  type: ClusterIP

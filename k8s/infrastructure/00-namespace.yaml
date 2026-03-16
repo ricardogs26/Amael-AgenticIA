@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: amael-ia
+  labels:
+    app.kubernetes.io/part-of: amael-ia
+    environment: production

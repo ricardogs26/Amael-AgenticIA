@@ -1,0 +1,74 @@
+# Ingress para amael-agentic-backend
+#
+# ESTRATEGIA DE MIGRACIÓN:
+#   Actualmente /api → backend-service (backend-ia:2.20.4)
+#
+#   Paso 1 (este archivo NO se aplica todavía):
+#     Desplegar el nuevo backend y validarlo internamente con port-forward.
+#
+#   Paso 2 (cuando esté validado):
+#     kubectl apply -f k8s/ingress/06-ingress.yaml -n amael-ia
+#     Esto redirige /api al nuevo backend. La migración es instantánea.
+#
+#   Paso 3 (rollback si falla):
+#     Editar el ingress para volver a apuntar a backend-service:8000
+#
+# NOTA: /llm, /tts y / no cambian — siguen al mismo lugar.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: amael-ia-ingress
+  namespace: amael-ia
+  annotations:
+    cert-manager.io/cluster-issuer:                 "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/force-ssl-redirect:  "true"
+    # SSE streaming: desactivar buffering para tokens en tiempo real
+    nginx.ingress.kubernetes.io/proxy-buffering:     "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout:  "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout:  "3600"
+    nginx.ingress.kubernetes.io/proxy-buffer-size:   "8k"
+spec:
+  tls:
+  - hosts:
+    - amael-ia.richardx.dev
+    secretName: amael-ia-tls-secret
+  rules:
+  - host: "amael-ia.richardx.dev"
+    http:
+      paths:
+      # ── API: nuevo backend (amael-agentic-backend) ────────────────────
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: amael-agentic-service   # ← CAMBIA de backend-service
+            port:
+              number: 8000
+
+      # ── LLM Adapter (sin cambios) ─────────────────────────────────────
+      - path: /llm
+        pathType: Prefix
+        backend:
+          service:
+            name: llm-adapter-service
+            port:
+              number: 80
+
+      # ── TTS (sin cambios) ─────────────────────────────────────────────
+      - path: /tts
+        pathType: Prefix
+        backend:
+          service:
+            name: cosyvoice-service
+            port:
+              number: 8000
+
+      # ── Frontend Next.js (sin cambios) ───────────────────────────────
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-next-service
+            port:
+              number: 3000

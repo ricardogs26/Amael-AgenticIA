@@ -1,0 +1,75 @@
+"""
+Enumeraciones y constantes globales de la plataforma Amael-AgenticIA.
+"""
+from enum import Enum
+
+
+class StepType(str, Enum):
+    """Tipos de pasos que puede generar el PlannerAgent."""
+    K8S_TOOL         = "K8S_TOOL"
+    RAG_RETRIEVAL    = "RAG_RETRIEVAL"
+    PRODUCTIVITY_TOOL = "PRODUCTIVITY_TOOL"
+    WEB_SEARCH       = "WEB_SEARCH"
+    DOCUMENT_TOOL    = "DOCUMENT_TOOL"
+    REASONING        = "REASONING"
+
+
+class ActionType(str, Enum):
+    """Acciones de remediación que puede ejecutar el SREAgent."""
+    ROLLOUT_RESTART       = "ROLLOUT_RESTART"
+    ROLLOUT_UNDO          = "ROLLOUT_UNDO_DEPLOYMENT"
+    NOTIFY_HUMAN          = "NOTIFY_HUMAN"
+    SCALE_DEPLOYMENT      = "SCALE_DEPLOYMENT"
+    NO_ACTION             = "NO_ACTION"
+
+
+class AnomalyType(str, Enum):
+    """Tipos de anomalías detectables por el SREAgent."""
+    # Estructurales (K8s observe)
+    CRASH_LOOP              = "CRASH_LOOP"
+    OOM_KILLED              = "OOM_KILLED"
+    IMAGE_PULL_ERROR        = "IMAGE_PULL_ERROR"
+    POD_FAILED              = "POD_FAILED"
+    POD_PENDING_STUCK       = "POD_PENDING_STUCK"
+    HIGH_RESTARTS           = "HIGH_RESTARTS"
+    NODE_NOT_READY          = "NODE_NOT_READY"
+    # Métricas (Prometheus)
+    HIGH_CPU                = "HIGH_CPU"
+    HIGH_MEMORY             = "HIGH_MEMORY"
+    HIGH_ERROR_RATE         = "HIGH_ERROR_RATE"
+    # Predictivas (tendencias)
+    DISK_EXHAUSTION_PREDICTED = "DISK_EXHAUSTION_PREDICTED"
+    MEMORY_LEAK_PREDICTED   = "MEMORY_LEAK_PREDICTED"
+    ERROR_RATE_ESCALATING   = "ERROR_RATE_ESCALATING"
+    # SLO
+    SLO_BUDGET_BURNING      = "SLO_BUDGET_BURNING"
+
+
+class Severity(str, Enum):
+    LOW      = "LOW"
+    MEDIUM   = "MEDIUM"
+    HIGH     = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class SupervisorDecision(str, Enum):
+    ACCEPT = "ACCEPT"
+    REPLAN = "REPLAN"
+
+
+class MessageType(str, Enum):
+    REQUEST  = "REQUEST"
+    RESPONSE = "RESPONSE"
+    EVENT    = "EVENT"
+    ERROR    = "ERROR"
+
+
+# ── Límites del sistema ────────────────────────────────────────────────────────
+MAX_PLAN_STEPS        = 8
+MAX_GRAPH_ITERATIONS  = MAX_PLAN_STEPS + 2
+MAX_RETRIES_SUPERVISOR = 1
+MAX_PROMPT_CHARS      = 4_000
+MAX_CONTEXT_CHARS     = 12_000
+MAX_ANSWER_CHARS      = 8_000
+RATE_LIMIT_MAX        = 15
+RATE_LIMIT_WINDOW     = 60   # segundos
