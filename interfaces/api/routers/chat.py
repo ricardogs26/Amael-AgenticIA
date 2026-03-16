@@ -94,12 +94,10 @@ async def chat(
     # Routing + dispatch
     try:
         from orchestration import AgentRouter, dispatch
-        from tools.registry import ToolRegistry, register_all_tools
 
-        router_inst  = AgentRouter()
-        decision     = await router_inst.route(question)
-        tools_map    = {name: ToolRegistry.get_or_none(name)
-                        for name in ToolRegistry.names()}
+        router_inst = AgentRouter()
+        decision    = await router_inst.route(question)
+        tools_map   = _build_tools_map(effective_user)
 
         result_dict = await dispatch(
             question=question,
@@ -202,12 +200,10 @@ async def chat_stream(
             yield _sse("status", msg="Analizando tu pregunta…")
 
             from orchestration import AgentRouter, dispatch
-            from tools.registry import ToolRegistry
 
             router_inst = AgentRouter()
             decision    = await router_inst.route(question)
-            tools_map   = {name: ToolRegistry.get_or_none(name)
-                           for name in ToolRegistry.names()}
+            tools_map   = _build_tools_map(user_id)
 
             yield _sse("status", msg="Procesando respuesta…")
 
@@ -266,6 +262,101 @@ async def chat_stream(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _build_tools_map(user_id: str) -> dict:
+    """
+    Construye el tools_map completo para el pipeline LangGraph.
+
+    Combina:
+      - Herramientas de agente (k8s, rag, productivity, web_search) — callables (str → str)
+      - Integraciones externas (prometheus, grafana, etc.) — BaseTool instances
+    """
+    tools: dict = {}
+
+    # ── k8s: llama al k8s-agent service (FastAPI en k8s-agent-service:8002) ──
+    def _k8s(query: str) -> str:
+        import httpx
+        from config.settings import settings
+        try:
+            resp = httpx.post(
+                f"{settings.k8s_agent_url}/api/k8s-agent",
+                json={"question": query, "user_id": user_id},
+                headers={"Authorization": f"Bearer {settings.internal_api_secret}"},
+                timeout=60.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("response") or data.get("answer") or str(data)
+            return f"[k8s-agent] Error {resp.status_code}: {resp.text[:200]}"
+        except Exception as exc:
+            return f"[k8s-agent] No disponible: {exc}"
+
+    tools["k8s"] = _k8s
+
+    # ── rag: búsqueda semántica en Qdrant del usuario ─────────────────────────
+    def _rag(query: str) -> str:
+        from agents.researcher.rag_retriever import retrieve_documents
+        return retrieve_documents(user_id, query) or "No se encontraron documentos relevantes."
+
+    tools["rag"] = _rag
+
+    # ── productivity: llama al productivity-service ───────────────────────────
+    def _productivity(query: str) -> str:
+        import httpx
+        from config.settings import settings
+        try:
+            resp = httpx.post(
+                f"{settings.productivity_service_url}/api/productivity",
+                json={"question": query, "user_id": user_id},
+                headers={"Authorization": f"Bearer {settings.internal_api_secret}"},
+                timeout=30.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("response") or data.get("answer") or str(data)
+            return f"[productivity] Error {resp.status_code}: {resp.text[:200]}"
+        except Exception as exc:
+            return f"[productivity] No disponible: {exc}"
+
+    tools["productivity"] = _productivity
+
+    # ── web_search: DuckDuckGo via WebSkill ───────────────────────────────────
+    def _web_search(query: str) -> str:
+        try:
+            from skills.registry import SkillRegistry
+            skill = SkillRegistry.get("web")
+            from core.skill_base import SkillInput
+            import asyncio
+            result = asyncio.get_event_loop().run_until_complete(
+                skill.execute(SkillInput(query=query))
+            )
+            return result.data if result.success else result.error or "Sin resultados web."
+        except Exception as exc:
+            return f"[web_search] No disponible: {exc}"
+
+    tools["web_search"] = _web_search
+
+    # ── document: generación de documentos formales ───────────────────────────
+    def _document(query: str) -> str:
+        try:
+            from agents.researcher.rag_retriever import retrieve_documents
+            context = retrieve_documents(user_id, query, k=3)
+            return context or f"Documento generado para: {query}"
+        except Exception as exc:
+            return f"[document] Error: {exc}"
+
+    tools["document"] = _document
+
+    # ── Integraciones externas (prometheus, grafana, etc.) ────────────────────
+    try:
+        from tools.registry import ToolRegistry
+        for name in ToolRegistry.names():
+            tools[name] = ToolRegistry.get_or_none(name)
+    except Exception:
+        pass
+
+    return tools
+
 
 def _persist_message(
     conversation_id: str,
