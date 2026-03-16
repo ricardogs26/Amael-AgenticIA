@@ -82,10 +82,26 @@ async def login(request: Request):
     return await oauth.google.authorize_redirect(request, _CALLBACK_URL)
 
 
+def _is_user_active(email: str) -> bool:
+    """Verifica que el email existe en user_profile con status='active'."""
+    try:
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM user_profile WHERE user_id = %s AND status = 'active'",
+                    (email,),
+                )
+                return cur.fetchone() is not None
+    except Exception as exc:
+        logger.error(f"[auth] DB check failed para {email!r}: {exc}")
+        return False
+
+
 @router.get("/callback")
 async def auth_callback(request: Request):
     """
-    Recibe el código de Google, valida el email contra la whitelist,
+    Recibe el código de Google, valida el email contra user_profile (DB),
     crea el JWT y redirige al frontend con ?token=&name=&picture=
     """
     oauth = _get_oauth()
@@ -94,7 +110,7 @@ async def auth_callback(request: Request):
         user_info = token.get("userinfo") or {}
         email     = user_info.get("email", "")
 
-        if not email or email not in settings.allowed_emails:
+        if not email or not _is_user_active(email):
             logger.warning(f"[auth] Login rechazado para: {email!r}")
             return Response(
                 status_code=302,
@@ -131,8 +147,10 @@ async def calendar_auth(request: Request, token: str | None = None):
             token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
         )
         email = payload.get("sub") or payload.get("email")
-        if not email or email not in settings.full_whitelist:
+        if not email or not _is_user_active(email):
             raise HTTPException(status_code=403, detail="Usuario no autorizado")
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=401, detail="Token inválido")
 

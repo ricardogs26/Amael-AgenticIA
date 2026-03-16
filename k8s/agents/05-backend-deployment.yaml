@@ -63,8 +63,6 @@ spec:
         envFrom:
         - configMapRef:
             name: amael-agentic-configmap
-        - configMapRef:
-            name: allowed-users-configmap    # ALLOWED_EMAILS_CSV, K8S_ALLOWED_USERS_CSV
 
         env:
         # Secrets compartidos con backend-ia
