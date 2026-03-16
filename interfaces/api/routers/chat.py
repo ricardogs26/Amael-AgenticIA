@@ -280,7 +280,7 @@ def _build_tools_map(user_id: str) -> dict:
         try:
             resp = httpx.post(
                 f"{settings.k8s_agent_url}/api/k8s-agent",
-                json={"query": query, "user_id": user_id},
+                json={"query": query, "user_email": user_id},
                 headers={"Authorization": f"Bearer {settings.internal_api_secret}"},
                 timeout=60.0,
             )
