@@ -11,6 +11,7 @@ class StepType(str, Enum):
     PRODUCTIVITY_TOOL = "PRODUCTIVITY_TOOL"
     WEB_SEARCH       = "WEB_SEARCH"
     DOCUMENT_TOOL    = "DOCUMENT_TOOL"
+    TTS_TOOL         = "TTS_TOOL"
     REASONING        = "REASONING"
 
 

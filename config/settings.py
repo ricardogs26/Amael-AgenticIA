@@ -61,6 +61,10 @@ class Settings(BaseSettings):
         default="http://whatsapp-personal-service:3001",
         alias="WHATSAPP_PERSONAL_URL",
     )
+    piper_service_url: str = Field(
+        default="http://piper-service:8010",
+        alias="PIPER_SERVICE_URL",
+    )
 
     # ── Seguridad ─────────────────────────────────────────────────────────────
     internal_api_secret: str = Field(alias="INTERNAL_API_SECRET")

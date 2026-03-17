@@ -97,6 +97,56 @@ def handle_document_tool(
     return doc_func(query)
 
 
+def handle_tts_tool(query: str, state: Dict[str, Any], tools_map: Dict[str, Any]) -> str:
+    """
+    Síntesis de voz y envío como nota de voz WhatsApp.
+
+    El query puede ser solo texto, o con formato:
+      "para <phone>: <texto>"   → envía al número indicado
+      "<texto>"                 → envía al ADMIN_PHONE configurado
+    """
+    import asyncio
+    import re
+
+    tts_tool = tools_map.get("piper")
+    if not tts_tool:
+        EXECUTOR_ERRORS_TOTAL.labels(step_type="TTS_TOOL").inc()
+        return "Error: Herramienta TTS no disponible (cosyvoice-service no registrado)."
+
+    # Parsear "para <phone>: <texto>"
+    phone = None
+    text  = query.strip()
+    m = re.match(r"^para\s+(\d{10,15}):\s*(.+)$", text, re.DOTALL | re.IGNORECASE)
+    if m:
+        phone = m.group(1)
+        text  = m.group(2).strip()
+
+    # Determinar idioma desde el texto
+    language = "es"
+    en_markers = ("the ", "this ", "hello", "please", "generate", " is ", " are ")
+    if any(mk in text.lower() for mk in en_markers):
+        language = "en"
+
+    try:
+        from tools.piper.tool import SynthesizeAndSendInput
+        result = asyncio.get_event_loop().run_until_complete(
+            tts_tool.synthesize_and_send(
+                SynthesizeAndSendInput(text=text, phone=phone)
+            )
+        )
+        if result.success:
+            d = result.data
+            return (
+                f"Nota de voz enviada a {d['phone']} "
+                f"({d['duration_seconds']:.1f}s, {d['chars']} caracteres)."
+            )
+        return f"Error al enviar nota de voz: {result.error}"
+    except Exception as exc:
+        logger.error(f"[executor] TTS_TOOL error: {exc}")
+        EXECUTOR_ERRORS_TOTAL.labels(step_type="TTS_TOOL").inc()
+        return f"Error en síntesis de voz: {exc}"
+
+
 # Mapa de tipo → handler
 STEP_HANDLERS = {
     "K8S_TOOL":          handle_k8s_tool,
@@ -104,4 +154,5 @@ STEP_HANDLERS = {
     "PRODUCTIVITY_TOOL": handle_productivity_tool,
     "WEB_SEARCH":        handle_web_search,
     "DOCUMENT_TOOL":     handle_document_tool,
+    "TTS_TOOL":          handle_tts_tool,
 }

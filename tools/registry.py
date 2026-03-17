@@ -157,10 +157,11 @@ def register_all_tools() -> None:
     Orden de registro no importa — cada tool es independiente.
     """
     _tools = [
-        ("tools.prometheus.tool", "PrometheusTool"),
-        ("tools.grafana.tool",    "GrafanaTool"),
-        ("tools.whatsapp.tool",   "WhatsAppTool"),
-        ("tools.github.tool",     "GitHubTool"),
+        ("tools.prometheus.tool",  "PrometheusTool"),
+        ("tools.grafana.tool",     "GrafanaTool"),
+        ("tools.whatsapp.tool",    "WhatsAppTool"),
+        ("tools.github.tool",      "GitHubTool"),
+        ("tools.piper.tool",       "PiperTool"),
     ]
 
     for module_path, class_name in _tools:

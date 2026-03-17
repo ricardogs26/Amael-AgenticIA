@@ -68,8 +68,26 @@ async def chat(
     # Si el caller es el bot de servicio, usar el user_id del body (usuario real)
     _BOT_USER = "bot-amael@richardx.dev"
     if body.user_id and user_id == _BOT_USER:
-        from config.settings import settings
-        if body.user_id not in settings.full_whitelist:
+        from storage.postgres.client import get_connection
+        try:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Verificar por email en user_profile
+                    cur.execute(
+                        "SELECT 1 FROM user_profile WHERE user_id = %s AND status = 'active'",
+                        (body.user_id,),
+                    )
+                    allowed = cur.fetchone() is not None
+                    if not allowed:
+                        # Verificar por identidad (número WhatsApp)
+                        cur.execute(
+                            "SELECT 1 FROM user_identities WHERE identity_value = %s",
+                            (body.user_id,),
+                        )
+                        allowed = cur.fetchone() is not None
+        except Exception:
+            allowed = False
+        if not allowed:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                                 detail="Usuario no autorizado")
         effective_user = body.user_id
