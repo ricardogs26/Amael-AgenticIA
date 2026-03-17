@@ -20,7 +20,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from interfaces.api.auth import get_current_user, require_internal_secret
+from interfaces.api.auth import require_internal_secret, require_operator
 
 logger = logging.getLogger("interfaces.api.sre")
 
@@ -54,7 +54,7 @@ def get_loop_status() -> dict[str, Any]:
 @router.get("/incidents")
 def get_incidents(
     limit: int = 5,
-    _: Annotated[str, Depends(get_current_user)] = "",
+    _: Annotated[str, Depends(require_operator)] = "",
 ) -> list[dict[str, Any]]:
     """Últimos N incidentes desde PostgreSQL."""
     try:
@@ -69,7 +69,7 @@ def get_incidents(
 @router.get("/postmortems")
 def get_postmortems(
     limit: int = 3,
-    _: Annotated[str, Depends(get_current_user)] = "",
+    _: Annotated[str, Depends(require_operator)] = "",
 ) -> list[dict[str, Any]]:
     """Últimos N postmortems generados por LLM."""
     try:
@@ -84,7 +84,7 @@ def get_postmortems(
 @router.get("/learning/stats")
 def get_learning_stats(
     days: int = 7,
-    _: Annotated[str, Depends(get_current_user)] = "",
+    _: Annotated[str, Depends(require_operator)] = "",
 ) -> list[dict[str, Any]]:
     """Tasa de éxito por (issue_type, action) en los últimos N días."""
     try:
@@ -98,7 +98,7 @@ def get_learning_stats(
 
 @router.get("/slo/status")
 def get_slo_status(
-    _: Annotated[str, Depends(get_current_user)] = "",
+    _: Annotated[str, Depends(require_operator)] = "",
 ) -> list[dict[str, Any]]:
     """SLO targets con burn rates actuales desde Prometheus."""
     try:
@@ -112,7 +112,7 @@ def get_slo_status(
 
 @router.get("/maintenance")
 def get_maintenance(
-    _: Annotated[str, Depends(get_current_user)] = "",
+    _: Annotated[str, Depends(require_operator)] = "",
 ) -> dict[str, Any]:
     """Estado de la ventana de mantenimiento activa."""
     try:
