@@ -215,6 +215,7 @@ def create_app() -> FastAPI:
     from interfaces.api.routers.auth import router as auth_router
     from interfaces.api.routers.chat import router as chat_router
     from interfaces.api.routers.conversations import router as conv_router
+    from interfaces.api.routers.devops import router as devops_router
     from interfaces.api.routers.documents import router as documents_router
     from interfaces.api.routers.feedback import router as feedback_router
     from interfaces.api.routers.identity import router as identity_router
@@ -238,6 +239,7 @@ def create_app() -> FastAPI:
     app.include_router(documents_router)
     app.include_router(tasks_router)        # POST /api/agent/task — Phase 1
     app.include_router(memory_router)       # GET/DELETE /api/memory — Phase 8
+    app.include_router(devops_router)       # POST /api/devops/ci-hook — webhook CI
 
     return app
 

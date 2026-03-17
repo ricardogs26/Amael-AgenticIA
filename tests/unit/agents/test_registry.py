@@ -5,7 +5,6 @@ from agents.base.agent_registry import AgentRegistry
 from core.agent_base import AgentContext, AgentResult, BaseAgent
 from core.exceptions import AgentNotFoundError
 
-
 # ── Agente stub para tests ────────────────────────────────────────────────────
 
 class _DummyAgent(BaseAgent):
