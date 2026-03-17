@@ -38,6 +38,8 @@ _DIRECT_DISPATCH: Dict[str, str] = {
     "dev":          "gabriel",    # Gabriel — código y PRs
     "arch":         "uriel",      # Uriel — arquitectura
     "coding":       "gabriel",    # alias legacy → Gabriel
+    "coder":        "jophiel",    # Jophiel — generación/análisis de código en memoria
+    "devops":       "camael",     # Camael — CI/CD y operaciones de entrega
 }
 
 # Intents que pasan por el pipeline LangGraph completo
