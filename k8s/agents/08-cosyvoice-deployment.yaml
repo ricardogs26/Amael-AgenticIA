@@ -1,0 +1,113 @@
+# cosyvoice-service — TTS via CosyVoice2-0.5B (CPU only)
+# El modelo se descarga manualmente al PVC antes del primer despliegue:
+#
+#   kubectl run model-downloader --image=python:3.11-slim --restart=Never \
+#     --overrides='{"spec":{"volumes":[{"name":"v","persistentVolumeClaim":{"claimName":"cosyvoice-models-pvc"}}],"containers":[{"name":"d","image":"python:3.11-slim","command":["sh","-c","pip install modelscope && modelscope download --model FunAudioLLM/CosyVoice2-0.5B --local_dir /models/CosyVoice2-0.5B"],"volumeMounts":[{"name":"v","mountPath":"/models"}]}]}}' \
+#     -n amael-ia
+#   kubectl delete pod model-downloader -n amael-ia
+#
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cosyvoice-models-pvc
+  namespace: amael-ia
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cosyvoice-deployment
+  namespace: amael-ia
+  labels:
+    app: cosyvoice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cosyvoice
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: cosyvoice
+        monitor: amael-metrics
+    spec:
+      containers:
+        - name: cosyvoice
+          image: registry.richardx.dev/cosyvoice-service:1.0.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8010
+
+          env:
+            - name: COSYVOICE_MODEL_DIR
+              value: "/models/CosyVoice2-0.5B"
+            - name: TTS_MAX_CHARS
+              value: "500"
+
+          resources:
+            requests:
+              cpu: "2"
+              memory: "3Gi"
+            limits:
+              cpu: "4"
+              memory: "6Gi"
+            # Sin nvidia.com/gpu — CPU only, la GPU queda exclusiva para Ollama
+
+          volumeMounts:
+            - name: models
+              mountPath: /models
+              readOnly: true
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8010
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 18   # hasta 3 min para que el modelo cargue
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8010
+            initialDelaySeconds: 0
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8010
+            initialDelaySeconds: 0
+            periodSeconds: 15
+            timeoutSeconds: 5
+
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: cosyvoice-models-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cosyvoice-service
+  namespace: amael-ia
+  labels:
+    app: cosyvoice
+spec:
+  selector:
+    app: cosyvoice
+  ports:
+    - name: http
+      port: 8010
+      targetPort: 8010
+  type: ClusterIP
