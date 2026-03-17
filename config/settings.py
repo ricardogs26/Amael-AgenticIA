@@ -144,6 +144,11 @@ class Settings(BaseSettings):
     )
     vault_role: str = Field(default="amael-productivity", alias="VAULT_ROLE")
 
+    # ── Gabriel — GitHub defaults ─────────────────────────────────────────────
+    github_default_owner: str = Field(default="", alias="GABRIEL_GITHUB_OWNER")
+    github_default_repo:  str = Field(default="", alias="GABRIEL_GITHUB_REPO")
+    github_default_branch: str = Field(default="main", alias="GABRIEL_GITHUB_BRANCH")
+
     # ── Entorno ───────────────────────────────────────────────────────────────
     environment: str = Field(default="production", alias="ENVIRONMENT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
