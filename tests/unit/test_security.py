@@ -2,7 +2,6 @@
 from security.sanitizer import sanitize_output
 from security.validator import validate_prompt
 
-
 # ── validator ─────────────────────────────────────────────────────────────────
 
 class TestValidatePrompt:
