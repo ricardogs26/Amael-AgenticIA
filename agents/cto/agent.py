@@ -37,9 +37,9 @@ Plataforma actual:
 
 
 @AgentRegistry.register
-class CTOAgent(BaseAgent):
+class RazielAgent(BaseAgent):
     """
-    Agente de estrategia tecnológica y decisiones de arquitectura ejecutiva.
+    Raziel — CTO Agent: estrategia tecnológica y decisiones de arquitectura ejecutiva.
 
     task dict esperado:
         {
@@ -48,7 +48,7 @@ class CTOAgent(BaseAgent):
         }
     """
 
-    name         = "cto"
+    name         = "raziel"
     role         = "Estrategia tecnológica, roadmap y decisiones ejecutivas de arquitectura"
     version      = "1.0.0"
     capabilities = [

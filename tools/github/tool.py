@@ -1,18 +1,25 @@
 """
 GitHubTool — integración con la GitHub API v3/v4.
 
-Capacidades:
+Capacidades de lectura:
   get_repo(owner, repo)                      — metadata del repositorio
   list_issues(owner, repo, state, labels)    — issues filtrados
   create_issue(owner, repo, title, body)     — crea un issue
   list_pull_requests(owner, repo, state)     — pull requests
   get_workflow_runs(owner, repo, workflow)   — últimas ejecuciones CI
 
+Capacidades de escritura (Phase 1 — Gabriel):
+  get_file_contents(owner, repo, path, ref)  — lee un archivo del repo (base64 decodificado)
+  create_branch(owner, repo, branch, sha)    — crea una rama desde un commit/sha
+  create_commit(owner, repo, path, ...)      — crea o actualiza un archivo con un commit
+  create_pull_request(owner, repo, ...)      — abre un Pull Request
+
 Autenticación: variable de entorno GITHUB_TOKEN (Personal Access Token o GitHub App token).
 Si no está configurado, las llamadas funcionan con rate limit reducido (60 req/h).
 """
 from __future__ import annotations
 
+import base64
 import logging
 import os
 from typing import List, Optional
@@ -67,6 +74,36 @@ class GetWorkflowRunsInput(ToolInput):
     workflow: str = ""     # workflow filename o ID; "" = todos
     limit:    int = 10
 
+class GetFileContentsInput(ToolInput):
+    owner: str
+    repo:  str
+    path:  str             # path dentro del repo (ej. "src/main.py")
+    ref:   str = "main"    # branch, tag o commit SHA
+
+class CreateBranchInput(ToolInput):
+    owner:      str
+    repo:       str
+    branch:     str        # nombre de la nueva rama (ej. "feat/gabriel-fix-123")
+    from_ref:   str = "main"  # rama/sha origen
+
+class CreateCommitInput(ToolInput):
+    owner:      str
+    repo:       str
+    path:       str        # path del archivo a crear/actualizar
+    content:    str        # contenido completo del archivo (texto plano)
+    message:    str        # mensaje del commit
+    branch:     str        # rama donde commitear
+    sha:        str = ""   # SHA actual del archivo (requerido para updates, "" para nuevos)
+
+class CreatePullRequestInput(ToolInput):
+    owner:      str
+    repo:       str
+    title:      str
+    body:       str = ""
+    head:       str        # rama de origen (feature branch)
+    base:       str = "main"  # rama destino
+    draft:      bool = False
+
 
 # ── Tool ──────────────────────────────────────────────────────────────────────
 
@@ -78,8 +115,8 @@ class GitHubTool(BaseTool):
     """
 
     name            = "github"
-    description     = "GitHub API: repos, issues, pull requests y workflow runs"
-    version         = "1.0.0"
+    description     = "GitHub API: repos, issues, pull requests, workflow runs y escritura de código (Gabriel)"
+    version         = "2.0.0"
     external_system = "github"
 
     async def execute(self, input: ToolInput) -> ToolOutput:
@@ -93,6 +130,14 @@ class GitHubTool(BaseTool):
             return await self.list_pull_requests(input)
         if isinstance(input, GetWorkflowRunsInput):
             return await self.get_workflow_runs(input)
+        if isinstance(input, GetFileContentsInput):
+            return await self.get_file_contents(input)
+        if isinstance(input, CreateBranchInput):
+            return await self.create_branch(input)
+        if isinstance(input, CreateCommitInput):
+            return await self.create_commit(input)
+        if isinstance(input, CreatePullRequestInput):
+            return await self.create_pull_request(input)
         return ToolOutput.fail(
             f"Input tipo '{type(input).__name__}' no soportado",
             source=self.name,
@@ -295,6 +340,156 @@ class GitHubTool(BaseTool):
             )
         except Exception as exc:
             logger.error(f"[github_tool] get_workflow_runs error: {exc}")
+            return ToolOutput.fail(str(exc), source=self.name)
+
+    async def get_file_contents(self, input: GetFileContentsInput) -> ToolOutput:
+        """Lee el contenido de un archivo del repositorio (decodifica base64)."""
+        try:
+            resp = _req.get(
+                f"{_GITHUB_API}/repos/{input.owner}/{input.repo}/contents/{input.path}",
+                headers=_headers(),
+                params={"ref": input.ref},
+                timeout=10,
+            )
+            if resp.status_code == 404:
+                return ToolOutput.fail(
+                    f"Archivo '{input.path}' no encontrado en {input.owner}/{input.repo}@{input.ref}",
+                    source=self.name,
+                )
+            if resp.status_code != 200:
+                return ToolOutput.fail(f"GitHub API HTTP {resp.status_code}", source=self.name)
+            d = resp.json()
+            content_b64 = d.get("content", "").replace("\n", "")
+            content = base64.b64decode(content_b64).decode("utf-8", errors="replace")
+            return ToolOutput.ok(
+                data={
+                    "path":    d.get("path"),
+                    "sha":     d.get("sha"),
+                    "size":    d.get("size"),
+                    "content": content,
+                    "url":     d.get("html_url"),
+                },
+                source=self.name,
+            )
+        except Exception as exc:
+            logger.error(f"[github_tool] get_file_contents error: {exc}")
+            return ToolOutput.fail(str(exc), source=self.name)
+
+    async def create_branch(self, input: CreateBranchInput) -> ToolOutput:
+        """Crea una nueva rama a partir de from_ref (resuelve el SHA automáticamente)."""
+        try:
+            # Resolver SHA del from_ref
+            ref_resp = _req.get(
+                f"{_GITHUB_API}/repos/{input.owner}/{input.repo}/git/ref/heads/{input.from_ref}",
+                headers=_headers(),
+                timeout=10,
+            )
+            if ref_resp.status_code != 200:
+                return ToolOutput.fail(
+                    f"No se pudo resolver la rama origen '{input.from_ref}': HTTP {ref_resp.status_code}",
+                    source=self.name,
+                )
+            sha = ref_resp.json()["object"]["sha"]
+
+            resp = _req.post(
+                f"{_GITHUB_API}/repos/{input.owner}/{input.repo}/git/refs",
+                headers=_headers(),
+                json={"ref": f"refs/heads/{input.branch}", "sha": sha},
+                timeout=15,
+            )
+            if resp.status_code in (200, 201):
+                return ToolOutput.ok(
+                    data={"branch": input.branch, "sha": sha, "from_ref": input.from_ref},
+                    source=self.name,
+                )
+            if resp.status_code == 422:
+                return ToolOutput.fail(
+                    f"La rama '{input.branch}' ya existe.",
+                    source=self.name,
+                )
+            return ToolOutput.fail(
+                f"GitHub API HTTP {resp.status_code}: {resp.text[:300]}",
+                source=self.name,
+            )
+        except Exception as exc:
+            logger.error(f"[github_tool] create_branch error: {exc}")
+            return ToolOutput.fail(str(exc), source=self.name)
+
+    async def create_commit(self, input: CreateCommitInput) -> ToolOutput:
+        """Crea o actualiza un archivo con un commit en la rama indicada."""
+        try:
+            content_b64 = base64.b64encode(input.content.encode("utf-8")).decode()
+            payload: dict = {
+                "message": input.message,
+                "content": content_b64,
+                "branch":  input.branch,
+            }
+            if input.sha:
+                payload["sha"] = input.sha  # requerido para updates
+
+            resp = _req.put(
+                f"{_GITHUB_API}/repos/{input.owner}/{input.repo}/contents/{input.path}",
+                headers=_headers(),
+                json=payload,
+                timeout=20,
+            )
+            if resp.status_code in (200, 201):
+                d = resp.json()
+                return ToolOutput.ok(
+                    data={
+                        "path":       d["content"]["path"],
+                        "sha":        d["content"]["sha"],
+                        "commit_sha": d["commit"]["sha"],
+                        "commit_url": d["commit"]["html_url"],
+                    },
+                    source=self.name,
+                )
+            return ToolOutput.fail(
+                f"GitHub API HTTP {resp.status_code}: {resp.text[:300]}",
+                source=self.name,
+            )
+        except Exception as exc:
+            logger.error(f"[github_tool] create_commit error: {exc}")
+            return ToolOutput.fail(str(exc), source=self.name)
+
+    async def create_pull_request(self, input: CreatePullRequestInput) -> ToolOutput:
+        """Abre un Pull Request en el repositorio."""
+        try:
+            resp = _req.post(
+                f"{_GITHUB_API}/repos/{input.owner}/{input.repo}/pulls",
+                headers=_headers(),
+                json={
+                    "title": input.title,
+                    "body":  input.body,
+                    "head":  input.head,
+                    "base":  input.base,
+                    "draft": input.draft,
+                },
+                timeout=20,
+            )
+            if resp.status_code in (200, 201):
+                pr = resp.json()
+                return ToolOutput.ok(
+                    data={
+                        "number":  pr.get("number"),
+                        "url":     pr.get("html_url"),
+                        "title":   pr.get("title"),
+                        "state":   pr.get("state"),
+                        "draft":   pr.get("draft", False),
+                        "head":    pr.get("head", {}).get("ref"),
+                        "base":    pr.get("base", {}).get("ref"),
+                    },
+                    source=self.name,
+                )
+            if resp.status_code == 422:
+                detail = resp.json().get("errors", [{}])[0].get("message", resp.text[:200])
+                return ToolOutput.fail(f"PR ya existe o parámetros inválidos: {detail}", source=self.name)
+            return ToolOutput.fail(
+                f"GitHub API HTTP {resp.status_code}: {resp.text[:300]}",
+                source=self.name,
+            )
+        except Exception as exc:
+            logger.error(f"[github_tool] create_pull_request error: {exc}")
             return ToolOutput.fail(str(exc), source=self.name)
 
     async def health_check(self) -> bool:

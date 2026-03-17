@@ -28,9 +28,9 @@ _SUPPORTED_ACTIONS = {
 
 
 @AgentRegistry.register
-class ProductivityAgent(BaseAgent):
+class HanielAgent(BaseAgent):
     """
-    Agente de productividad personal — Google Calendar + Gmail + Vault.
+    Haniel — Productivity Agent: Google Calendar + Gmail + Vault.
 
     task dict esperado:
         {
@@ -43,7 +43,7 @@ class ProductivityAgent(BaseAgent):
     almacenadas en Vault (ruta: secret/data/amael/google-tokens/{user}).
     """
 
-    name         = "productivity"
+    name         = "haniel"
     role         = "Productividad Personal — Google Calendar, Gmail, Day Planner"
     version      = "1.2.0"
     capabilities = [

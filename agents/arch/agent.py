@@ -41,9 +41,9 @@ Arquitectura actual del sistema:
 
 
 @AgentRegistry.register
-class ArchAgent(BaseAgent):
+class UrielAgent(BaseAgent):
     """
-    Agente de arquitectura de software: diseño, ADRs, patrones y contratos de API.
+    Uriel — Arch Agent: diseño de sistemas, ADRs, patrones y contratos de API.
 
     task dict esperado:
         {
@@ -52,7 +52,7 @@ class ArchAgent(BaseAgent):
         }
     """
 
-    name         = "arch"
+    name         = "uriel"
     role         = "Arquitectura de software: diseño de sistemas, ADRs y patrones de diseño"
     version      = "1.0.0"
     capabilities = [

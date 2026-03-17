@@ -10,7 +10,7 @@ Uso:
         conversation_id="conv-123",
         request_id="req-abc",
     )
-    agent = AgentRegistry.get("sre", ctx)
+    agent = AgentRegistry.get("raphael", ctx)
     result = await agent.run({"query": "¿Cuál es el estado del clúster?"})
 """
 from __future__ import annotations

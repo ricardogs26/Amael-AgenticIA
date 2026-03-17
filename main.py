@@ -221,6 +221,7 @@ def create_app() -> FastAPI:
     from interfaces.api.routers.admin         import router as admin_router
     from interfaces.api.routers.ingest        import router as ingest_router
     from interfaces.api.routers.documents     import router as documents_router
+    from interfaces.api.routers.tasks         import router as tasks_router
 
     app.include_router(chat_router)
     app.include_router(conv_router)
@@ -233,6 +234,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_router)
     app.include_router(ingest_router)
     app.include_router(documents_router)
+    app.include_router(tasks_router)        # POST /api/agent/task — Phase 1
 
     return app
 

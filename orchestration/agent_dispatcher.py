@@ -29,14 +29,15 @@ from orchestration.agent_router import RoutingDecision
 logger = logging.getLogger("orchestration.dispatcher")
 
 # Intents que van directamente a un agente específico (sin LangGraph)
+# Formato: "intent_keyword" → "agent_registry_name"
 _DIRECT_DISPATCH: Dict[str, str] = {
-    "sre":          "sre",
-    "productivity": "productivity",
-    "research":     "researcher",
-    "cto":          "cto",
-    "dev":          "dev",
-    "arch":         "arch",
-    "coding":       "dev",     # alias legacy
+    "sre":          "raphael",    # Raphael — SRE autónomo
+    "productivity": "haniel",     # Haniel — Calendar/Gmail
+    "research":     "sandalphon", # Sandalphon — RAG + web
+    "cto":          "raziel",     # Raziel — estrategia técnica
+    "dev":          "gabriel",    # Gabriel — código y PRs
+    "arch":         "uriel",      # Uriel — arquitectura
+    "coding":       "gabriel",    # alias legacy → Gabriel
 }
 
 # Intents que pasan por el pipeline LangGraph completo

@@ -162,15 +162,15 @@ def grouper_node(state: Dict[str, Any]) -> Dict[str, Any]:
 # ── BaseAgent wrapper (nueva arquitectura) ────────────────────────────────────
 
 @AgentRegistry.register
-class PlannerAgent(BaseAgent):
+class SarielAgent(BaseAgent):
     """
-    Agente planificador: descompone un request en pasos ejecutables.
+    Sariel — Planner Agent: descompone un request en pasos ejecutables.
 
     Se puede usar tanto como nodo LangGraph (via planner_node) como
     agente standalone (via run()).
     """
 
-    name = "planner"
+    name = "sariel"
     role = "Descomponer requests en planes de ejecución paso a paso"
     version = "2.0.0"
     capabilities = ["task_decomposition", "step_planning", "batch_grouping"]
