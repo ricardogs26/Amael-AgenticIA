@@ -222,6 +222,7 @@ def create_app() -> FastAPI:
     from interfaces.api.routers.ingest        import router as ingest_router
     from interfaces.api.routers.documents     import router as documents_router
     from interfaces.api.routers.tasks         import router as tasks_router
+    from interfaces.api.routers.memory        import router as memory_router
 
     app.include_router(chat_router)
     app.include_router(conv_router)
@@ -235,6 +236,7 @@ def create_app() -> FastAPI:
     app.include_router(ingest_router)
     app.include_router(documents_router)
     app.include_router(tasks_router)        # POST /api/agent/task — Phase 1
+    app.include_router(memory_router)       # GET/DELETE /api/memory — Phase 8
 
     return app
 
