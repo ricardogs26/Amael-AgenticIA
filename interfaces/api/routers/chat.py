@@ -124,8 +124,15 @@ async def chat(
         decision    = await router_inst.route(question)
         tools_map   = _build_tools_map(effective_user)
 
+        # Enriquecer con memoria episódica (best-effort, no bloquea si falla)
+        memory_ctx = await _retrieve_memory_context(effective_user, question)
+        dispatch_q = (
+            f"[Contexto de sesiones anteriores]\n{memory_ctx}\n\n[Pregunta actual]\n{question}"
+            if memory_ctx else question
+        )
+
         result_dict = await dispatch(
-            question=question,
+            question=dispatch_q,
             user_id=effective_user,   # usar el usuario real, no el JWT del bot
             tools_map=tools_map,
             routing_decision=decision,
@@ -152,6 +159,14 @@ async def chat(
         request_id=request_id,
         intent=result_dict.get("intent", "general"),
     )
+
+    # Almacenar episodio en memoria Zaphkiel (fire-and-forget)
+    asyncio.create_task(_store_memory_episode(
+        user_id=effective_user,
+        conversation_id=conversation_id,
+        user_message=question,
+        assistant_reply=answer,
+    ))
 
     logger.info(
         "Chat request completado",
@@ -421,3 +436,48 @@ def _persist_message(
                 )
     except Exception as exc:
         logger.warning(f"[chat] No se pudo persistir mensaje: {exc}")
+
+
+async def _retrieve_memory_context(user_id: str, question: str) -> str:
+    """
+    Recupera recuerdos relevantes de Zaphkiel para enriquecer el contexto del LLM.
+    Retorna string vacío si no hay memorias o si el agente no está disponible.
+    Best-effort: nunca lanza excepción.
+    """
+    try:
+        from agents.base.agent_registry import AgentRegistry
+        from core.agent_base import AgentContext
+        ctx    = AgentContext(request_id="memory-retrieve", user_id=user_id)
+        agent  = AgentRegistry.get("zaphkiel", ctx)
+        result = await agent.execute({"action": "retrieve", "user_id": user_id, "query": question, "k": 4})
+        if result.success and result.output:
+            return result.output.get("context", "")
+    except Exception as exc:
+        logger.debug(f"[chat] memoria no disponible (no crítico): {exc}")
+    return ""
+
+
+async def _store_memory_episode(
+    user_id: str,
+    conversation_id: str,
+    user_message: str,
+    assistant_reply: str,
+) -> None:
+    """
+    Almacena el episodio en Zaphkiel de forma asíncrona (fire-and-forget).
+    Best-effort: nunca lanza excepción ni bloquea la respuesta al usuario.
+    """
+    try:
+        from agents.base.agent_registry import AgentRegistry
+        from core.agent_base import AgentContext
+        ctx   = AgentContext(request_id="memory-store", user_id=user_id)
+        agent = AgentRegistry.get("zaphkiel", ctx)
+        await agent.execute({
+            "action":          "store",
+            "user_id":         user_id,
+            "conversation_id": conversation_id,
+            "user_message":    user_message,
+            "assistant_reply": assistant_reply,
+        })
+    except Exception as exc:
+        logger.debug(f"[chat] memoria store no crítico: {exc}")

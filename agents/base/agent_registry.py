@@ -141,6 +141,7 @@ def register_all_agents() -> None:
         ("agents.cto.agent",          "RazielAgent"),
         ("agents.dev.agent",          "GabrielAgent"),
         ("agents.arch.agent",         "UrielAgent"),
+        ("agents.memory_agent.agent", "ZaphkielAgent"),
     ]
     for module_path, class_name in _agent_modules:
         try:
