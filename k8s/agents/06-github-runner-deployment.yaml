@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-runner-deployment
+  namespace: amael-ia
+  labels:
+    app: github-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: github-runner
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: github-runner
+    spec:
+      serviceAccountName: github-runner-sa
+      # GID 125 = grupo docker en lab-home — permite acceder a /var/run/docker.sock
+      securityContext:
+        supplementalGroups: [125]
+      containers:
+        - name: runner
+          image: registry.richardx.dev/github-runner:1.0.0
+          imagePullPolicy: Always
+          env:
+            - name: REPO_URL
+              value: "https://github.com/ricardogs26/Amael-AgenticIA"
+            - name: ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-runner-secret
+                  key: ACCESS_TOKEN
+            - name: RUNNER_NAME
+              value: "amael-lab"
+            - name: LABELS
+              value: "self-hosted,amael-lab"
+            - name: RUNNER_SCOPE
+              value: "repo"
+            - name: RUNNER_WORKDIR
+              value: "/tmp/github-runner-work"
+            - name: EPHEMERAL
+              value: "false"
+            - name: RUN_AS_ROOT
+              value: "false"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "2"
+              memory: "1Gi"
+          volumeMounts:
+            - name: runner-work
+              mountPath: /tmp/github-runner-work
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+      volumes:
+        - name: runner-work
+          emptyDir: {}
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
