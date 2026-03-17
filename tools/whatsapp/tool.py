@@ -17,7 +17,6 @@ import asyncio
 import logging
 import os
 import time
-from typing import List, Optional
 
 import requests as _req
 
@@ -57,8 +56,8 @@ class SendMediaInput(ToolInput):
 class SendSREAlertInput(ToolInput):
     message:      str
     severity:     str = "HIGH"       # LOW | MEDIUM | HIGH | CRITICAL
-    phone:        Optional[str] = None   # Sobreescribe _SRE_ALERT_PHONE si se da
-    min_severity: Optional[str] = None  # Sobreescribe _MIN_ALERT_SEVERITY si se da
+    phone:        str | None = None   # Sobreescribe _SRE_ALERT_PHONE si se da
+    min_severity: str | None = None  # Sobreescribe _MIN_ALERT_SEVERITY si se da
 
 
 # ── Tool ──────────────────────────────────────────────────────────────────────

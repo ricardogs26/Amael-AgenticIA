@@ -8,7 +8,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -21,9 +21,9 @@ router = APIRouter(prefix="/api/memory", tags=["profile"])
 
 
 class ProfileUpdate(BaseModel):
-    display_name: Optional[str] = None
-    timezone:     Optional[str] = None
-    preferences:  Optional[Dict[str, Any]] = None
+    display_name: str | None = None
+    timezone:     str | None = None
+    preferences:  dict[str, Any] | None = None
 
 
 def _get_or_create_profile(cur, user_id: str) -> dict:

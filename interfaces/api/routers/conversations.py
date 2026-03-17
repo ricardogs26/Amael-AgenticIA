@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Annotated, List, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -31,28 +31,28 @@ class ConversationSummary(BaseModel):
     message_count:  int
     created_at:     str
     last_active_at: str
-    last_message:   Optional[str] = None
+    last_message:   str | None = None
 
 class Message(BaseModel):
     id:         str
     role:       str    # "user" | "assistant"
     content:    str
-    intent:     Optional[str] = None
+    intent:     str | None = None
     created_at: str
 
 class ConversationDetail(BaseModel):
     id:       str
     title:    str
-    messages: List[Message]
+    messages: list[Message]
 
 class CreateConversationRequest(BaseModel):
-    title: Optional[str] = None
+    title: str | None = None
 
 class UpdateConversationRequest(BaseModel):
     title: str
 
 class ConversationListResponse(BaseModel):
-    conversations: List[ConversationSummary]
+    conversations: list[ConversationSummary]
 
 class MessageOut(BaseModel):
     role:    str
@@ -60,7 +60,7 @@ class MessageOut(BaseModel):
     ts:      str   # formatted time string, e.g. "14:05"
 
 class MessagesResponse(BaseModel):
-    messages: List[MessageOut]
+    messages: list[MessageOut]
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────

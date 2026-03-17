@@ -10,9 +10,9 @@ import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
-from langchain_ollama import ChatOllama, OllamaLLM
+from langchain_ollama import ChatOllama
 
 from agents.executor.step_handlers import STEP_HANDLERS
 from observability.metrics import (
@@ -65,7 +65,7 @@ def _step_type(step: str) -> str:
 
 
 def run_tool_step(
-    step: str, state: Dict[str, Any], tools_map: Dict[str, Any]
+    step: str, state: dict[str, Any], tools_map: dict[str, Any]
 ) -> str:
     """
     Ejecuta un único paso de herramienta (no-REASONING).
@@ -123,8 +123,8 @@ def _detect_language(text: str) -> str:
 
 
 def run_reasoning_step(
-    step: str, state: Dict[str, Any]
-) -> Tuple[str, str]:
+    step: str, state: dict[str, Any]
+) -> tuple[str, str]:
     """
     Ejecuta un paso REASONING: sintetiza el contexto acumulado con el LLM.
     Retorna (nueva_respuesta, contexto_sin_cambios).
@@ -194,8 +194,8 @@ def run_reasoning_step(
 
 
 def run_parallel_batch(
-    batch: List[str], state: Dict[str, Any], tools_map: Dict[str, Any]
-) -> Tuple[str, str]:
+    batch: list[str], state: dict[str, Any], tools_map: dict[str, Any]
+) -> tuple[str, str]:
     """
     Ejecuta todos los pasos del batch de forma concurrente con ThreadPoolExecutor.
     Solo válido para batches de herramientas (no-REASONING).
@@ -204,7 +204,7 @@ def run_parallel_batch(
     EXECUTOR_PARALLEL_BATCHES_TOTAL.inc()
     EXECUTOR_PARALLEL_BATCH_SIZE.observe(len(batch))
 
-    results: Dict[str, str] = {}
+    results: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=len(batch)) as pool:
         future_to_step = {
             pool.submit(run_tool_step, step, state, tools_map): step

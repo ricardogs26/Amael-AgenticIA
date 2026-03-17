@@ -19,8 +19,8 @@ import asyncio
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
 from core.agent_base import AgentResult, BaseAgent
@@ -70,12 +70,16 @@ class ZaphkielAgent(BaseAgent):
     version      = "1.0.0"
     capabilities = ["memory_store", "memory_retrieve", "memory_forget", "memory_list"]
 
-    async def execute(self, task: Dict[str, Any]) -> AgentResult:
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         action = task.get("action", "retrieve")
-        if action == "store":    return await self._store(task)
-        if action == "retrieve": return await self._retrieve(task)
-        if action == "forget":   return await self._forget(task)
-        if action == "list":     return await self._list(task)
+        if action == "store":
+            return await self._store(task)
+        if action == "retrieve":
+            return await self._retrieve(task)
+        if action == "forget":
+            return await self._forget(task)
+        if action == "list":
+            return await self._list(task)
         return AgentResult(
             success=False, output=None, agent_name=self.name,
             error=f"Acción desconocida: '{action}'. Usa: store, retrieve, forget, list",
@@ -83,7 +87,7 @@ class ZaphkielAgent(BaseAgent):
 
     # ── store ─────────────────────────────────────────────────────────────────
 
-    async def _store(self, task: Dict[str, Any]) -> AgentResult:
+    async def _store(self, task: dict[str, Any]) -> AgentResult:
         user_id         = task.get("user_id", "").strip()
         user_message    = task.get("user_message", "").strip()
         assistant_reply = task.get("assistant_reply", "").strip()
@@ -130,7 +134,7 @@ class ZaphkielAgent(BaseAgent):
                         "content":        content,
                         "user_message":   user_message[:600],
                         "assistant_reply": assistant_reply[:600],
-                        "timestamp":      datetime.now(timezone.utc).isoformat(),
+                        "timestamp":      datetime.now(UTC).isoformat(),
                         "importance":     round(importance, 3),
                         "conversation_id": conversation_id,
                     },
@@ -152,7 +156,7 @@ class ZaphkielAgent(BaseAgent):
 
     # ── retrieve ──────────────────────────────────────────────────────────────
 
-    async def _retrieve(self, task: Dict[str, Any]) -> AgentResult:
+    async def _retrieve(self, task: dict[str, Any]) -> AgentResult:
         user_id = task.get("user_id", "").strip()
         query   = task.get("query", "").strip()
         k       = int(task.get("k", 5))
@@ -208,7 +212,7 @@ class ZaphkielAgent(BaseAgent):
 
     # ── forget ────────────────────────────────────────────────────────────────
 
-    async def _forget(self, task: Dict[str, Any]) -> AgentResult:
+    async def _forget(self, task: dict[str, Any]) -> AgentResult:
         user_id  = task.get("user_id", "").strip()
         point_id = task.get("id")   # None → GDPR wipe
 
@@ -254,7 +258,7 @@ class ZaphkielAgent(BaseAgent):
 
     # ── list ──────────────────────────────────────────────────────────────────
 
-    async def _list(self, task: Dict[str, Any]) -> AgentResult:
+    async def _list(self, task: dict[str, Any]) -> AgentResult:
         user_id = task.get("user_id", "").strip()
         limit   = int(task.get("limit", 20))
         offset  = task.get("offset", None)   # Qdrant scroll offset token
@@ -316,8 +320,9 @@ def _collection_name(user_id: str) -> str:
 
 
 def _get_qdrant_client():
-    from config.settings import settings
     from qdrant_client import QdrantClient
+
+    from config.settings import settings
     return QdrantClient(url=settings.qdrant_url)
 
 
@@ -340,8 +345,9 @@ def _ensure_collection(client, collection: str) -> None:
     logger.info(f"[zaphkiel] Colección creada: {collection}")
 
 
-def _embed_text(text: str) -> List[float]:
+def _embed_text(text: str) -> list[float]:
     import requests as _req
+
     from config.settings import settings
     resp = _req.post(
         f"{settings.ollama_base_url}/api/embeddings",

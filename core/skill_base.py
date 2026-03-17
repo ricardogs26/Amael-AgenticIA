@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel
-
 
 # ── Modelos I/O base ──────────────────────────────────────────────────────────
 
@@ -24,17 +23,17 @@ class SkillOutput(BaseModel):
     """Base para todos los outputs de skills."""
     success: bool
     data: Any = None
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = {}
+    error: str | None = None
+    metadata: dict[str, Any] = {}
 
     model_config = {"arbitrary_types_allowed": True}
 
     @classmethod
-    def ok(cls, data: Any, **metadata) -> "SkillOutput":
+    def ok(cls, data: Any, **metadata) -> SkillOutput:
         return cls(success=True, data=data, metadata=metadata)
 
     @classmethod
-    def fail(cls, error: str, **metadata) -> "SkillOutput":
+    def fail(cls, error: str, **metadata) -> SkillOutput:
         return cls(success=False, data=None, error=error, metadata=metadata)
 
 

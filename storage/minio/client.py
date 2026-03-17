@@ -8,14 +8,14 @@ Usado para:
 from __future__ import annotations
 
 import logging
-from typing import IO, Optional
+from typing import IO
 
 from minio import Minio
 from minio.error import S3Error
 
 logger = logging.getLogger("storage.minio")
 
-_client: Optional[Minio] = None
+_client: Minio | None = None
 _default_bucket: str = "amael-uploads"
 
 
@@ -70,7 +70,7 @@ def upload_file(
     data: IO,
     length: int,
     content_type: str = "application/octet-stream",
-    bucket: Optional[str] = None,
+    bucket: str | None = None,
 ) -> str:
     """
     Sube un archivo a MinIO.

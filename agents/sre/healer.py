@@ -14,10 +14,9 @@ from __future__ import annotations
 import logging
 import os
 import threading
-import time
-from typing import Optional
+from datetime import UTC
 
-from agents.sre.models import Anomaly, SREAction
+from agents.sre.models import Anomaly
 from core.constants import ActionType, Severity
 
 logger = logging.getLogger("agents.sre.healer")
@@ -90,7 +89,7 @@ def rollout_restart(deployment_name: str, namespace: str) -> str:
     Ejecuta rollout restart del deployment via K8s API.
     Equivalente a: kubectl rollout restart deployment/<name> -n <ns>
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
     try:
         apps_v1 = _get_k8s_apps()
         patch = {
@@ -99,7 +98,7 @@ def rollout_restart(deployment_name: str, namespace: str) -> str:
                     "metadata": {
                         "annotations": {
                             "kubectl.kubernetes.io/restartedAt":
-                                datetime.now(timezone.utc).isoformat()
+                                datetime.now(UTC).isoformat()
                         }
                     }
                 }
@@ -126,10 +125,10 @@ def _was_recently_deployed(deployment_name: str, namespace: str, window_minutes:
         dep = apps_v1.read_namespaced_deployment(name=deployment_name, namespace=namespace)
         for cond in (dep.status.conditions or []):
             if cond.type == "Progressing" and cond.last_update_time:
-                from datetime import datetime, timezone
+                from datetime import datetime
                 age = (
-                    datetime.now(timezone.utc)
-                    - cond.last_update_time.replace(tzinfo=timezone.utc)
+                    datetime.now(UTC)
+                    - cond.last_update_time.replace(tzinfo=UTC)
                 ).total_seconds()
                 if age < window_minutes * 60:
                     return True
@@ -146,8 +145,6 @@ def rollout_undo_deployment(deployment_name: str, namespace: str) -> str:
     try:
         apps_v1 = _get_k8s_apps()
         # Obtener ReplicaSets del deployment para encontrar la revisión anterior
-        from kubernetes import client as k8s_client
-        label_selector = f"app={deployment_name}"
         rs_list = apps_v1.list_namespaced_replica_set(
             namespace=namespace,
         )
@@ -283,8 +280,8 @@ def schedule_verification(
     Se ejecuta delay_seconds después de la acción (default: 5 minutos).
     """
     try:
-        from datetime import datetime, timezone, timedelta
-        run_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+        from datetime import datetime, timedelta
+        run_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
         scheduler.add_job(
             _run_verification_job,
             "date",

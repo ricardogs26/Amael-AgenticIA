@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import List, Optional
 
 logger = logging.getLogger("agents.researcher.rag")
 
@@ -110,7 +109,7 @@ _STOPWORDS = {
 }
 
 
-def _detect_filename_filter(query: str, user_email: str) -> Optional[str]:
+def _detect_filename_filter(query: str, user_email: str) -> str | None:
     """
     Detecta si el query hace referencia explícita a un filename de la colección.
     Umbral: 1 palabra significativa (>3 chars, no stopword) en común.
@@ -166,7 +165,7 @@ def retrieve_documents(
     user_email: str,
     query: str,
     k: int = 5,
-    filename_filter: Optional[str] = None,
+    filename_filter: str | None = None,
 ) -> str:
     """
     Recupera los k chunks más relevantes para el query del usuario.
@@ -177,7 +176,8 @@ def retrieve_documents(
     Retorna texto con cabeceras de fuente para que el LLM cite correctamente.
     """
     import time
-    from observability.metrics import RAG_HITS_TOTAL, RAG_MISS_TOTAL, RAG_LATENCY_SECONDS
+
+    from observability.metrics import RAG_HITS_TOTAL, RAG_LATENCY_SECONDS, RAG_MISS_TOTAL
 
     _t0 = time.monotonic()
     try:
@@ -260,8 +260,8 @@ def retrieve_documents(
 
 def ingest_document(
     user_email: str,
-    text_chunks: List[str],
-    metadata: Optional[dict] = None,
+    text_chunks: list[str],
+    metadata: dict | None = None,
 ) -> int:
     """
     Indexa chunks de texto en la colección del usuario.
@@ -289,7 +289,7 @@ def ingest_document(
     return len(docs)
 
 
-def list_user_documents(user_email: str, limit: int = 20) -> List[dict]:
+def list_user_documents(user_email: str, limit: int = 20) -> list[dict]:
     """
     Lista los documentos indexados del usuario (por payload Qdrant).
     Útil para el endpoint GET /api/documents.

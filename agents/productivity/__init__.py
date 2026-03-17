@@ -9,19 +9,19 @@ Módulos:
   agent             — ProductivityAgent(BaseAgent) registrado en AgentRegistry
 """
 from agents.productivity.agent import ProductivityAgent
-from agents.productivity.day_planner import organize_day_for_user
-from agents.productivity.vault_credentials import (
-    get_user_credentials,
-    save_user_credentials,
-    has_credentials,
-    get_auth_flow,
-)
 from agents.productivity.calendar_manager import (
-    get_todays_events,
     create_calendar_event,
+    get_todays_events,
     sync_plan_to_calendar,
 )
+from agents.productivity.day_planner import organize_day_for_user
 from agents.productivity.email_manager import get_unread_emails
+from agents.productivity.vault_credentials import (
+    get_auth_flow,
+    get_user_credentials,
+    has_credentials,
+    save_user_credentials,
+)
 
 __all__ = [
     "ProductivityAgent",

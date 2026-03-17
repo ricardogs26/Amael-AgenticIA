@@ -22,7 +22,6 @@ from __future__ import annotations
 import base64
 import logging
 import os
-from typing import List, Optional
 
 import requests as _req
 
@@ -60,7 +59,7 @@ class CreateIssueInput(ToolInput):
     repo:   str
     title:  str
     body:   str = ""
-    labels: List[str] = []
+    labels: list[str] = []
 
 class ListPullRequestsInput(ToolInput):
     owner: str

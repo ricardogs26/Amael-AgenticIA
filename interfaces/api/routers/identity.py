@@ -8,7 +8,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/identity", tags=["identity"])
 class AccessCheckResponse(BaseModel):
     allowed:            bool
     identifier:         str
-    canonical_user_id:  Optional[str] = None
+    canonical_user_id:  str | None = None
     allow_requests:     bool = False
 
 class UserInfoResponse(BaseModel):
@@ -33,10 +33,10 @@ class UserInfoResponse(BaseModel):
 
 @router.get("/check", response_model=AccessCheckResponse)
 def check_access(
-    email:      Optional[str] = Query(default=None),
-    phone:      Optional[str] = Query(default=None),
-    number:     Optional[str] = Query(default=None),
-    identifier: Optional[str] = Query(default=None),  # usado por whatsapp-bridge
+    email:      str | None = Query(default=None),
+    phone:      str | None = Query(default=None),
+    number:     str | None = Query(default=None),
+    identifier: str | None = Query(default=None),  # usado por whatsapp-bridge
 ) -> AccessCheckResponse:
     """
     Verifica si un email o número de teléfono tiene acceso a la plataforma.
@@ -48,7 +48,6 @@ def check_access(
       2. Tabla user_identities (usuarios gestionados desde Admin panel)
       3. Tabla user_profile con status = 'active'
     """
-    from config.settings import settings
 
     value = (email or phone or number or identifier or "").strip()
     if not value:

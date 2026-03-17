@@ -9,9 +9,9 @@ Provee:
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Optional
+from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = logging.getLogger("interfaces.api.auth")
@@ -22,7 +22,7 @@ _bearer = HTTPBearer(auto_error=False)
 # ── JWT ───────────────────────────────────────────────────────────────────────
 
 def get_current_user(
-    credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(_bearer)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> str:
     """
     Dependencia FastAPI: extrae el email del usuario desde el JWT Bearer.
@@ -39,7 +39,8 @@ def get_current_user(
         )
 
     try:
-        from jose import JWTError, jwt
+        from jose import jwt
+
         from config.settings import settings
 
         payload = jwt.decode(
@@ -47,7 +48,7 @@ def get_current_user(
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
         )
-        user_id: Optional[str] = payload.get("sub") or payload.get("email")
+        user_id: str | None = payload.get("sub") or payload.get("email")
         if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -65,7 +66,7 @@ def get_current_user(
 
 
 def require_internal_secret(
-    authorization: Annotated[Optional[str], Header()] = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> None:
     """
     Dependencia para endpoints internos (CronJobs, WhatsApp bridge).
@@ -94,9 +95,9 @@ def check_rate_limit(user_id: str) -> None:
     Lanza HTTP 429 si se excede el límite.
     """
     try:
-        from storage.redis.client import get_client
         from config.settings import settings
         from observability.metrics import SECURITY_RATE_LIMITED_TOTAL
+        from storage.redis.client import get_client
 
         redis = get_client()
         key   = f"rate_limit:{user_id}"

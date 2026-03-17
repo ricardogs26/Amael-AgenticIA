@@ -10,11 +10,8 @@ El whatsapp-bridge acepta audio vía /send-audio (OGG OPUS, ptt=True).
 """
 from __future__ import annotations
 
-import base64
-import io
 import logging
 import os
-from typing import Optional
 
 import requests as _req
 
@@ -43,7 +40,7 @@ class SynthesizeInput(ToolInput):
 
 class SynthesizeAndSendInput(ToolInput):
     text:     str
-    phone:    Optional[str] = None   # Usa ADMIN_PHONE si no se especifica
+    phone:    str | None = None   # Usa ADMIN_PHONE si no se especifica
     language: str = "es"
 
 class SynthesizeCloneInput(ToolInput):

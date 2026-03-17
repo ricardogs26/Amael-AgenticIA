@@ -8,18 +8,18 @@ BaseAgent wrapper: SupervisorAgent
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
 from agents.supervisor.quality_scorer import evaluate
-from core.agent_base import AgentContext, AgentResult, BaseAgent
+from core.agent_base import AgentResult, BaseAgent
 
 logger = logging.getLogger("agents.supervisor")
 
 
 # ── Nodo LangGraph ─────────────────────────────────────────────────────────────
 
-def supervisor_node(state: Dict[str, Any], redis_client=None) -> Dict[str, Any]:
+def supervisor_node(state: dict[str, Any], redis_client=None) -> dict[str, Any]:
     """Nodo LangGraph: evalúa la respuesta y decide ACCEPT o REPLAN."""
     return evaluate(state, redis_client=redis_client)
 
@@ -38,7 +38,7 @@ class RemielAgent(BaseAgent):
     version = "2.0.0"
     capabilities = ["quality_evaluation", "replan_decision", "feedback_recording"]
 
-    async def execute(self, task: Dict[str, Any]) -> AgentResult:
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         state = task.get("state", {})
         redis_client = task.get("redis_client")
         result = evaluate(state, redis_client=redis_client)

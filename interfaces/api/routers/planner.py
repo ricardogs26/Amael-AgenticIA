@@ -11,7 +11,7 @@ el plan del día: eventos de calendario + emails + bloque de tareas en LLM.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Dict, Any, List
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/planner", tags=["planner"])
 
 class PlannerResult(BaseModel):
     processed: int
-    results:   List[Dict[str, Any]]
+    results:   list[dict[str, Any]]
 
 
 @router.post(
@@ -44,7 +44,7 @@ async def run_daily_planner() -> PlannerResult:
     """
     from storage.postgres.client import get_connection
 
-    user_emails: List[str] = []
+    user_emails: list[str] = []
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
@@ -55,7 +55,7 @@ async def run_daily_planner() -> PlannerResult:
         logger.error(f"[planner] Error recuperando usuarios activos: {exc}")
         return PlannerResult(processed=0, results=[{"status": "error", "error": "DB_ERROR"}])
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     processed = 0
 
     for user_email in user_emails:

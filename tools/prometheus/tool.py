@@ -10,10 +10,8 @@ Migrado desde k8s-agent/main.py → query_prometheus() + _PROMETHEUS_ALIASES.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
 
 import requests as _req
 
@@ -28,7 +26,7 @@ _PROMETHEUS_URL = os.environ.get(
 )
 
 # Aliases para queries frecuentes — los mismos del k8s-agent original
-_PROMETHEUS_ALIASES: Dict[str, str] = {
+_PROMETHEUS_ALIASES: dict[str, str] = {
     "cpu_pods": (
         'sum(rate(container_cpu_usage_seconds_total'
         '{namespace="amael-ia",container!=""}[5m])) by (pod)'

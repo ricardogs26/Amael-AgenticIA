@@ -11,10 +11,10 @@ Registro: @AgentRegistry.register → disponible como AgentRegistry.get("researc
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
-from core.agent_base import AgentContext, AgentResult, BaseAgent
+from core.agent_base import AgentResult, BaseAgent
 
 logger = logging.getLogger("agents.researcher.agent")
 
@@ -46,7 +46,7 @@ class SandalphonAgent(BaseAgent):
         "currency_rates",
     ]
 
-    async def execute(self, task: Dict[str, Any]) -> AgentResult:
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         step_type  = task.get("step_type", "").upper()
         query      = task.get("query", "").strip()
         user_email = task.get("user_email", "")

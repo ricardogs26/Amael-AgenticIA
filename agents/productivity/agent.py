@@ -11,10 +11,10 @@ Registro: @AgentRegistry.register → disponible como AgentRegistry.get("product
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
-from core.agent_base import AgentContext, AgentResult, BaseAgent
+from core.agent_base import AgentResult, BaseAgent
 
 logger = logging.getLogger("agents.productivity.agent")
 
@@ -55,7 +55,7 @@ class HanielAgent(BaseAgent):
         "day_planner_cronjob",
     ]
 
-    async def execute(self, task: Dict[str, Any]) -> AgentResult:
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         action     = task.get("action", "").lower()
         user_email = task.get("user_email", "").strip()
         query      = task.get("query", "").strip()
@@ -125,8 +125,8 @@ class HanielAgent(BaseAgent):
     async def _handle_get_events(self, user_email: str) -> AgentResult:
         """Recupera los eventos del día actual del usuario."""
         try:
+            from agents.productivity.calendar_manager import get_todays_events
             from agents.productivity.vault_credentials import get_user_credentials
-            from agents.productivity.calendar_manager  import get_todays_events
 
             creds = get_user_credentials(user_email)
             if not creds:
@@ -155,8 +155,8 @@ class HanielAgent(BaseAgent):
     async def _handle_get_emails(self, user_email: str) -> AgentResult:
         """Recupera los emails no leídos del inbox del usuario."""
         try:
+            from agents.productivity.email_manager import get_unread_emails
             from agents.productivity.vault_credentials import get_user_credentials
-            from agents.productivity.email_manager     import get_unread_emails
 
             creds = get_user_credentials(user_email)
             if not creds:

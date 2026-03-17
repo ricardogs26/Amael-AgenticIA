@@ -10,7 +10,6 @@ Módulo puro: sin estado global, sin singletons, importable desde cualquier agen
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import httpx
 
@@ -34,7 +33,7 @@ _JUNK_KEYWORDS = [
 ]
 
 # Persistent httpx client — reutilizado en toda la vida del proceso
-_http_client: Optional[httpx.Client] = None
+_http_client: httpx.Client | None = None
 
 
 def _get_http_client() -> httpx.Client:
@@ -44,7 +43,7 @@ def _get_http_client() -> httpx.Client:
     return _http_client
 
 
-def _search_exchange_rates() -> Optional[str]:
+def _search_exchange_rates() -> str | None:
     """
     Consulta open.er-api.com para tipo de cambio actual USD → MXN/EUR/CAD/GBP.
     Retorna None si la API falla.

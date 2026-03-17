@@ -12,7 +12,7 @@ Registro: @AgentRegistry.register → disponible como AgentRegistry.get("cto", c
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
 from agents.base.llm_utils import build_prompt, invoke_llm, retrieve_rag_context
@@ -60,7 +60,7 @@ class RazielAgent(BaseAgent):
         "web_search",
     ]
 
-    async def execute(self, task: Dict[str, Any]) -> AgentResult:
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         query      = task.get("query", "").strip()
         user_email = task.get("user_email", "")
 

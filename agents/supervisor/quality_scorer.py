@@ -8,11 +8,11 @@ import json
 import logging
 import re
 import time
+from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 from pydantic import BaseModel, ValidationError, field_validator
-from typing import Literal, Optional
 
 from agents.supervisor.prompts import SUPERVISOR_SYSTEM_PROMPT
 from observability.metrics import (

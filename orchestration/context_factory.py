@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.agent_base import AgentContext
 
@@ -50,9 +50,9 @@ class ContextFactory:
         user_id: str,
         conversation_id: str = "",
         request_id: str = "",
-        skill_names: Optional[List[str]] = None,
-        extra_tools: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        skill_names: list[str] | None = None,
+        extra_tools: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> AgentContext:
         """
         Construye un AgentContext completo con skills inyectadas.
@@ -218,7 +218,7 @@ class ContextFactory:
     # ── Helpers privados ──────────────────────────────────────────────────────
 
     @classmethod
-    def _load_skills(cls, skill_names: Optional[List[str]]) -> Dict[str, Any]:
+    def _load_skills(cls, skill_names: list[str] | None) -> dict[str, Any]:
         """
         Instancia y retorna las skills solicitadas desde SkillRegistry.
         Skills no encontradas se omiten con un warning.
@@ -235,7 +235,7 @@ class ContextFactory:
         else:
             names = skill_names
 
-        skills: Dict[str, Any] = {}
+        skills: dict[str, Any] = {}
         for name in names:
             skill = SkillRegistry.get_or_none(name)
             if skill is not None:
