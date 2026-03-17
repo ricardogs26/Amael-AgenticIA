@@ -10,10 +10,9 @@ Análogo a AgentRegistry pero para skills. Permite:
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Type
 
-from core.skill_base import BaseSkill
 from core.exceptions import AmaelError
+from core.skill_base import BaseSkill
 
 logger = logging.getLogger("skills.registry")
 
@@ -38,10 +37,10 @@ class SkillRegistry:
         result = await skill.list_pods(ListPodsInput(namespace="amael-ia"))
     """
 
-    _skills: Dict[str, Type[BaseSkill]] = {}
+    _skills: dict[str, type[BaseSkill]] = {}
 
     @classmethod
-    def register(cls, skill_class: Type[BaseSkill]) -> Type[BaseSkill]:
+    def register(cls, skill_class: type[BaseSkill]) -> type[BaseSkill]:
         """Decorator que registra una clase de skill en el registry global."""
         name = getattr(skill_class, "name", "")
         if not name:
@@ -77,14 +76,14 @@ class SkillRegistry:
         return cls._skills[name]()
 
     @classmethod
-    def get_or_none(cls, name: str) -> Optional[BaseSkill]:
+    def get_or_none(cls, name: str) -> BaseSkill | None:
         """Igual que get() pero retorna None si no existe."""
         if name not in cls._skills:
             return None
         return cls._skills[name]()
 
     @classmethod
-    def list_skills(cls) -> List[Dict]:
+    def list_skills(cls) -> list[dict]:
         """Retorna metadata de todas las skills registradas."""
         return [
             {
@@ -96,7 +95,7 @@ class SkillRegistry:
         ]
 
     @classmethod
-    def names(cls) -> List[str]:
+    def names(cls) -> list[str]:
         return sorted(cls._skills.keys())
 
     @classmethod
@@ -108,14 +107,14 @@ class SkillRegistry:
         return name in cls._skills
 
     @classmethod
-    async def health_check_all(cls) -> Dict[str, bool]:
+    async def health_check_all(cls) -> dict[str, bool]:
         """
         Ejecuta health_check() en todas las skills registradas.
 
         Returns:
             Dict {skill_name: bool} con el resultado de cada check.
         """
-        results: Dict[str, bool] = {}
+        results: dict[str, bool] = {}
         for name, skill_class in cls._skills.items():
             try:
                 skill          = skill_class()
@@ -144,10 +143,10 @@ def register_all_skills() -> None:
     Las skills se auto-registran al importarse gracias al decorator.
     """
     from skills.kubernetes.skill import KubernetesSkill
-    from skills.rag.skill         import RAGSkill
-    from skills.llm.skill         import LLMSkill
-    from skills.vault.skill       import VaultSkill
-    from skills.web.skill         import WebSkill
+    from skills.llm.skill import LLMSkill
+    from skills.rag.skill import RAGSkill
+    from skills.vault.skill import VaultSkill
+    from skills.web.skill import WebSkill
 
     for skill_class in [KubernetesSkill, RAGSkill, LLMSkill, VaultSkill, WebSkill]:
         if not SkillRegistry.is_registered(skill_class.name):

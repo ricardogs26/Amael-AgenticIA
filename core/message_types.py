@@ -5,14 +5,14 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from core.constants import MessageType
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _uuid() -> str:
@@ -27,11 +27,11 @@ class AgentMessage:
     from_agent: str
     to_agent: str
     message_type: MessageType
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     id: str = field(default_factory=_uuid)
     correlation_id: str = field(default_factory=_uuid)
     timestamp: datetime = field(default_factory=_now)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ── Request / Response ────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ class TaskRequest(AgentMessage):
     task_type: str = ""
     priority: int = 5
     timeout_s: int = 120
-    context: Dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         self.message_type = MessageType.REQUEST
@@ -69,7 +69,7 @@ class TaskResult(AgentMessage):
     """
     success: bool = True
     result: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     duration_ms: float = 0.0
 
     def __post_init__(self):
@@ -99,8 +99,8 @@ class ChatRequest:
     user_id: str
     conversation_id: str
     request_id: str = field(default_factory=_uuid)
-    attachments: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    attachments: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -109,8 +109,8 @@ class ChatResponse:
     answer: str
     request_id: str
     success: bool = True
-    error: Optional[str] = None
-    supervisor_score: Optional[int] = None
-    agents_used: List[str] = field(default_factory=list)
+    error: str | None = None
+    supervisor_score: int | None = None
+    agents_used: list[str] = field(default_factory=list)
     duration_ms: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)

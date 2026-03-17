@@ -24,7 +24,7 @@ Registro: @AgentRegistry.register → disponible como AgentRegistry.get("camael"
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
 from agents.base.llm_utils import build_prompt, invoke_llm, retrieve_rag_context
@@ -83,19 +83,25 @@ class CamaelAgent(BaseAgent):
         "rag_retrieval",
     ]
 
-    async def execute(self, task: Dict[str, Any]) -> AgentResult:
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         task_type = task.get("task", "").lower()
-        if task_type == "k8s_status":       return await self._k8s_status(task)
-        if task_type == "k8s_scale":        return await self._k8s_scale(task)
-        if task_type == "k8s_rollout":      return await self._k8s_rollout(task)
-        if task_type == "workflow_list":    return await self._workflow_list(task)
-        if task_type == "workflow_trigger": return await self._workflow_trigger(task)
-        if task_type == "workflow_status":  return await self._workflow_status(task)
+        if task_type == "k8s_status":
+            return await self._k8s_status(task)
+        if task_type == "k8s_scale":
+            return await self._k8s_scale(task)
+        if task_type == "k8s_rollout":
+            return await self._k8s_rollout(task)
+        if task_type == "workflow_list":
+            return await self._workflow_list(task)
+        if task_type == "workflow_trigger":
+            return await self._workflow_trigger(task)
+        if task_type == "workflow_status":
+            return await self._workflow_status(task)
         return await self._conversational(task)
 
     # ── Conversacional ────────────────────────────────────────────────────────
 
-    async def _conversational(self, task: Dict[str, Any]) -> AgentResult:
+    async def _conversational(self, task: dict[str, Any]) -> AgentResult:
         query      = task.get("query", "").strip()
         user_email = task.get("user_id", "")
 
@@ -121,14 +127,14 @@ class CamaelAgent(BaseAgent):
 
     # ── K8s operations ────────────────────────────────────────────────────────
 
-    async def _k8s_status(self, task: Dict[str, Any]) -> AgentResult:
+    async def _k8s_status(self, task: dict[str, Any]) -> AgentResult:
         namespace  = task.get("namespace", "amael-ia")
         user_email = task.get("user_id", "")
         query      = f"Dame el estado de todos los deployments en el namespace {namespace}: pods running/pending/failed, imágenes actuales y últimos eventos."
         return await self._k8s_query(query, user_email, task_name="k8s_status",
                                      metadata={"namespace": namespace})
 
-    async def _k8s_scale(self, task: Dict[str, Any]) -> AgentResult:
+    async def _k8s_scale(self, task: dict[str, Any]) -> AgentResult:
         deployment = task.get("deployment", "")
         replicas   = int(task.get("replicas", 1))
         namespace  = task.get("namespace", "amael-ia")
@@ -143,7 +149,7 @@ class CamaelAgent(BaseAgent):
                                      metadata={"deployment": deployment, "replicas": replicas,
                                                "namespace": namespace})
 
-    async def _k8s_rollout(self, task: Dict[str, Any]) -> AgentResult:
+    async def _k8s_rollout(self, task: dict[str, Any]) -> AgentResult:
         deployment = task.get("deployment", "")
         namespace  = task.get("namespace", "amael-ia")
         user_email = task.get("user_id", "")
@@ -161,10 +167,9 @@ class CamaelAgent(BaseAgent):
         query: str,
         user_email: str,
         task_name: str,
-        metadata: Dict,
+        metadata: dict,
     ) -> AgentResult:
         """Delega una operación K8s al k8s-agent service."""
-        import asyncio
         import httpx
         try:
             from config.settings import settings
@@ -192,7 +197,7 @@ class CamaelAgent(BaseAgent):
 
     # ── GitHub Actions ────────────────────────────────────────────────────────
 
-    async def _workflow_list(self, task: Dict[str, Any]) -> AgentResult:
+    async def _workflow_list(self, task: dict[str, Any]) -> AgentResult:
         owner = task.get("owner", "")
         repo  = task.get("repo", "")
         if not owner or not repo:
@@ -215,7 +220,7 @@ class CamaelAgent(BaseAgent):
             logger.error(f"[camael] workflow_list error: {exc}")
             return AgentResult(success=False, output=None, agent_name=self.name, error=str(exc))
 
-    async def _workflow_trigger(self, task: Dict[str, Any]) -> AgentResult:
+    async def _workflow_trigger(self, task: dict[str, Any]) -> AgentResult:
         owner    = task.get("owner", "")
         repo     = task.get("repo", "")
         workflow = task.get("workflow", "")   # filename or id, e.g. "ci.yml"
@@ -243,7 +248,7 @@ class CamaelAgent(BaseAgent):
             logger.error(f"[camael] workflow_trigger error: {exc}")
             return AgentResult(success=False, output=None, agent_name=self.name, error=str(exc))
 
-    async def _workflow_status(self, task: Dict[str, Any]) -> AgentResult:
+    async def _workflow_status(self, task: dict[str, Any]) -> AgentResult:
         owner  = task.get("owner", "")
         repo   = task.get("repo", "")
         run_id = task.get("run_id", "")

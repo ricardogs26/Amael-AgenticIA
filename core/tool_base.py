@@ -11,10 +11,9 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel
-
 
 # ── Modelos I/O base ──────────────────────────────────────────────────────────
 
@@ -27,18 +26,18 @@ class ToolOutput(BaseModel):
     """Base para todos los outputs de tools."""
     success: bool
     data: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     source: str = ""           # Nombre de la tool que generó el resultado
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
 
     model_config = {"arbitrary_types_allowed": True}
 
     @classmethod
-    def ok(cls, data: Any, source: str = "", **metadata) -> "ToolOutput":
+    def ok(cls, data: Any, source: str = "", **metadata) -> ToolOutput:
         return cls(success=True, data=data, source=source, metadata=metadata)
 
     @classmethod
-    def fail(cls, error: str, source: str = "", **metadata) -> "ToolOutput":
+    def fail(cls, error: str, source: str = "", **metadata) -> ToolOutput:
         return cls(success=False, data=None, error=error, source=source, metadata=metadata)
 
 

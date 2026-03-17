@@ -6,9 +6,8 @@ métricas Prometheus centralizadas.
 """
 from __future__ import annotations
 
-import re
 import logging
-from typing import Tuple
+import re
 
 from core.constants import MAX_PROMPT_CHARS
 from core.exceptions import PromptInjectionError
@@ -30,7 +29,7 @@ _INJECTION_PATTERNS = re.compile(
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
-def validate_prompt(prompt: str) -> Tuple[bool, str]:
+def validate_prompt(prompt: str) -> tuple[bool, str]:
     """
     Valida el prompt del usuario antes de entrar al pipeline de agentes.
 

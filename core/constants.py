@@ -1,10 +1,10 @@
 """
 Enumeraciones y constantes globales de la plataforma Amael-AgenticIA.
 """
-from enum import Enum
+from enum import StrEnum
 
 
-class StepType(str, Enum):
+class StepType(StrEnum):
     """Tipos de pasos que puede generar el PlannerAgent."""
     K8S_TOOL          = "K8S_TOOL"
     RAG_RETRIEVAL     = "RAG_RETRIEVAL"
@@ -16,7 +16,7 @@ class StepType(str, Enum):
     REASONING         = "REASONING"
 
 
-class ActionType(str, Enum):
+class ActionType(StrEnum):
     """Acciones de remediación que puede ejecutar el SREAgent."""
     ROLLOUT_RESTART       = "ROLLOUT_RESTART"
     ROLLOUT_UNDO          = "ROLLOUT_UNDO_DEPLOYMENT"
@@ -25,7 +25,7 @@ class ActionType(str, Enum):
     NO_ACTION             = "NO_ACTION"
 
 
-class AnomalyType(str, Enum):
+class AnomalyType(StrEnum):
     """Tipos de anomalías detectables por el SREAgent."""
     # Estructurales (K8s observe)
     CRASH_LOOP              = "CRASH_LOOP"
@@ -47,19 +47,19 @@ class AnomalyType(str, Enum):
     SLO_BUDGET_BURNING      = "SLO_BUDGET_BURNING"
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     LOW      = "LOW"
     MEDIUM   = "MEDIUM"
     HIGH     = "HIGH"
     CRITICAL = "CRITICAL"
 
 
-class SupervisorDecision(str, Enum):
+class SupervisorDecision(StrEnum):
     ACCEPT = "ACCEPT"
     REPLAN = "REPLAN"
 
 
-class MessageType(str, Enum):
+class MessageType(StrEnum):
     REQUEST  = "REQUEST"
     RESPONSE = "RESPONSE"
     EVENT    = "EVENT"

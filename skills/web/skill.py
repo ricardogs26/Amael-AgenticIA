@@ -10,7 +10,6 @@ Wrapper sobre agents/researcher/web_searcher + httpx.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from core.skill_base import BaseSkill, SkillInput, SkillOutput
 

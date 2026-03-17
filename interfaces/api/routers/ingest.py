@@ -16,7 +16,6 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
@@ -59,7 +58,7 @@ async def ingest_document(
     Returns:
         { doc_id, filename, summary, chunks }
     """
-    temp_path: Optional[str] = None
+    temp_path: str | None = None
     content = await file.read()
 
     # ── 1. Detectar MIME ──────────────────────────────────────────────────────
@@ -113,6 +112,7 @@ async def ingest_document(
     # ── 3. Chunking + indexar en Qdrant ───────────────────────────────────────
     try:
         from langchain_text_splitters import RecursiveCharacterTextSplitter
+
         from agents.researcher.rag_retriever import get_user_vectorstore
         splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         chunks = splitter.split_documents(documents)
@@ -158,6 +158,7 @@ async def ingest_document(
     # ── 6. Backup en MinIO (best-effort) ─────────────────────────────────────
     try:
         import io
+
         from storage.minio.client import get_client
         minio = get_client()
         bucket = _sanitize_email(user).replace("_", "-")[:63]

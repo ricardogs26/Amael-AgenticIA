@@ -14,9 +14,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, Dict, Optional
-
-import requests
+from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
 from agents.base.llm_utils import build_prompt, invoke_llm, retrieve_rag_context
@@ -107,7 +105,7 @@ class GabrielAgent(BaseAgent):
         "create_pull_request",
     ]
 
-    async def execute(self, task: Dict[str, Any]) -> AgentResult:
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         mode = task.get("mode", "conversational").lower()
         if mode == "autonomous":
             return await self._autonomous_pipeline(task)
@@ -115,7 +113,7 @@ class GabrielAgent(BaseAgent):
 
     # ── Modo conversacional ───────────────────────────────────────────────────
 
-    async def _conversational(self, task: Dict[str, Any]) -> AgentResult:
+    async def _conversational(self, task: dict[str, Any]) -> AgentResult:
         query      = task.get("query", "").strip()
         user_email = task.get("user_email", "")
 
@@ -142,7 +140,7 @@ class GabrielAgent(BaseAgent):
 
     # ── Modo autónomo ─────────────────────────────────────────────────────────
 
-    async def _autonomous_pipeline(self, task: Dict[str, Any]) -> AgentResult:
+    async def _autonomous_pipeline(self, task: dict[str, Any]) -> AgentResult:
         """
         Ciclo completo de coding autónomo:
           1. Analizar tarea → branch, commit message, PR title, target_file
@@ -154,7 +152,7 @@ class GabrielAgent(BaseAgent):
         from config.settings import settings
 
         query        = task.get("query", "").strip()
-        user_email   = task.get("user_email", "")
+        user_email   = task.get("user_email", "")  # noqa: F841 — usado por _notify vía closure
         owner        = task.get("github_owner", "") or settings.github_default_owner
         repo         = task.get("github_repo", "")  or settings.github_default_repo
         base_branch  = task.get("base_branch", settings.github_default_branch) or "main"
@@ -317,7 +315,7 @@ class GabrielAgent(BaseAgent):
         repo: str,
         base_branch: str,
         hint_file: str,
-    ) -> Optional[Dict[str, str]]:
+    ) -> dict[str, str] | None:
         """
         Llama al LLM para determinar archivo objetivo, branch, commit msg y PR title.
         Retorna el dict parseado o None si el JSON no es válido.
@@ -353,7 +351,7 @@ class GabrielAgent(BaseAgent):
         query: str,
         file_path: str,
         current_content: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Genera el contenido completo del archivo modificado.
         Extrae el contenido entre los marcadores ---FILE_START--- / ---FILE_END---.
@@ -370,7 +368,7 @@ class GabrielAgent(BaseAgent):
                 return m.group(1)
             # Fallback: si no hay marcadores, usar toda la respuesta como código
             # (el LLM a veces ignora los marcadores pero igual da código puro)
-            logger.warning(f"[gabriel] _generate_fix: marcadores no encontrados, usando respuesta completa")
+            logger.warning("[gabriel] _generate_fix: marcadores no encontrados, usando respuesta completa")
             return raw.strip()
         except Exception as exc:
             logger.error(f"[gabriel] _generate_fix error: {exc}")
@@ -396,6 +394,7 @@ class GabrielAgent(BaseAgent):
         """Envía una notificación WhatsApp de forma no bloqueante (fire-and-forget)."""
         try:
             import os
+
             import requests
             bridge_url = os.environ.get("WHATSAPP_BRIDGE_URL", "http://whatsapp-bridge-service:3000")
             phone      = os.environ.get("ADMIN_PHONE", "")

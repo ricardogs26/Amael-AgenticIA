@@ -10,11 +10,10 @@ Uso:
         span.set_attribute("agent.question_length", len(question))
 """
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
-# Importado desde config para evitar import circular en tests
-import os
 OTEL_ENDPOINT = os.environ.get(
     "OTEL_EXPORTER_OTLP_ENDPOINT",
     "http://otel-collector.observability.svc.cluster.local:4317",
@@ -23,10 +22,10 @@ SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "amael-backend")
 
 try:
     from opentelemetry import trace
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.sdk.resources import Resource
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 
     _resource = Resource.create({"service.name": SERVICE_NAME})
     _provider = TracerProvider(resource=_resource)

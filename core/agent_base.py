@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from core.exceptions import AgentDependencyError
 
@@ -32,10 +32,10 @@ class AgentContext:
     conversation_id: str
     request_id: str
     llm: Any                            # BaseLLMAdapter
-    skills: Dict[str, Any] = field(default_factory=dict)   # name → BaseSkill
-    tools: Dict[str, Any] = field(default_factory=dict)    # name → BaseTool
-    memory: Optional[Any] = None        # MemoryStore (Qdrant + Redis + Postgres)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    skills: dict[str, Any] = field(default_factory=dict)   # name → BaseSkill
+    tools: dict[str, Any] = field(default_factory=dict)    # name → BaseTool
+    memory: Any | None = None        # MemoryStore (Qdrant + Redis + Postgres)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ── Resultado estandarizado ───────────────────────────────────────────────────
@@ -52,9 +52,9 @@ class AgentResult:
     output: Any
     agent_name: str
     duration_ms: float = 0.0
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    sub_results: List["AgentResult"] = field(default_factory=list)
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    sub_results: list[AgentResult] = field(default_factory=list)
 
     def __repr__(self) -> str:
         status = "OK" if self.success else f"ERROR: {self.error}"
@@ -88,9 +88,9 @@ class BaseAgent(ABC):
     name: str = ""
     role: str = ""
     version: str = "1.0.0"
-    capabilities: List[str] = []
-    required_skills: List[str] = []
-    required_tools: List[str] = []
+    capabilities: list[str] = []
+    required_skills: list[str] = []
+    required_tools: list[str] = []
 
     def __init__(self, context: AgentContext) -> None:
         if not self.name:
@@ -128,7 +128,7 @@ class BaseAgent(ABC):
     # ── Ciclo de vida ─────────────────────────────────────────────────────────
 
     @abstractmethod
-    async def execute(self, task: Dict[str, Any]) -> AgentResult:
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         """
         Ejecuta la tarea principal del agente.
 
@@ -141,7 +141,7 @@ class BaseAgent(ABC):
         """
         ...
 
-    async def before_execute(self, task: Dict[str, Any]) -> None:
+    async def before_execute(self, task: dict[str, Any]) -> None:
         """
         Hook pre-ejecución.
         Ideal para: validación adicional, inicio de span OTel, logging.
@@ -152,7 +152,7 @@ class BaseAgent(ABC):
         )
 
     async def after_execute(
-        self, task: Dict[str, Any], result: AgentResult
+        self, task: dict[str, Any], result: AgentResult
     ) -> None:
         """
         Hook post-ejecución.
@@ -168,7 +168,7 @@ class BaseAgent(ABC):
         )
 
     async def on_error(
-        self, task: Dict[str, Any], error: Exception
+        self, task: dict[str, Any], error: Exception
     ) -> AgentResult:
         """
         Hook de manejo de errores.
@@ -187,7 +187,7 @@ class BaseAgent(ABC):
             error=str(error),
         )
 
-    async def run(self, task: Dict[str, Any]) -> AgentResult:
+    async def run(self, task: dict[str, Any]) -> AgentResult:
         """
         Template method: ciclo de vida completo del agente.
 
@@ -199,14 +199,14 @@ class BaseAgent(ABC):
 
         El duration_ms se calcula automáticamente aquí.
         """
-        start = datetime.now(timezone.utc)
+        start = datetime.now(UTC)
         try:
             await self.before_execute(task)
             result = await self.execute(task)
         except Exception as exc:
             result = await self.on_error(task, exc)
 
-        elapsed = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+        elapsed = (datetime.now(UTC) - start).total_seconds() * 1000
         result.duration_ms = elapsed
 
         try:

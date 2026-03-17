@@ -13,7 +13,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
@@ -23,7 +23,7 @@ from agents.base.agent_registry import AgentRegistry
 from agents.planner.grouper import group_plan_into_batches
 from agents.planner.models import PlanStep
 from agents.planner.prompts import PLANNER_SYSTEM_PROMPT
-from core.agent_base import AgentContext, AgentResult, BaseAgent
+from core.agent_base import AgentResult, BaseAgent
 from core.constants import MAX_PLAN_STEPS
 from observability.metrics import (
     PLANNER_INVALID_STEPS_TOTAL,
@@ -57,7 +57,7 @@ def _get_llm() -> ChatOllama:
 
 # ── Helpers (compatibles con el código original) ───────────────────────────────
 
-def _parse_raw_response(response: str) -> List[str]:
+def _parse_raw_response(response: str) -> list[str]:
     """Extrae una lista JSON de la respuesta cruda del LLM."""
     if response.startswith("[") and response.endswith("]"):
         return json.loads(response)
@@ -67,9 +67,9 @@ def _parse_raw_response(response: str) -> List[str]:
     return [f"REASONING: {response}"]
 
 
-def _validate_plan(raw_steps: list) -> List[str]:
+def _validate_plan(raw_steps: list) -> list[str]:
     """Valida cada paso con Pydantic y aplica el cap MAX_PLAN_STEPS."""
-    validated: List[str] = []
+    validated: list[str] = []
     for raw in raw_steps:
         if not isinstance(raw, str):
             PLANNER_INVALID_STEPS_TOTAL.inc()
@@ -84,7 +84,7 @@ def _validate_plan(raw_steps: list) -> List[str]:
     return validated[:MAX_PLAN_STEPS]
 
 
-def _apply_fast_paths(question: str, plan: List[str]) -> List[str]:
+def _apply_fast_paths(question: str, plan: list[str]) -> list[str]:
     """
     Fast-paths para peticiones que no necesitan pasar por ReAct completo.
     Preservado del comportamiento original.
@@ -107,7 +107,7 @@ def _apply_fast_paths(question: str, plan: List[str]) -> List[str]:
 
 # ── Nodo LangGraph (función pura, compatible con el workflow original) ─────────
 
-def planner_node(state: Dict[str, Any], llm=None) -> Dict[str, Any]:
+def planner_node(state: dict[str, Any], llm=None) -> dict[str, Any]:
     """
     Nodo LangGraph: genera el plan de ejecución.
 
@@ -128,7 +128,7 @@ def planner_node(state: Dict[str, Any], llm=None) -> Dict[str, Any]:
         response = _get_llm().invoke(messages).content.strip()
         PLANNER_LATENCY_SECONDS.observe(time.time() - t0)
 
-        plan: List[str] = []
+        plan: list[str] = []
         try:
             raw_steps = _parse_raw_response(response)
             plan = _validate_plan(raw_steps)
@@ -153,7 +153,7 @@ def planner_node(state: Dict[str, Any], llm=None) -> Dict[str, Any]:
         return {**state, "plan": plan, "current_step": 0}
 
 
-def grouper_node(state: Dict[str, Any]) -> Dict[str, Any]:
+def grouper_node(state: dict[str, Any]) -> dict[str, Any]:
     """Nodo LangGraph: convierte el plan plano en batches paralelos."""
     batches = group_plan_into_batches(state.get("plan", []))
     return {**state, "batches": batches, "current_batch": 0}
@@ -175,7 +175,7 @@ class SarielAgent(BaseAgent):
     version = "2.0.0"
     capabilities = ["task_decomposition", "step_planning", "batch_grouping"]
 
-    async def execute(self, task: Dict[str, Any]) -> AgentResult:
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         question = task.get("question", "")
         user_id = task.get("user_id", "unknown")
 

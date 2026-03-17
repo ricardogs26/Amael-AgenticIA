@@ -9,18 +9,18 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict
+from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
 from agents.executor.batch_runner import (
     MAX_CONTEXT_CHARS,
+    _step_type,
+    _truncate,
     run_parallel_batch,
     run_reasoning_step,
     run_tool_step,
-    _step_type,
-    _truncate,
 )
-from core.agent_base import AgentContext, AgentResult, BaseAgent
+from core.agent_base import AgentResult, BaseAgent
 from observability.metrics import EXECUTOR_PARALLEL_BATCH_SIZE
 from observability.tracing import tracer
 
@@ -30,10 +30,10 @@ logger = logging.getLogger("agents.executor")
 # ── Nodo LangGraph ─────────────────────────────────────────────────────────────
 
 def batch_executor_node(
-    state: Dict[str, Any],
+    state: dict[str, Any],
     llm=None,
-    tools_map: Dict[str, Any] | None = None,
-) -> Dict[str, Any]:
+    tools_map: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     Nodo LangGraph: ejecuta un batch del plan y retorna el state actualizado.
 
@@ -121,7 +121,7 @@ class ExecutorAgent(BaseAgent):
         "parallel_execution",
     ]
 
-    async def execute(self, task: Dict[str, Any]) -> AgentResult:
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         state = task.get("state", {})
         tools_map = task.get("tools_map", state.get("tools_map", {}))
         result = batch_executor_node(state, tools_map=tools_map)

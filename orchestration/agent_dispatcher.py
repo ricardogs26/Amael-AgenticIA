@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any
 
 from orchestration.agent_router import RoutingDecision
 
@@ -30,7 +30,7 @@ logger = logging.getLogger("orchestration.dispatcher")
 
 # Intents que van directamente a un agente específico (sin LangGraph)
 # Formato: "intent_keyword" → "agent_registry_name"
-_DIRECT_DISPATCH: Dict[str, str] = {
+_DIRECT_DISPATCH: dict[str, str] = {
     "sre":          "raphael",    # Raphael — SRE autónomo
     "productivity": "haniel",     # Haniel — Calendar/Gmail
     "research":     "sandalphon", # Sandalphon — RAG + web
@@ -60,12 +60,12 @@ class AgentDispatcher:
         self,
         question: str,
         user_id: str,
-        tools_map: Dict[str, Any],
-        routing_decision: Optional[RoutingDecision] = None,
+        tools_map: dict[str, Any],
+        routing_decision: RoutingDecision | None = None,
         request_id: str = "",
         conversation_id: str = "",
-        extra_metadata: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Ejecuta el request según el routing_decision.
 
@@ -141,8 +141,8 @@ class AgentDispatcher:
         intent: str,
         request_id: str,
         conversation_id: str,
-        extra_metadata: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        extra_metadata: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         """
         Invoca un agente especializado directamente, sin pasar por LangGraph.
         Más rápido para intents claros (SRE, Productivity, Researcher).
@@ -243,10 +243,10 @@ class AgentDispatcher:
         self,
         question: str,
         user_id: str,
-        tools_map: Dict[str, Any],
+        tools_map: dict[str, Any],
         request_id: str,
         conversation_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Ejecuta el pipeline LangGraph completo:
         planner → grouper → batch_executor → supervisor
@@ -297,11 +297,11 @@ _dispatcher = AgentDispatcher()
 async def dispatch(
     question: str,
     user_id: str,
-    tools_map: Dict[str, Any],
-    routing_decision: Optional[RoutingDecision] = None,
+    tools_map: dict[str, Any],
+    routing_decision: RoutingDecision | None = None,
     request_id: str = "",
     conversation_id: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Shortcut funcional que usa la instancia global del dispatcher.
 

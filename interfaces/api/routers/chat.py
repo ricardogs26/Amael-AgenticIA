@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Annotated, List, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -29,12 +29,12 @@ router = APIRouter(prefix="/api", tags=["chat"])
 
 class ChatRequest(BaseModel):
     # Acepta tanto 'question' (nuevo) como 'prompt' (whatsapp-bridge legacy)
-    question:        Optional[str] = Field(default=None, max_length=4000)
-    prompt:          Optional[str] = Field(default=None, max_length=4000)
-    conversation_id: Optional[str] = None
+    question:        str | None = Field(default=None, max_length=4000)
+    prompt:          str | None = Field(default=None, max_length=4000)
+    conversation_id: str | None = None
     # user_id opcional: usado por whatsapp-bridge para indicar el usuario real
     # cuando el JWT pertenece al bot de servicio (bot-amael@richardx.dev)
-    user_id:         Optional[str] = None
+    user_id:         str | None = None
 
     @property
     def effective_question(self) -> str:
@@ -196,8 +196,8 @@ class HistoryMessage(BaseModel):
 
 class ChatStreamRequest(BaseModel):
     prompt:          str                  = Field(..., min_length=1, max_length=4000)
-    history:         List[HistoryMessage] = Field(default_factory=list)
-    conversation_id: Optional[str]        = None
+    history:         list[HistoryMessage] = Field(default_factory=list)
+    conversation_id: str | None        = None
 
 
 def _sse(type_: str, **kwargs) -> str:
@@ -316,6 +316,7 @@ def _build_tools_map(user_id: str) -> dict:
     # ── k8s: llama al k8s-agent service (FastAPI en k8s-agent-service:8002) ──
     def _k8s(query: str) -> str:
         import httpx
+
         from config.settings import settings
         try:
             resp = httpx.post(
@@ -343,6 +344,7 @@ def _build_tools_map(user_id: str) -> dict:
     # ── productivity: llama al productivity-service ───────────────────────────
     def _productivity(query: str) -> str:
         import httpx
+
         from config.settings import settings
         try:
             resp = httpx.post(
@@ -365,8 +367,9 @@ def _build_tools_map(user_id: str) -> dict:
         try:
             from skills.registry import SkillRegistry
             skill = SkillRegistry.get("web")
-            from core.skill_base import SkillInput
             import asyncio
+
+            from core.skill_base import SkillInput
             result = asyncio.get_event_loop().run_until_complete(
                 skill.execute(SkillInput(query=query))
             )

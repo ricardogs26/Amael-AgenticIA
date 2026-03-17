@@ -19,13 +19,12 @@ Uso en health endpoint:
     from skills.registry import SkillRegistry
     status = await SkillRegistry.health_check_all()
 """
-from skills.registry import SkillRegistry, SkillNotFoundError, register_all_skills
-
 from skills.kubernetes import KubernetesSkill
-from skills.rag        import RAGSkill
-from skills.llm        import LLMSkill
-from skills.vault      import VaultSkill
-from skills.web        import WebSkill
+from skills.llm import LLMSkill
+from skills.rag import RAGSkill
+from skills.registry import SkillNotFoundError, SkillRegistry, register_all_skills
+from skills.vault import VaultSkill
+from skills.web import WebSkill
 
 __all__ = [
     # Registry

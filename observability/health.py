@@ -18,9 +18,9 @@ import asyncio
 import logging
 import os
 import time
-import urllib.request
 import urllib.error
-from typing import Any, Dict
+import urllib.request
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -40,7 +40,7 @@ class HealthResponse(BaseModel):
     status:     str              # "ok" | "degraded" | "unavailable"
     version:    str
     uptime_s:   float
-    components: Dict[str, Any] = {}
+    components: dict[str, Any] = {}
 
 
 _START_TIME = time.monotonic()
@@ -49,7 +49,7 @@ _VERSION    = os.environ.get("APP_VERSION", "dev")
 
 # ── Liveness ──────────────────────────────────────────────────────────────────
 
-def liveness() -> Dict[str, str]:
+def liveness() -> dict[str, str]:
     """
     Liveness check: el proceso está vivo y la app arrancó.
     No verifica dependencias externas — sólo que el proceso responde.
@@ -82,7 +82,7 @@ async def readiness() -> HealthResponse:
 
     postgres_result, redis_result, qdrant_result, ollama_result, skills_results, tools_results = checks
 
-    components: Dict[str, Any] = {}
+    components: dict[str, Any] = {}
     all_storage_ok = True
     any_skill_fail = False
     any_tool_fail  = False
@@ -228,9 +228,9 @@ async def _check_ollama() -> ComponentHealth:
         )
 
 
-async def _check_skills() -> Dict[str, ComponentHealth]:
+async def _check_skills() -> dict[str, ComponentHealth]:
     """Ejecuta health_check() en todas las skills registradas."""
-    results: Dict[str, ComponentHealth] = {}
+    results: dict[str, ComponentHealth] = {}
     try:
         from skills.registry import SkillRegistry
         for name in SkillRegistry.names():
@@ -255,9 +255,9 @@ async def _check_skills() -> Dict[str, ComponentHealth]:
     return results
 
 
-async def _check_tools() -> Dict[str, ComponentHealth]:
+async def _check_tools() -> dict[str, ComponentHealth]:
     """Ejecuta health_check() en todas las tools registradas."""
-    results: Dict[str, ComponentHealth] = {}
+    results: dict[str, ComponentHealth] = {}
     try:
         from tools.registry import ToolRegistry
         for name in ToolRegistry.names():
@@ -282,7 +282,7 @@ async def _check_tools() -> Dict[str, ComponentHealth]:
     return results
 
 
-def _update_health_metrics(components: Dict[str, Any]) -> None:
+def _update_health_metrics(components: dict[str, Any]) -> None:
     """Actualiza el Gauge REGISTRY_HEALTH_STATUS con el estado de cada componente."""
     try:
         from observability.metrics import REGISTRY_HEALTH_STATUS

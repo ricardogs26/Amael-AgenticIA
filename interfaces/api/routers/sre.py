@@ -15,7 +15,7 @@ Endpoints (todos requieren INTERNAL_API_SECRET salvo /status):
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -34,13 +34,13 @@ class MaintenanceRequest(BaseModel):
 
 class SRECommandRequest(BaseModel):
     command: str
-    phone:   Optional[str] = None
+    phone:   str | None = None
 
 
 # ── Loop status (no requiere JWT — usado por dashboards internos) ─────────────
 
 @router.get("/loop/status")
-def get_loop_status() -> Dict[str, Any]:
+def get_loop_status() -> dict[str, Any]:
     """Estado del loop SRE: circuit breaker, mantenimiento, config."""
     try:
         from agents.sre import get_loop_state
@@ -55,7 +55,7 @@ def get_loop_status() -> Dict[str, Any]:
 def get_incidents(
     limit: int = 5,
     _: Annotated[str, Depends(get_current_user)] = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Últimos N incidentes desde PostgreSQL."""
     try:
         from agents.sre import get_recent_incidents
@@ -70,7 +70,7 @@ def get_incidents(
 def get_postmortems(
     limit: int = 3,
     _: Annotated[str, Depends(get_current_user)] = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Últimos N postmortems generados por LLM."""
     try:
         from agents.sre import get_recent_postmortems
@@ -85,7 +85,7 @@ def get_postmortems(
 def get_learning_stats(
     days: int = 7,
     _: Annotated[str, Depends(get_current_user)] = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Tasa de éxito por (issue_type, action) en los últimos N días."""
     try:
         from agents.sre import get_historical_success_rate
@@ -99,7 +99,7 @@ def get_learning_stats(
 @router.get("/slo/status")
 def get_slo_status(
     _: Annotated[str, Depends(get_current_user)] = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """SLO targets con burn rates actuales desde Prometheus."""
     try:
         from agents.sre.scheduler import get_slo_burn_rates
@@ -113,7 +113,7 @@ def get_slo_status(
 @router.get("/maintenance")
 def get_maintenance(
     _: Annotated[str, Depends(get_current_user)] = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Estado de la ventana de mantenimiento activa."""
     try:
         from agents.sre import get_loop_state
@@ -127,7 +127,7 @@ def get_maintenance(
 
 
 @router.post("/maintenance", dependencies=[Depends(require_internal_secret)])
-def activate_maintenance_window(body: MaintenanceRequest) -> Dict[str, Any]:
+def activate_maintenance_window(body: MaintenanceRequest) -> dict[str, Any]:
     """Activa una ventana de mantenimiento por N minutos."""
     try:
         from agents.sre import activate_maintenance
@@ -138,7 +138,7 @@ def activate_maintenance_window(body: MaintenanceRequest) -> Dict[str, Any]:
 
 
 @router.delete("/maintenance", dependencies=[Depends(require_internal_secret)])
-def deactivate_maintenance_window() -> Dict[str, Any]:
+def deactivate_maintenance_window() -> dict[str, Any]:
     """Desactiva la ventana de mantenimiento."""
     try:
         from agents.sre import deactivate_maintenance
@@ -151,7 +151,7 @@ def deactivate_maintenance_window() -> Dict[str, Any]:
 # ── WhatsApp /sre command dispatcher ─────────────────────────────────────────
 
 @router.post("/command", dependencies=[Depends(require_internal_secret)])
-async def handle_sre_command(body: SRECommandRequest) -> Dict[str, Any]:
+async def handle_sre_command(body: SRECommandRequest) -> dict[str, Any]:
     """
     Dispatcher de comandos /sre desde el whatsapp-bridge.
 
@@ -171,11 +171,11 @@ async def handle_sre_command(body: SRECommandRequest) -> Dict[str, Any]:
 
     try:
         from agents.sre import (
+            activate_maintenance,
+            deactivate_maintenance,
             get_loop_state,
             get_recent_incidents,
             get_recent_postmortems,
-            activate_maintenance,
-            deactivate_maintenance,
         )
 
         if cmd_base == "status":
@@ -219,7 +219,7 @@ async def handle_sre_command(body: SRECommandRequest) -> Dict[str, Any]:
 
 # ── Formatters ────────────────────────────────────────────────────────────────
 
-def _format_status(state: Dict[str, Any]) -> str:
+def _format_status(state: dict[str, Any]) -> str:
     cb = state.get("circuit_breaker_state", "CLOSED")
     maint = "🔧 SÍ" if state.get("maintenance_active") else "No"
     loop  = "✅" if state.get("loop_running") else "❌"
@@ -232,7 +232,7 @@ def _format_status(state: Dict[str, Any]) -> str:
     )
 
 
-def _format_incidents(incidents: List[Dict]) -> str:
+def _format_incidents(incidents: list[dict]) -> str:
     if not incidents:
         return "No hay incidentes recientes."
     lines = ["*Últimos incidentes SRE:*"]
@@ -244,7 +244,7 @@ def _format_incidents(incidents: List[Dict]) -> str:
     return "\n".join(lines)
 
 
-def _format_postmortems(pms: List[Dict]) -> str:
+def _format_postmortems(pms: list[dict]) -> str:
     if not pms:
         return "No hay postmortems recientes."
     lines = ["*Últimos postmortems:*"]

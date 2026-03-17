@@ -6,10 +6,8 @@ Migrados desde k8s-agent/main.py: dataclasses Anomaly y SREAction.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-
-from core.constants import ActionType, AnomalyType, Severity
+from datetime import UTC, datetime
+from typing import Any
 
 
 @dataclass
@@ -33,9 +31,9 @@ class Anomaly:
     confidence: float = 0.0  # Confianza del diagnóstico (0.0–1.0)
     root_cause: str = ""     # Causa raíz (llenada por el Diagnoser)
     timestamp: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def incident_key(self) -> str:
@@ -60,7 +58,7 @@ class SREAction:
     executed: bool = False
     result: str = ""          # "✅ OK" / "❌ Error: ..."
     timestamp: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
 
 
@@ -72,7 +70,7 @@ class SRELoopState:
     """
     loop_enabled: bool
     loop_interval_seconds: int
-    last_run_at: Optional[datetime]
+    last_run_at: datetime | None
     last_run_result: str
     anomalies_in_last_run: int
     actions_in_last_run: int

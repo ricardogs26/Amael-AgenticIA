@@ -15,8 +15,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import threading
-from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("agents.sre.reporter")
 
@@ -34,8 +32,9 @@ _postmortem_llm = None
 def _get_postmortem_llm():
     global _postmortem_llm
     if _postmortem_llm is None:
-        from config.settings import settings
         from langchain_ollama import OllamaLLM
+
+        from config.settings import settings
         _postmortem_llm = OllamaLLM(
             model=settings.llm_model,
             base_url=settings.ollama_base_url,
@@ -101,7 +100,7 @@ def update_incident_verification(incident_key: str, verification_result: str) ->
         logger.error(f"[reporter] update_incident_verification error: {exc}")
 
 
-def get_recent_incidents(limit: int = 10) -> List[Dict]:
+def get_recent_incidents(limit: int = 10) -> list[dict]:
     """Retorna los últimos N incidentes de PostgreSQL."""
     try:
         from storage.postgres import get_connection
@@ -127,7 +126,7 @@ def get_recent_incidents(limit: int = 10) -> List[Dict]:
 
 def get_historical_success_rate(
     issue_type: str, owner_name: str, namespace: str
-) -> Optional[float]:
+) -> float | None:
     """
     Retorna la tasa de éxito [0.0-1.0] de ROLLOUT_RESTART para un recurso/issue.
     Retorna None si no hay datos suficientes.
@@ -165,7 +164,7 @@ def get_historical_success_rate(
 
 # ── Postmortems ───────────────────────────────────────────────────────────────
 
-def _get_incident_by_key(incident_key: str) -> Optional[Dict]:
+def _get_incident_by_key(incident_key: str) -> dict | None:
     """Recupera un incidente por su clave única."""
     try:
         from storage.postgres import get_connection
@@ -184,7 +183,7 @@ def _get_incident_by_key(incident_key: str) -> Optional[Dict]:
     return None
 
 
-def _generate_postmortem_sync(incident: Dict) -> Optional[Dict]:
+def _generate_postmortem_sync(incident: dict) -> dict | None:
     """Llama al LLM para generar un postmortem estructurado (timeout 60s)."""
     import concurrent.futures
 
@@ -212,7 +211,7 @@ def _generate_postmortem_sync(incident: Dict) -> Optional[Dict]:
     return None
 
 
-def _store_postmortem(incident_key: str, incident: Dict, postmortem: Dict) -> None:
+def _store_postmortem(incident_key: str, incident: dict, postmortem: dict) -> None:
     """Persiste el postmortem en la tabla sre_postmortems."""
     try:
         from storage.postgres import get_connection
@@ -262,7 +261,7 @@ def generate_and_store_postmortem(incident_key: str) -> None:
         _store_postmortem(incident_key, incident, postmortem)
 
 
-def get_recent_postmortems(limit: int = 5) -> List[Dict]:
+def get_recent_postmortems(limit: int = 5) -> list[dict]:
     """Retorna los últimos N postmortems."""
     try:
         from storage.postgres import get_connection

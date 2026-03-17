@@ -7,7 +7,6 @@ Uso del decorator @AgentRegistry.register sobre cada clase de agente.
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Type
 
 from core.agent_base import AgentContext, BaseAgent
 from core.exceptions import AgentNotFoundError
@@ -30,10 +29,10 @@ class AgentRegistry:
         result = await agent.run(task)
     """
 
-    _agents: Dict[str, Type[BaseAgent]] = {}
+    _agents: dict[str, type[BaseAgent]] = {}
 
     @classmethod
-    def register(cls, agent_class: Type[BaseAgent]) -> Type[BaseAgent]:
+    def register(cls, agent_class: type[BaseAgent]) -> type[BaseAgent]:
         """
         Decorator que registra una clase de agente en el registry global.
 
@@ -82,7 +81,7 @@ class AgentRegistry:
         return cls._agents[name](context)
 
     @classmethod
-    def list_agents(cls) -> List[Dict]:
+    def list_agents(cls) -> list[dict]:
         """
         Retorna metadata de todos los agentes registrados.
 
@@ -101,7 +100,7 @@ class AgentRegistry:
         ]
 
     @classmethod
-    def names(cls) -> List[str]:
+    def names(cls) -> list[str]:
         """Retorna la lista de nombres de agentes registrados."""
         return sorted(cls._agents.keys())
 

@@ -11,10 +11,9 @@ Migrado desde k8s-agent/main.py:
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
 
 from agents.sre.models import Anomaly
-from core.constants import AnomalyType, Severity
+from core.constants import Severity
 from observability.metrics import SRE_ANOMALIES_DETECTED_TOTAL
 
 logger = logging.getLogger("agents.sre.detector")
@@ -29,11 +28,11 @@ _SEVERITY_RANK = {
 
 
 def detect_anomalies(
-    structural: List[Anomaly],
-    metric: Optional[List[Anomaly]] = None,
-    trend: Optional[List[Anomaly]] = None,
-    slo: Optional[List[Anomaly]] = None,
-) -> List[Anomaly]:
+    structural: list[Anomaly],
+    metric: list[Anomaly] | None = None,
+    trend: list[Anomaly] | None = None,
+    slo: list[Anomaly] | None = None,
+) -> list[Anomaly]:
     """
     Combina todas las fuentes de observación en una lista consolidada.
 
@@ -45,14 +44,14 @@ def detect_anomalies(
 
     Registra métricas Prometheus por tipo y severidad.
     """
-    all_anomalies: List[Anomaly] = []
+    all_anomalies: list[Anomaly] = []
     all_anomalies.extend(slo or [])
     all_anomalies.extend(structural)
     all_anomalies.extend(metric or [])
     all_anomalies.extend(trend or [])
 
     # Deduplicar por incident_key (misma anomalía detectada por múltiples fuentes)
-    seen: Dict[str, Anomaly] = {}
+    seen: dict[str, Anomaly] = {}
     for anomaly in all_anomalies:
         key = anomaly.incident_key
         if key not in seen:
@@ -88,7 +87,7 @@ def detect_anomalies(
     return unique
 
 
-def correlate_anomalies(anomalies: List[Anomaly]) -> List[Anomaly]:
+def correlate_anomalies(anomalies: list[Anomaly]) -> list[Anomaly]:
     """
     Agrupa anomalías de múltiples pods del mismo deployment (P4-B).
 
@@ -105,8 +104,8 @@ def correlate_anomalies(anomalies: List[Anomaly]) -> List[Anomaly]:
         SRE_CORRELATION_GROUPED = None
 
     # Agrupar por (owner_name, namespace, issue_type)
-    groups: Dict[tuple, List[Anomaly]] = defaultdict(list)
-    ungrouped: List[Anomaly] = []
+    groups: dict[tuple, list[Anomaly]] = defaultdict(list)
+    ungrouped: list[Anomaly] = []
 
     for anomaly in anomalies:
         if anomaly.owner_name and anomaly.resource_type == "Pod":

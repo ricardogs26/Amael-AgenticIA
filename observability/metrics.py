@@ -9,7 +9,7 @@ Uso:
     with PLANNER_LATENCY_SECONDS.time():
         ...
 """
-from prometheus_client import Counter, Histogram, Gauge
+from prometheus_client import Counter, Gauge, Histogram
 
 # ── Planner ───────────────────────────────────────────────────────────────────
 PLANNER_LATENCY_SECONDS = Histogram(

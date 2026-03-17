@@ -11,13 +11,12 @@ Usado por:
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import redis as redis_lib
 
 logger = logging.getLogger("storage.redis")
 
-_client: Optional[redis_lib.Redis] = None
+_client: redis_lib.Redis | None = None
 
 
 def init_client(

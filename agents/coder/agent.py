@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
 from agents.base.llm_utils import build_prompt, invoke_llm, retrieve_rag_context
@@ -155,18 +155,23 @@ class JophielAgent(BaseAgent):
         "rag_retrieval",
     ]
 
-    async def execute(self, task: Dict[str, Any]) -> AgentResult:
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         task_type = task.get("task", "").lower()
-        if task_type == "generate":   return await self._generate(task)
-        if task_type == "refactor":   return await self._refactor(task)
-        if task_type == "analyze":    return await self._analyze(task)
-        if task_type == "test_gen":   return await self._test_gen(task)
-        if task_type == "document":   return await self._document(task)
+        if task_type == "generate":
+            return await self._generate(task)
+        if task_type == "refactor":
+            return await self._refactor(task)
+        if task_type == "analyze":
+            return await self._analyze(task)
+        if task_type == "test_gen":
+            return await self._test_gen(task)
+        if task_type == "document":
+            return await self._document(task)
         return await self._conversational(task)
 
     # ── Modo conversacional ───────────────────────────────────────────────────
 
-    async def _conversational(self, task: Dict[str, Any]) -> AgentResult:
+    async def _conversational(self, task: dict[str, Any]) -> AgentResult:
         query      = task.get("query", "").strip()
         user_email = task.get("user_id", "")
 
@@ -192,7 +197,7 @@ class JophielAgent(BaseAgent):
 
     # ── generate ──────────────────────────────────────────────────────────────
 
-    async def _generate(self, task: Dict[str, Any]) -> AgentResult:
+    async def _generate(self, task: dict[str, Any]) -> AgentResult:
         description = task.get("description", "").strip()
         language    = task.get("language", "python")
         context     = task.get("context", "")
@@ -225,7 +230,7 @@ class JophielAgent(BaseAgent):
 
     # ── refactor ──────────────────────────────────────────────────────────────
 
-    async def _refactor(self, task: Dict[str, Any]) -> AgentResult:
+    async def _refactor(self, task: dict[str, Any]) -> AgentResult:
         code         = task.get("code", "").strip()
         instructions = task.get("instructions", "").strip()
         language     = task.get("language", "python")
@@ -253,7 +258,7 @@ class JophielAgent(BaseAgent):
 
     # ── analyze ───────────────────────────────────────────────────────────────
 
-    async def _analyze(self, task: Dict[str, Any]) -> AgentResult:
+    async def _analyze(self, task: dict[str, Any]) -> AgentResult:
         code     = task.get("code", "").strip()
         language = task.get("language", "python")
 
@@ -276,7 +281,7 @@ class JophielAgent(BaseAgent):
 
     # ── test_gen ──────────────────────────────────────────────────────────────
 
-    async def _test_gen(self, task: Dict[str, Any]) -> AgentResult:
+    async def _test_gen(self, task: dict[str, Any]) -> AgentResult:
         code          = task.get("code", "").strip()
         language      = task.get("language", "python")
         function_name = task.get("function_name", "")
@@ -302,7 +307,7 @@ class JophielAgent(BaseAgent):
 
     # ── document ──────────────────────────────────────────────────────────────
 
-    async def _document(self, task: Dict[str, Any]) -> AgentResult:
+    async def _document(self, task: dict[str, Any]) -> AgentResult:
         code     = task.get("code", "").strip()
         language = task.get("language", "python")
 
@@ -327,7 +332,7 @@ class JophielAgent(BaseAgent):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _extract_block(text: str, tag: str) -> Optional[str]:
+def _extract_block(text: str, tag: str) -> str | None:
     """Extrae contenido entre ---{tag}_START--- y ---{tag}_END---."""
     m = re.search(rf'---{tag}_START---\s*([\s\S]+?)\s*---{tag}_END---', text)
     return m.group(1).strip() if m else None
