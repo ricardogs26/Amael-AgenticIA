@@ -134,6 +134,14 @@ spec:
               key: GRAFANA_PASSWORD
               optional: true
 
+        # Webhook GitHub CI (Option B — Camael notificación proactiva)
+        - name: GITHUB_WEBHOOK_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: amael-secrets
+              key: GITHUB_WEBHOOK_SECRET
+              optional: true    # si no está configurado, acepta sin validar firma
+
         # Identidad del pod para Lease leader election (SRE)
         - name: POD_NAME
           valueFrom:
