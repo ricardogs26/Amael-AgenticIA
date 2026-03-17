@@ -26,7 +26,7 @@ class AgentRegistry:
             ...
 
     Ejemplo de instanciación:
-        agent = AgentRegistry.get("sre", context)
+        agent = AgentRegistry.get("raphael", context)
         result = await agent.run(task)
     """
 
@@ -132,15 +132,15 @@ def register_all_agents() -> None:
     Llamar una vez en el startup de la aplicación.
     """
     _agent_modules = [
-        ("agents.planner.agent",      "PlannerAgent"),
+        ("agents.planner.agent",      "SarielAgent"),
         ("agents.executor.agent",     "ExecutorAgent"),
-        ("agents.supervisor.agent",   "SupervisorAgent"),
-        ("agents.researcher.agent",   "ResearchAgent"),
-        ("agents.productivity.agent", "ProductivityAgent"),
-        ("agents.sre.agent",          "SREAgent"),
-        ("agents.cto.agent",          "CTOAgent"),
-        ("agents.dev.agent",          "DevAgent"),
-        ("agents.arch.agent",         "ArchAgent"),
+        ("agents.supervisor.agent",   "RemielAgent"),
+        ("agents.researcher.agent",   "SandalphonAgent"),
+        ("agents.productivity.agent", "HanielAgent"),
+        ("agents.sre.agent",          "RaphaelAgent"),
+        ("agents.cto.agent",          "RazielAgent"),
+        ("agents.dev.agent",          "GabrielAgent"),
+        ("agents.arch.agent",         "UrielAgent"),
     ]
     for module_path, class_name in _agent_modules:
         try:

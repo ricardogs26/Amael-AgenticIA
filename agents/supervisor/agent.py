@@ -27,13 +27,13 @@ def supervisor_node(state: Dict[str, Any], redis_client=None) -> Dict[str, Any]:
 # ── BaseAgent wrapper ──────────────────────────────────────────────────────────
 
 @AgentRegistry.register
-class SupervisorAgent(BaseAgent):
+class RemielAgent(BaseAgent):
     """
-    Agente supervisor: evalúa la calidad de la respuesta final
+    Remiel — Supervisor Agent: evalúa la calidad de la respuesta final
     y decide si aceptarla o solicitar un re-plan.
     """
 
-    name = "supervisor"
+    name = "remiel"
     role = "Evaluar calidad de respuestas y controlar el ciclo de re-plan"
     version = "2.0.0"
     capabilities = ["quality_evaluation", "replan_decision", "feedback_recording"]

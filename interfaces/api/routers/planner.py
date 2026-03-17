@@ -42,18 +42,28 @@ async def run_daily_planner() -> PlannerResult:
 
     Requiere: Authorization: Bearer {INTERNAL_API_SECRET}
     """
-    from config.settings import settings
+    from storage.postgres.client import get_connection
+
+    user_emails: List[str] = []
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT user_id FROM user_profile WHERE status = 'active'")
+                rows = cur.fetchall()
+                user_emails = [r[0] for r in rows if "@" in (r[0] or "")]
+    except Exception as exc:
+        logger.error(f"[planner] Error recuperando usuarios activos: {exc}")
+        return PlannerResult(processed=0, results=[{"status": "error", "error": "DB_ERROR"}])
 
     results: List[Dict[str, Any]] = []
     processed = 0
 
-    for user_email in settings.full_whitelist:
-        if "@" not in user_email:
-            continue   # skips phone numbers
+    for user_email in user_emails:
 
         try:
-            from agents.productivity.day_planner import run_day_planner
-            summary = await run_day_planner(user_email=user_email)
+            from agents.productivity.day_planner import organize_day_for_user
+            res = await organize_day_for_user(user_email=user_email)
+            summary = res.get("summary", "")
             results.append({"user": user_email, "status": "ok", "summary": summary})
             processed += 1
             logger.info(f"[planner] Plan generado para {user_email}")

@@ -6,13 +6,14 @@ from enum import Enum
 
 class StepType(str, Enum):
     """Tipos de pasos que puede generar el PlannerAgent."""
-    K8S_TOOL         = "K8S_TOOL"
-    RAG_RETRIEVAL    = "RAG_RETRIEVAL"
+    K8S_TOOL          = "K8S_TOOL"
+    RAG_RETRIEVAL     = "RAG_RETRIEVAL"
     PRODUCTIVITY_TOOL = "PRODUCTIVITY_TOOL"
-    WEB_SEARCH       = "WEB_SEARCH"
-    DOCUMENT_TOOL    = "DOCUMENT_TOOL"
-    TTS_TOOL         = "TTS_TOOL"
-    REASONING        = "REASONING"
+    WEB_SEARCH        = "WEB_SEARCH"
+    DOCUMENT_TOOL     = "DOCUMENT_TOOL"
+    TTS_TOOL          = "TTS_TOOL"
+    CODE_GENERATION   = "CODE_GENERATION"   # Gabriel: leer/escribir código en GitHub
+    REASONING         = "REASONING"
 
 
 class ActionType(str, Enum):

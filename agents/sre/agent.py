@@ -642,9 +642,9 @@ def get_scheduler() -> Optional[Any]:
 # ── SREAgent — BaseAgent implementation ──────────────────────────────────────
 
 @AgentRegistry.register
-class SREAgent(BaseAgent):
+class RaphaelAgent(BaseAgent):
     """
-    Agente SRE conversacional registrado en el AgentRegistry.
+    Raphael — SRE Agent conversacional registrado en el AgentRegistry.
 
     Punto de entrada para consultas sobre el estado del clúster,
     incidentes, Vault y acciones de remediación via lenguaje natural.
@@ -653,7 +653,7 @@ class SREAgent(BaseAgent):
     en el lifespan del servidor FastAPI — no en el __init__ del agente.
     """
 
-    name         = "sre"
+    name         = "raphael"
     role         = "Site Reliability Engineering — Kubernetes Autonomous Agent"
     version      = "5.0.2"
     capabilities = [

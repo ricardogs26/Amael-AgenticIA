@@ -147,6 +147,113 @@ def handle_tts_tool(query: str, state: Dict[str, Any], tools_map: Dict[str, Any]
         return f"Error en síntesis de voz: {exc}"
 
 
+def handle_code_generation(
+    query: str, state: Dict[str, Any], tools_map: Dict[str, Any]
+) -> str:
+    """
+    Ejecuta una tarea de generación/modificación de código usando GitHubTool (Gabriel).
+
+    El query puede incluir instrucciones estructuradas como:
+      "read <owner>/<repo>/<path>"
+      "create_branch <owner>/<repo> branch=<name> from=<main>"
+      "commit <owner>/<repo>/<path> branch=<name> message=<msg> content=<...>"
+      "pull_request <owner>/<repo> head=<branch> title=<...> body=<...>"
+    O puede ser texto libre que se resuelve mediante LLM en el paso REASONING siguiente.
+    """
+    import asyncio
+    import re
+
+    github_tool = tools_map.get("github")
+    if not github_tool:
+        EXECUTOR_ERRORS_TOTAL.labels(step_type="CODE_GENERATION").inc()
+        return "Error: GitHubTool no disponible. Configura GITHUB_TOKEN en el backend."
+
+    try:
+        from tools.github.tool import (
+            CreateBranchInput,
+            CreateCommitInput,
+            CreatePullRequestInput,
+            GetFileContentsInput,
+        )
+
+        loop = asyncio.get_event_loop()
+        q = query.strip()
+
+        # ── read <owner>/<repo>/<path> [@ref] ────────────────────────────────
+        m = re.match(
+            r"^read\s+([^/]+)/([^/]+)/(.+?)(?:\s+@(\S+))?$", q, re.IGNORECASE
+        )
+        if m:
+            result = loop.run_until_complete(
+                github_tool.get_file_contents(
+                    GetFileContentsInput(
+                        owner=m.group(1),
+                        repo=m.group(2),
+                        path=m.group(3),
+                        ref=m.group(4) or "main",
+                    )
+                )
+            )
+            if result.success:
+                content = result.data.get("content", "")
+                sha = result.data.get("sha", "")
+                return f"[sha:{sha}]\n{content}"
+            return f"Error leyendo archivo: {result.error}"
+
+        # ── create_branch <owner>/<repo> branch=<name> [from=<ref>] ──────────
+        m = re.match(
+            r"^create_branch\s+([^/]+)/([^/]+)\s+branch=(\S+)(?:\s+from=(\S+))?$",
+            q, re.IGNORECASE,
+        )
+        if m:
+            result = loop.run_until_complete(
+                github_tool.create_branch(
+                    CreateBranchInput(
+                        owner=m.group(1),
+                        repo=m.group(2),
+                        branch=m.group(3),
+                        from_ref=m.group(4) or "main",
+                    )
+                )
+            )
+            if result.success:
+                return (
+                    f"Rama '{result.data['branch']}' creada desde "
+                    f"'{result.data['from_ref']}' (sha: {result.data['sha'][:8]})."
+                )
+            return f"Error creando rama: {result.error}"
+
+        # ── pull_request <owner>/<repo> head=<branch> title=<...> [body=<...>] ─
+        m = re.match(
+            r"^pull_request\s+([^/]+)/([^/]+)\s+head=(\S+)\s+title=(.+?)(?:\s+body=(.+))?$",
+            q, re.IGNORECASE | re.DOTALL,
+        )
+        if m:
+            result = loop.run_until_complete(
+                github_tool.create_pull_request(
+                    CreatePullRequestInput(
+                        owner=m.group(1),
+                        repo=m.group(2),
+                        head=m.group(3),
+                        title=m.group(4).strip(),
+                        body=m.group(5).strip() if m.group(5) else "",
+                    )
+                )
+            )
+            if result.success:
+                d = result.data
+                return f"PR #{d['number']} creado: {d['url']}"
+            return f"Error creando PR: {result.error}"
+
+        # ── fallback: devolver el query para resolución LLM en REASONING ──────
+        return f"[CODE_GENERATION] Instrucción recibida por Gabriel: {q}"
+
+    except Exception as exc:
+        logger.error(f"[executor] CODE_GENERATION error: {exc}")
+        EXECUTOR_ERRORS_TOTAL.labels(step_type="CODE_GENERATION").inc()
+        return f"Error en CODE_GENERATION: {exc}"
+
+
 # Mapa de tipo → handler
 STEP_HANDLERS = {
     "K8S_TOOL":          handle_k8s_tool,
@@ -155,4 +262,5 @@ STEP_HANDLERS = {
     "WEB_SEARCH":        handle_web_search,
     "DOCUMENT_TOOL":     handle_document_tool,
     "TTS_TOOL":          handle_tts_tool,
+    "CODE_GENERATION":   handle_code_generation,
 }

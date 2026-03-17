@@ -1,5 +1,5 @@
 """
-DevAgent — Agente de desarrollo de software: código, bugs, PRs y refactoring.
+Gabriel — Agente de desarrollo de software: código, bugs, PRs y refactoring.
 
 Responsabilidades:
   - Escribir, explicar y depurar código
@@ -7,8 +7,9 @@ Responsabilidades:
   - Revisar código y sugerir refactoring
   - Implementar funcionalidades con contexto del proyecto (RAG)
   - Buscar referencias técnicas (web search)
+  - Leer archivos del repo, crear branches y abrir Pull Requests (GitHubTool v2)
 
-Registro: @AgentRegistry.register → disponible como AgentRegistry.get("dev", ctx)
+Registro: @AgentRegistry.register → disponible como AgentRegistry.get("gabriel", ctx)
 """
 from __future__ import annotations
 
@@ -19,9 +20,9 @@ from agents.base.agent_registry import AgentRegistry
 from agents.base.llm_utils import build_prompt, invoke_llm, retrieve_rag_context
 from core.agent_base import AgentResult, BaseAgent
 
-logger = logging.getLogger("agents.dev.agent")
+logger = logging.getLogger("agents.gabriel")
 
-_SYSTEM_PROMPT = """Eres un ingeniero de software senior especializado en Python, FastAPI, Next.js y
+_SYSTEM_PROMPT = """Eres Gabriel, un ingeniero de software senior especializado en Python, FastAPI, Next.js y
 arquitecturas de sistemas distribuidos. Trabajas en Amael-IA, una plataforma multi-agente con LangGraph.
 
 Directrices:
@@ -31,6 +32,7 @@ Directrices:
 - Cuando detectes un bug, explica la causa raíz antes de proponer el fix
 - Para refactoring, justifica el cambio con el problema concreto que resuelve
 - Responde siempre en el mismo idioma que la pregunta
+- Para tareas de código en GitHub: usa get_file_contents para leer, create_branch + create_commit + create_pull_request para implementar
 
 Stack técnico del proyecto:
 - Backend: Python 3.11, FastAPI, LangGraph, LangChain, Pydantic v2
@@ -40,9 +42,9 @@ Stack técnico del proyecto:
 
 
 @AgentRegistry.register
-class DevAgent(BaseAgent):
+class GabrielAgent(BaseAgent):
     """
-    Agente de desarrollo: código, bugs, implementación y refactoring.
+    Gabriel — Agente de desarrollo: código, bugs, implementación y PRs en GitHub.
 
     task dict esperado:
         {
@@ -51,9 +53,9 @@ class DevAgent(BaseAgent):
         }
     """
 
-    name         = "dev"
-    role         = "Desarrollo de software: código, bugs, PRs y refactoring"
-    version      = "1.0.0"
+    name         = "gabriel"
+    role         = "Desarrollo de software: código, bugs, PRs y refactoring en GitHub"
+    version      = "2.0.0"
     capabilities = [
         "code_generation",
         "bug_analysis",
@@ -61,6 +63,9 @@ class DevAgent(BaseAgent):
         "refactoring",
         "rag_retrieval",
         "web_search",
+        "github_read",
+        "github_write",
+        "create_pull_request",
     ]
 
     async def execute(self, task: Dict[str, Any]) -> AgentResult:
@@ -81,10 +86,10 @@ class DevAgent(BaseAgent):
             response = await invoke_llm(prompt, self.context, self.name)
             return AgentResult(
                 success=True,
-                output={"response": response, "source": "dev_agent"},
+                output={"response": response, "source": "gabriel"},
                 agent_name=self.name,
                 metadata={"rag_used": bool(rag_context)},
             )
         except Exception as exc:
-            logger.error(f"[dev] LLM error: {exc}")
+            logger.error(f"[gabriel] LLM error: {exc}")
             return AgentResult(success=False, output=None, agent_name=self.name, error=str(exc))

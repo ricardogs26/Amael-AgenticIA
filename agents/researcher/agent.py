@@ -20,9 +20,9 @@ logger = logging.getLogger("agents.researcher.agent")
 
 
 @AgentRegistry.register
-class ResearchAgent(BaseAgent):
+class SandalphonAgent(BaseAgent):
     """
-    Agente de investigación y recuperación de información.
+    Sandalphon — Research Agent: investigación y recuperación de información.
 
     Maneja dos tipos de step del Planner:
       - RAG_RETRIEVAL : similarity_search en Qdrant (colección del usuario)
@@ -36,7 +36,7 @@ class ResearchAgent(BaseAgent):
         }
     """
 
-    name         = "researcher"
+    name         = "sandalphon"
     role         = "Investigación: RAG sobre documentos de usuario + búsqueda web"
     version      = "1.0.0"
     capabilities = [
