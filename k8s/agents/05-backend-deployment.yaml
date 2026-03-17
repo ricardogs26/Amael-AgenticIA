@@ -53,7 +53,7 @@ spec:
 
       containers:
       - name: amael-agentic-backend
-        image: registry.richardx.dev/amael-agentic-backend:1.7.0
+        image: registry.richardx.dev/amael-agentic-backend:1.7.1
         imagePullPolicy: Always
         ports:
         - name: http
@@ -114,6 +114,13 @@ spec:
               name: amael-agentic-secrets
               key: GITHUB_TOKEN
               optional: true    # GithubTool funciona sin token (rate limit reducido)
+        # Gabriel — GitHub defaults para modo autónomo
+        - name: GABRIEL_GITHUB_OWNER
+          value: "ricardogs26"
+        - name: GABRIEL_GITHUB_REPO
+          value: "Amael-AgenticIA"
+        - name: GABRIEL_GITHUB_BRANCH
+          value: "main"
         - name: GRAFANA_USER
           valueFrom:
             secretKeyRef:
