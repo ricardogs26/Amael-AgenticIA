@@ -116,6 +116,10 @@ spec:
             - name: EPHEMERAL
               value: "false"
 
+            # Correr como usuario runner (UID 1001), no root
+            - name: RUN_AS_ROOT
+              value: "false"
+
           resources:
             requests:
               cpu: "250m"
