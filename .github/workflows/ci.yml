@@ -2,7 +2,7 @@ name: CI — amael-agentic-backend
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - "**/*.py"
       - "requirements*.txt"
@@ -17,7 +17,7 @@ env:
   IMAGE:    amael-agentic-backend
 
 jobs:
-  # ── 1. Test ──────────────────────────────────────────────────────────────────
+  # ── 1. Test (en push a develop/main y en PRs a main) ─────────────────────────
   test:
     name: Tests & Lint
     runs-on: ubuntu-latest
@@ -46,7 +46,7 @@ jobs:
           JWT_SECRET_KEY:      ci-test-secret
           INTERNAL_API_SECRET: ci-internal-secret
 
-  # ── 2. Build & Push (solo en push a main) ────────────────────────────────────
+  # ── 2. Build & Push (solo en merge/push a main) ───────────────────────────────
   build:
     name: Build & Push image
     runs-on: ubuntu-latest
@@ -76,7 +76,7 @@ jobs:
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
           cache-to: type=inline
 
-  # ── 3. Deploy + notificar a Raphael ──────────────────────────────────────────
+  # ── 3. Deploy + notificar a Raphael (solo en merge/push a main) ───────────────
   deploy:
     name: Deploy a K8s (MicroK8s)
     runs-on: [self-hosted, amael-lab]
