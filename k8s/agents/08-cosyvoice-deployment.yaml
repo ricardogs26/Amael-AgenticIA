@@ -43,7 +43,7 @@ spec:
     spec:
       containers:
         - name: cosyvoice
-          image: registry.richardx.dev/cosyvoice-service:1.0.0
+          image: registry.richardx.dev/cosyvoice-service:1.0.9
           imagePullPolicy: Always
           ports:
             - containerPort: 8010
@@ -57,31 +57,32 @@ spec:
           resources:
             requests:
               cpu: "2"
-              memory: "3Gi"
+              memory: "6Gi"
             limits:
               cpu: "4"
-              memory: "6Gi"
+              memory: "14Gi"
             # Sin nvidia.com/gpu — CPU only, la GPU queda exclusiva para Ollama
+            # CosyVoice2-0.5B: llm.pt (1.9G) + tokenizers (950M) + flow (700M)
+            # + PyTorch buffer overhead en CPU → necesita ~8-12GB real
 
           volumeMounts:
             - name: models
               mountPath: /models
-              readOnly: true
 
           startupProbe:
             httpGet:
               path: /health
               port: 8010
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 10
-            failureThreshold: 18   # hasta 3 min para que el modelo cargue
+            failureThreshold: 54   # hasta 10 min: 60 + 54*10 = 600s (modelo CPU pesado + .fst downloads)
           livenessProbe:
             httpGet:
               path: /health
               port: 8010
             initialDelaySeconds: 0
             periodSeconds: 30
-            timeoutSeconds: 5
+            timeoutSeconds: 10
             failureThreshold: 3
           readinessProbe:
             httpGet:
