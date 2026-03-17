@@ -1,0 +1,137 @@
+# github-runner — self-hosted GitHub Actions runner para amael-lab
+#
+# Pre-requisito: crear el secret con el PAT de GitHub antes de aplicar:
+#
+#   kubectl create secret generic github-runner-secret \
+#     --from-literal=ACCESS_TOKEN=<tu_github_PAT> \
+#     -n amael-ia
+#
+# El PAT requiere los scopes: repo (full) — para registrar el runner y leer/escribir repos
+#
+# Después:
+#   kubectl apply -f k8s/agents/10-github-runner.yaml -n amael-ia
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── RBAC — el runner necesita apply + rollout en amael-ia ─────────────────────
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-runner-sa
+  namespace: amael-ia
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-runner-deployer
+  namespace: amael-ia
+rules:
+  # Deployments — apply + rollout status
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Services, ConfigMaps, ServiceAccounts — presentes en los manifests
+  - apiGroups: [""]
+    resources: ["services", "serviceaccounts", "configmaps", "pods"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # CronJobs
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # RBAC (ClusterRole/Role references en manifests)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-runner-deployer-binding
+  namespace: amael-ia
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-runner-deployer
+subjects:
+  - kind: ServiceAccount
+    name: github-runner-sa
+    namespace: amael-ia
+
+# ── Deployment ────────────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-runner-deployment
+  namespace: amael-ia
+  labels:
+    app: github-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: github-runner
+  # Recreate: el runner desregistra la instancia anterior antes de que la nueva arranque
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: github-runner
+    spec:
+      serviceAccountName: github-runner-sa
+
+      containers:
+        - name: runner
+          image: registry.richardx.dev/github-runner:1.0.0
+          imagePullPolicy: Always
+
+          env:
+            # Repositorio que el runner atenderá
+            - name: REPO_URL
+              value: "https://github.com/ricardogs26/Amael-AgenticIA"
+
+            # PAT desde secret (scope: repo)
+            - name: ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-runner-secret
+                  key: ACCESS_TOKEN
+
+            # Identidad y labels del runner (deben coincidir con ci.yml runs-on)
+            - name: RUNNER_NAME
+              value: "amael-lab"
+            - name: LABELS
+              value: "self-hosted,amael-lab"
+            - name: RUNNER_SCOPE
+              value: "repo"
+
+            # Directorio de trabajo para los jobs
+            - name: RUNNER_WORKDIR
+              value: "/tmp/github-runner-work"
+
+            # No registrar como ephemeral (para que persista entre reinicios)
+            - name: EPHEMERAL
+              value: "false"
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+
+          # El runner necesita escribir en /tmp para los jobs
+          volumeMounts:
+            - name: runner-work
+              mountPath: /tmp/github-runner-work
+
+      volumes:
+        - name: runner-work
+          emptyDir: {}
+
+      # Sin affinity especial — single-node MicroK8s
+      restartPolicy: Always

@@ -92,11 +92,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Limpiar cache containerd (evita imagen stale)
-        run: |
-          microk8s ctr images rm \
-            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ needs.build.outputs.version }} || true
-
       - name: Apply manifest K8s
         run: |
           kubectl apply -f k8s/agents/05-backend-deployment.yaml -n amael-ia
@@ -105,15 +100,21 @@ jobs:
         run: |
           kubectl rollout status deployment/amael-agentic-deployment -n amael-ia --timeout=180s
 
-      - name: Notificar a Raphael (intensified monitoring 10min)
+      - name: Verificar pod corriendo
         run: |
-          curl -s -X POST http://k8s-agent-service.amael-ia.svc.cluster.local:8002/api/sre/deploy-hook \
+          kubectl get pods -n amael-ia -l app=amael-agentic --no-headers
+          echo "Versión desplegada: ${{ needs.build.outputs.version }}"
+
+      - name: Notificar a Raphael (monitoreo intensificado 10min)
+        run: |
+          curl -s -X POST \
+            http://k8s-agent-service.amael-ia.svc.cluster.local:8002/api/sre/deploy-hook \
             -H "Authorization: Bearer ${{ secrets.AMAEL_INTERNAL_SECRET }}" \
             -H "Content-Type: application/json" \
-            -d '{
-              "service": "amael-agentic-backend",
-              "version": "${{ needs.build.outputs.version }}",
-              "commit":  "${{ github.sha }}",
-              "author":  "${{ github.actor }}",
-              "message": "${{ github.event.head_commit.message }}"
-            }' || echo "Raphael no disponible — deploy hook omitido"
+            -d "{
+              \"service\": \"amael-agentic-backend\",
+              \"version\": \"${{ needs.build.outputs.version }}\",
+              \"commit\":  \"${{ github.sha }}\",
+              \"author\":  \"${{ github.actor }}\",
+              \"message\": \"${{ github.event.head_commit.message }}\"
+            }" || echo "Raphael no disponible — hook omitido"
