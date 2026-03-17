@@ -97,6 +97,10 @@ async def chat(
     # Rate limit
     check_rate_limit(effective_user)
 
+    # Rol del usuario (para control de acceso por agente)
+    from interfaces.api.auth import get_user_role
+    user_role = get_user_role(effective_user)
+
     # Correlación de logs
     request_id      = str(uuid.uuid4())
     conversation_id = body.conversation_id or str(uuid.uuid4())
@@ -138,6 +142,7 @@ async def chat(
             routing_decision=decision,
             request_id=request_id,
             conversation_id=conversation_id,
+            user_role=user_role,
         )
     except Exception as exc:
         logger.error(f"[chat] dispatch error: {exc}", exc_info=True)

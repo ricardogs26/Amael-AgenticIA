@@ -5,6 +5,9 @@ Provee:
   - get_current_user(token)  — decodifica JWT → email del usuario
   - require_internal_secret  — verifica INTERNAL_API_SECRET (CronJobs / WhatsApp bridge)
   - check_rate_limit(user_id)— 15 req / 60s por usuario via Redis
+  - get_user_role(user_id)   — consulta PostgreSQL → rol del usuario
+  - has_min_role(role, req)  — compara nivel de rol (user < operator < admin)
+  - require_operator         — dependencia FastAPI: mínimo rol operator
 """
 from __future__ import annotations
 
@@ -63,6 +66,55 @@ def get_current_user(
             detail="Token inválido o expirado",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+# ── RBAC — jerarquía de roles ─────────────────────────────────────────────────
+
+# Nivel numérico de cada rol: a mayor número, más privilegios.
+_ROLE_LEVELS: dict[str, int] = {
+    "user":     1,
+    "operator": 2,
+    "admin":    3,
+}
+
+
+def get_user_role(user_id: str) -> str:
+    """
+    Retorna el rol del usuario desde PostgreSQL.
+    Devuelve "user" si el usuario no existe o si falla la consulta.
+    """
+    try:
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT role FROM user_profile WHERE user_id = %s",
+                    (user_id,),
+                )
+                row = cur.fetchone()
+                return row[0] if row and row[0] else "user"
+    except Exception as exc:
+        logger.warning(f"[auth] get_user_role falló para {user_id}: {exc}")
+        return "user"
+
+
+def has_min_role(user_role: str, required_role: str) -> bool:
+    """Devuelve True si user_role tiene al menos el nivel de required_role."""
+    return _ROLE_LEVELS.get(user_role, 0) >= _ROLE_LEVELS.get(required_role, 99)
+
+
+def require_operator(user_id: Annotated[str, Depends(get_current_user)]) -> str:
+    """
+    Dependencia FastAPI: exige rol 'operator' o superior (admin).
+    Lanza HTTP 403 si el usuario tiene rol 'user'.
+    """
+    role = get_user_role(user_id)
+    if not has_min_role(role, "operator"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso restringido: se requiere rol operator o admin",
+        )
+    return user_id
 
 
 def require_internal_secret(
