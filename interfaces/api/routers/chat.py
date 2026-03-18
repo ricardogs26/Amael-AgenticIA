@@ -165,6 +165,10 @@ async def chat(
         intent=result_dict.get("intent", "general"),
     )
 
+    # Enviar nota de voz si el usuario lo pidió (fire-and-forget)
+    if _is_voice_request(question) and _is_whatsapp_user(effective_user):
+        asyncio.create_task(_send_voice_note(phone=effective_user, text=answer))
+
     # Almacenar episodio en memoria Zaphkiel (fire-and-forget)
     asyncio.create_task(_store_memory_episode(
         user_id=effective_user,
@@ -489,3 +493,44 @@ async def _store_memory_episode(
         })
     except Exception as exc:
         logger.debug(f"[chat] memoria store no crítico: {exc}")
+
+
+# ── Helpers de voz ────────────────────────────────────────────────────────────
+
+# Palabras clave que indican que el usuario quiere una respuesta en audio
+_VOICE_KEYWORDS = (
+    "nota de voz", "audio", "por audio", "en audio",
+    "mándame un audio", "escuchar", "dime en voz",
+    "respóndeme en voz", "voice note", "send audio",
+)
+
+
+def _is_voice_request(question: str) -> bool:
+    """True si la pregunta contiene una petición explícita de nota de voz."""
+    q = question.lower()
+    return any(kw in q for kw in _VOICE_KEYWORDS)
+
+
+def _is_whatsapp_user(user_id: str) -> bool:
+    """True si el user_id es un número de teléfono (usuario de WhatsApp)."""
+    # Los usuarios de WhatsApp tienen user_id numérico (ej: 5219993437008)
+    return user_id.replace("+", "").replace("-", "").isdigit()
+
+
+async def _send_voice_note(phone: str, text: str) -> None:
+    """
+    Sintetiza el texto con CosyVoice y lo envía como nota de voz PTT.
+    Fire-and-forget: nunca lanza excepción ni bloquea la respuesta de texto.
+    """
+    try:
+        from tools.cosyvoice.tool import CosyVoiceTool, SynthesizeAndSendInput
+        tool   = CosyVoiceTool()
+        result = await tool.synthesize_and_send(
+            SynthesizeAndSendInput(text=text[:500], phone=phone, language="es")
+        )
+        if result.success:
+            logger.info(f"[chat] Nota de voz enviada a {phone} ({result.data.get('duration_seconds', 0):.1f}s)")
+        else:
+            logger.warning(f"[chat] Nota de voz falló (no crítico): {result.error}")
+    except Exception as exc:
+        logger.debug(f"[chat] _send_voice_note no crítico: {exc}")
