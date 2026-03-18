@@ -35,6 +35,9 @@ class ChatRequest(BaseModel):
     # user_id opcional: usado por whatsapp-bridge para indicar el usuario real
     # cuando el JWT pertenece al bot de servicio (bot-amael@richardx.dev)
     user_id:         str | None = None
+    # phone opcional: número WhatsApp original del remitente (enviado por whatsapp-bridge)
+    # permite enviar nota de voz aunque canonical_user_id sea un email
+    phone:           str | None = None
 
     @property
     def effective_question(self) -> str:
@@ -166,8 +169,12 @@ async def chat(
     )
 
     # Enviar nota de voz si el usuario lo pidió (fire-and-forget)
-    if _is_voice_request(question) and _is_whatsapp_user(effective_user):
-        asyncio.create_task(_send_voice_note(phone=effective_user, text=answer))
+    # Usar body.phone si está disponible (bridge envía número aunque canonical sea email)
+    voice_phone = body.phone if body.phone and _is_whatsapp_user(body.phone) else (
+        effective_user if _is_whatsapp_user(effective_user) else None
+    )
+    if _is_voice_request(question) and voice_phone:
+        asyncio.create_task(_send_voice_note(phone=voice_phone, text=answer))
 
     # Almacenar episodio en memoria Zaphkiel (fire-and-forget)
     asyncio.create_task(_store_memory_episode(
@@ -519,18 +526,35 @@ def _is_whatsapp_user(user_id: str) -> bool:
 
 async def _send_voice_note(phone: str, text: str) -> None:
     """
-    Sintetiza el texto con CosyVoice y lo envía como nota de voz PTT.
+    Sintetiza el texto y lo envía como nota de voz PTT.
+    Usa Piper como motor principal (rápido, estable, acento latinoamericano).
+    CosyVoice solo como fallback si Piper no está disponible.
     Fire-and-forget: nunca lanza excepción ni bloquea la respuesta de texto.
     """
+    truncated = text[:500]
+
+    # 1. Piper (rápido, estable, voz latina consistente)
     try:
-        from tools.cosyvoice.tool import CosyVoiceTool, SynthesizeAndSendInput
-        tool   = CosyVoiceTool()
-        result = await tool.synthesize_and_send(
-            SynthesizeAndSendInput(text=text[:500], phone=phone, language="es")
+        from tools.piper.tool import PiperTool, SynthesizeAndSendInput as PiperInput
+        result = await PiperTool().synthesize_and_send(
+            PiperInput(text=truncated, phone=phone)
         )
         if result.success:
-            logger.info(f"[chat] Nota de voz enviada a {phone} ({result.data.get('duration_seconds', 0):.1f}s)")
-        else:
-            logger.warning(f"[chat] Nota de voz falló (no crítico): {result.error}")
+            logger.info(f"[chat] Nota de voz Piper enviada a {phone} ({result.data.get('duration_seconds', 0):.1f}s)")
+            return
+        logger.warning(f"[chat] Piper falló, intentando CosyVoice: {result.error}")
     except Exception as exc:
-        logger.debug(f"[chat] _send_voice_note no crítico: {exc}")
+        logger.warning(f"[chat] Piper excepción, intentando CosyVoice: {exc}")
+
+    # 2. Fallback a CosyVoice
+    try:
+        from tools.cosyvoice.tool import CosyVoiceTool, SynthesizeAndSendInput as CosyInput
+        result = await CosyVoiceTool().synthesize_and_send(
+            CosyInput(text=truncated, phone=phone, language="es")
+        )
+        if result.success:
+            logger.info(f"[chat] Nota de voz CosyVoice enviada a {phone} ({result.data.get('duration_seconds', 0):.1f}s)")
+        else:
+            logger.warning(f"[chat] CosyVoice también falló: {result.error}")
+    except Exception as exc:
+        logger.debug(f"[chat] _send_voice_note fallback CosyVoice: {exc}")
