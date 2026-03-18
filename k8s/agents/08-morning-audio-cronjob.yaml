@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: amael-morning-audio
+  namespace: amael-ia
+spec:
+  # Todos los días a las 6:00am hora de México
+  schedule: "0 6 * * *"
+  timeZone: "America/Mexico_City"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 480
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: morning-audio
+            image: curlimages/curl:8.6.0
+            command:
+            - sh
+            - -c
+            - |
+              echo "Calentando CosyVoice..." && \
+              curl -s -X POST http://cosyvoice-service:8010/tts \
+                -H "Content-Type: application/json" \
+                -d '{"text":"buenos días","language":"es"}' \
+                --max-time 90 > /dev/null && \
+              echo "CosyVoice listo. Generando reporte..." && \
+              curl -sf \
+                -X POST \
+                -H "Authorization: Bearer ${BOT_JWT_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d "{
+                  \"prompt\": \"Buenos días. Dame un resumen del estado del ambiente Kubernetes: pods en problemas, servicios caídos, alertas activas en Prometheus, y estado general del cluster amael-ia. Si todo está bien dímelo también. mándame un audio\",
+                  \"user_id\": \"${ADMIN_PHONE}\",
+                  \"phone\":   \"${ADMIN_PHONE}\"
+                }" \
+                --max-time 240 \
+                http://amael-agentic-service:8000/api/chat \
+              && echo "Morning audio OK" \
+              || (echo "Morning audio FALLÓ" && exit 1)
+            env:
+            - name: BOT_JWT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: amael-secrets
+                  key: jwt-token
+            - name: ADMIN_PHONE
+              valueFrom:
+                configMapKeyRef:
+                  name: amael-agentic-configmap
+                  key: ADMIN_PHONE

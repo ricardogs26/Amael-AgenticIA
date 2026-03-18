@@ -10,8 +10,10 @@ El whatsapp-bridge acepta audio vía /send-audio (OGG OPUS, ptt=True).
 """
 from __future__ import annotations
 
+import base64
 import logging
 import os
+import subprocess
 
 import requests as _req
 
@@ -87,7 +89,7 @@ class CosyVoiceTool(BaseTool):
                     "language": input.language,
                     "speed":    input.speed,
                 },
-                timeout=60,
+                timeout=120,
             )
             if resp.status_code != 200:
                 return ToolOutput.fail(
@@ -131,13 +133,42 @@ class CosyVoiceTool(BaseTool):
             logger.error(f"[cosyvoice_tool] synthesize_clone error: {exc}")
             return ToolOutput.fail(str(exc), source=self.name)
 
+    @staticmethod
+    def _wav_to_ogg_opus(wav_b64: str) -> str:
+        """
+        Convierte audio WAV base64 → OGG OPUS base64 usando ffmpeg.
+        WhatsApp requiere OGG OPUS para notas de voz PTT.
+        """
+        wav_bytes = base64.b64decode(wav_b64)
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "wav", "-i", "pipe:0",
+                "-c:a", "libopus",
+                "-b:a", "24k",
+                "-vbr", "on",
+                "-compression_level", "10",
+                "-f", "ogg",
+                "pipe:1",
+            ],
+            input=wav_bytes,
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"ffmpeg WAV→OGG error: {result.stderr.decode(errors='replace')[:200]}"
+            )
+        return base64.b64encode(result.stdout).decode()
+
     async def synthesize_and_send(self, input: SynthesizeAndSendInput) -> ToolOutput:
         """
         Genera audio y lo envía como nota de voz por WhatsApp.
 
         Flujo:
           1. POST /tts → base64 WAV
-          2. POST /send-audio en whatsapp-bridge → nota de voz PTT
+          2. Convierte WAV → OGG OPUS (WhatsApp solo acepta OGG OPUS como PTT)
+          3. POST /send-audio en whatsapp-bridge → nota de voz PTT
         """
         phone = input.phone or _ADMIN_PHONE
         if not phone:
@@ -153,18 +184,25 @@ class CosyVoiceTool(BaseTool):
         if not synth_result.success:
             return synth_result
 
-        audio_b64    = synth_result.data["audio_base64"]
-        duration     = synth_result.data.get("duration_seconds", 0)
+        wav_b64  = synth_result.data["audio_base64"]
+        duration = synth_result.data.get("duration_seconds", 0)
 
-        # 2. Enviar al bridge como nota de voz (PTT)
+        # 2. Convertir WAV → OGG OPUS
+        try:
+            ogg_b64 = self._wav_to_ogg_opus(wav_b64)
+        except Exception as exc:
+            logger.error(f"[cosyvoice_tool] WAV→OGG error: {exc}")
+            return ToolOutput.fail(f"Error convirtiendo audio: {exc}", source=self.name)
+
+        # 3. Enviar al bridge como nota de voz PTT (OGG OPUS)
         try:
             resp = _req.post(
                 f"{_WA_BRIDGE_URL}/send-audio",
                 json={
                     "phoneNumber": phone,
-                    "base64":      audio_b64,
-                    "mimetype":    "audio/wav",
-                    "ptt":         True,      # Push-to-talk = nota de voz en WhatsApp
+                    "base64":      ogg_b64,
+                    "mimetype":    "audio/ogg; codecs=opus",
+                    "ptt":         True,
                 },
                 timeout=30,
             )
