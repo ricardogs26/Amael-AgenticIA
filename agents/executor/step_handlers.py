@@ -101,6 +101,7 @@ def handle_tts_tool(query: str, state: dict[str, Any], tools_map: dict[str, Any]
     """
     Síntesis de voz y envío como nota de voz WhatsApp.
 
+    Prefiere CosyVoice (alta calidad) sobre Piper (rápido).
     El query puede ser solo texto, o con formato:
       "para <phone>: <texto>"   → envía al número indicado
       "<texto>"                 → envía al ADMIN_PHONE configurado
@@ -108,10 +109,12 @@ def handle_tts_tool(query: str, state: dict[str, Any], tools_map: dict[str, Any]
     import asyncio
     import re
 
-    tts_tool = tools_map.get("piper")
+    # Preferir CosyVoice (alta calidad), fallback a Piper (rápido)
+    tts_tool   = tools_map.get("cosyvoice") or tools_map.get("piper")
+    use_cosy   = "cosyvoice" in tools_map
     if not tts_tool:
         EXECUTOR_ERRORS_TOTAL.labels(step_type="TTS_TOOL").inc()
-        return "Error: Herramienta TTS no disponible (cosyvoice-service no registrado)."
+        return "Error: Herramienta TTS no disponible."
 
     # Parsear "para <phone>: <texto>"
     phone = None
@@ -121,19 +124,23 @@ def handle_tts_tool(query: str, state: dict[str, Any], tools_map: dict[str, Any]
         phone = m.group(1)
         text  = m.group(2).strip()
 
-
     try:
-        from tools.piper.tool import SynthesizeAndSendInput
+        if use_cosy:
+            from tools.cosyvoice.tool import SynthesizeAndSendInput
+            inp = SynthesizeAndSendInput(text=text, phone=phone, language="es")
+        else:
+            from tools.piper.tool import SynthesizeAndSendInput
+            inp = SynthesizeAndSendInput(text=text, phone=phone)
+
         result = asyncio.get_event_loop().run_until_complete(
-            tts_tool.synthesize_and_send(
-                SynthesizeAndSendInput(text=text, phone=phone)
-            )
+            tts_tool.synthesize_and_send(inp)
         )
         if result.success:
             d = result.data
+            engine = "CosyVoice" if use_cosy else "Piper"
             return (
                 f"Nota de voz enviada a {d['phone']} "
-                f"({d['duration_seconds']:.1f}s, {d['chars']} caracteres)."
+                f"({d['duration_seconds']:.1f}s, {d['chars']} caracteres) via {engine}."
             )
         return f"Error al enviar nota de voz: {result.error}"
     except Exception as exc:

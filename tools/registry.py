@@ -161,6 +161,7 @@ def register_all_tools() -> None:
         ("tools.whatsapp.tool",    "WhatsAppTool"),
         ("tools.github.tool",      "GitHubTool"),
         ("tools.piper.tool",       "PiperTool"),
+        ("tools.cosyvoice.tool",   "CosyVoiceTool"),  # TTS alta calidad → notas de voz WA
     ]
 
     for module_path, class_name in _tools:
