@@ -294,7 +294,10 @@ async def chat_stream(
 
             yield _sse("status", msg="Procesando respuesta…")
 
-            result_dict = await dispatch(
+            # Ejecutar dispatch como tarea concurrente para poder emitir
+            # keepalive SSE cada 20s — evita que Cloudflare cierre la
+            # conexión (~100s timeout) durante tareas largas como Gabriel.
+            dispatch_task = asyncio.ensure_future(dispatch(
                 question=question,
                 user_id=user_id,
                 tools_map=tools_map,
@@ -302,7 +305,14 @@ async def chat_stream(
                 request_id=request_id,
                 conversation_id=conversation_id,
                 user_role=user_role,
-            )
+            ))
+            while True:
+                done, _ = await asyncio.wait({dispatch_task}, timeout=20.0)
+                if done:
+                    break
+                yield _sse("status", msg="Procesando respuesta…")
+
+            result_dict = await dispatch_task
 
             from security.sanitizer import sanitize_output
             answer = sanitize_output(result_dict.get("final_answer", ""))
