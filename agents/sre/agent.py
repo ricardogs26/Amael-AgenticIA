@@ -14,10 +14,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
-from core.agent_base import AgentContext, AgentResult, BaseAgent
+from core.agent_base import AgentResult, BaseAgent
 
 logger = logging.getLogger("agents.sre.agent")
 
@@ -87,7 +87,7 @@ _METRICS_KNOWLEDGE = _load_kb("metrics_knowledge.md", "METRICS_KB")
 
 # ── SLO Targets ───────────────────────────────────────────────────────────────
 
-_SLO_TARGETS: List[dict] = []
+_SLO_TARGETS: list[dict] = []
 
 
 def load_slo_targets() -> None:
@@ -175,10 +175,11 @@ def init_runbooks_qdrant() -> None:
     del directorio runbooks/ si la colección está vacía.
     """
     try:
-        from qdrant_client import QdrantClient
-        from qdrant_client.models import Distance, VectorParams, PointStruct
-        import requests as _req
         import uuid
+
+        import requests as _req
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import Distance, PointStruct, VectorParams
 
         client = QdrantClient(url=_QDRANT_URL)
 
@@ -264,12 +265,14 @@ def _is_vault_question(query: str) -> bool:
 def _build_tools() -> list:
     """Construye la lista de LangChain Tools para el agente SRE."""
     from langchain.agents import Tool
-    from agents.sre import healer, scheduler, reporter
+
+    from agents.sre import healer, reporter, scheduler
 
     # Importaciones lazy para los tools del agente conversacional
     def _get_pods(ns: str = "") -> str:
         try:
-            from kubernetes import client as k8s, config as k8s_config
+            from kubernetes import client as k8s
+            from kubernetes import config as k8s_config
             try:
                 k8s_config.load_incluster_config()
             except Exception:
@@ -291,7 +294,8 @@ def _build_tools() -> list:
 
     def _describe_pod(pod_name: str) -> str:
         try:
-            from kubernetes import client as k8s, config as k8s_config
+            from kubernetes import client as k8s
+            from kubernetes import config as k8s_config
             try:
                 k8s_config.load_incluster_config()
             except Exception:
@@ -481,8 +485,8 @@ def _get_langgraph_agent():
         return _langgraph_agent
 
     try:
-        from langgraph.prebuilt import create_react_agent
         from langchain_core.messages import SystemMessage
+        from langgraph.prebuilt import create_react_agent
         _langgraph_agent = create_react_agent(
             _get_chat_llm(),
             _build_tools(),
@@ -503,7 +507,7 @@ def _get_classic_agent():
     if _classic_agent is not None:
         return _classic_agent
 
-    from langchain.agents import initialize_agent, AgentType
+    from langchain.agents import AgentType, initialize_agent
     _classic_agent = initialize_agent(
         _build_tools(),
         _get_classic_llm(),
@@ -578,7 +582,7 @@ def query_agent(query: str) -> str:
 _sre_scheduler = None
 
 
-def start_sre_loop() -> Optional[Any]:
+def start_sre_loop() -> Any | None:
     """
     Inicia el APScheduler con el loop autónomo SRE cada SRE_LOOP_INTERVAL segundos.
 
@@ -593,6 +597,7 @@ def start_sre_loop() -> Optional[Any]:
 
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
+
         from agents.sre.scheduler import sre_autonomous_loop
 
         _sre_scheduler = BackgroundScheduler(timezone="UTC")
@@ -634,7 +639,7 @@ def stop_sre_loop() -> None:
         _sre_scheduler = None
 
 
-def get_scheduler() -> Optional[Any]:
+def get_scheduler() -> Any | None:
     """Retorna la instancia del scheduler (para schedule_verification en healer)."""
     return _sre_scheduler
 
@@ -669,7 +674,7 @@ class RaphaelAgent(BaseAgent):
         "leader_election",
     ]
 
-    async def execute(self, task: Dict[str, Any]) -> AgentResult:
+    async def execute(self, task: dict[str, Any]) -> AgentResult:
         """
         Ejecuta una consulta conversacional al agente SRE.
 

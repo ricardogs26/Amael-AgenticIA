@@ -20,8 +20,8 @@ con imagen registry.richardx.dev/backend-ia:<version>.
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +30,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 # ── Logging primero — antes de cualquier otro import ──────────────────────────
 from observability.logging import setup_logging
+
 setup_logging()
 
 logger = logging.getLogger("main")
@@ -110,7 +111,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 6. SRE agent
     try:
-        from agents.sre import init_sre_db, init_runbooks_qdrant, start_sre_loop
+        from agents.sre import init_runbooks_qdrant, init_sre_db, start_sre_loop
         init_sre_db()
         await _run_in_thread(init_runbooks_qdrant)
         start_sre_loop()
@@ -210,18 +211,20 @@ def create_app() -> FastAPI:
         app.include_router(health_router)
 
     # ── API routers ───────────────────────────────────────────────────────────
-    from interfaces.api.routers.chat          import router as chat_router
+    from interfaces.api.routers.admin import router as admin_router
+    from interfaces.api.routers.auth import router as auth_router
+    from interfaces.api.routers.chat import router as chat_router
     from interfaces.api.routers.conversations import router as conv_router
-    from interfaces.api.routers.identity      import router as identity_router
-    from interfaces.api.routers.planner       import router as planner_router
-    from interfaces.api.routers.sre           import router as sre_router
-    from interfaces.api.routers.feedback      import router as feedback_router
-    from interfaces.api.routers.auth          import router as auth_router
-    from interfaces.api.routers.profile       import router as profile_router
-    from interfaces.api.routers.admin         import router as admin_router
-    from interfaces.api.routers.ingest        import router as ingest_router
-    from interfaces.api.routers.documents     import router as documents_router
-    from interfaces.api.routers.tasks         import router as tasks_router
+    from interfaces.api.routers.devops import router as devops_router
+    from interfaces.api.routers.documents import router as documents_router
+    from interfaces.api.routers.feedback import router as feedback_router
+    from interfaces.api.routers.identity import router as identity_router
+    from interfaces.api.routers.ingest import router as ingest_router
+    from interfaces.api.routers.memory import router as memory_router
+    from interfaces.api.routers.planner import router as planner_router
+    from interfaces.api.routers.profile import router as profile_router
+    from interfaces.api.routers.sre import router as sre_router
+    from interfaces.api.routers.tasks import router as tasks_router
 
     app.include_router(chat_router)
     app.include_router(conv_router)
@@ -235,6 +238,8 @@ def create_app() -> FastAPI:
     app.include_router(ingest_router)
     app.include_router(documents_router)
     app.include_router(tasks_router)        # POST /api/agent/task — Phase 1
+    app.include_router(memory_router)       # GET/DELETE /api/memory — Phase 8
+    app.include_router(devops_router)       # POST /api/devops/ci-hook — webhook CI
 
     return app
 

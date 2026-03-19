@@ -12,10 +12,9 @@ from __future__ import annotations
 import logging
 import os
 import time
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
-from agents.sre.models import Anomaly, SRELoopState
+from agents.sre.models import SRELoopState
 
 logger = logging.getLogger("agents.sre.scheduler")
 
@@ -47,7 +46,7 @@ class CircuitBreaker:
         self.reset_seconds  = reset_seconds
         self._failures      = 0
         self._state         = self.CLOSED
-        self._opened_at: Optional[float] = None
+        self._opened_at: float | None = None
 
     @property
     def state(self) -> str:
@@ -117,7 +116,7 @@ def _try_acquire_lease() -> bool:
             config.load_kube_config()
 
         coord = client.CoordinationV1Api()
-        now   = datetime.now(timezone.utc)
+        now   = datetime.now(UTC)
 
         try:
             lease = coord.read_namespaced_lease(
@@ -127,7 +126,7 @@ def _try_acquire_lease() -> bool:
             renewed = lease.spec.renew_time
             expired = (
                 renewed is None
-                or (now - renewed.replace(tzinfo=timezone.utc)).total_seconds()
+                or (now - renewed.replace(tzinfo=UTC)).total_seconds()
                 > _LEASE_DURATION_S
             )
             if holder == _POD_NAME or expired:
@@ -235,7 +234,7 @@ def mark_incident(key: str) -> None:
 
 def sre_autonomous_loop(
     prometheus_url: str,
-    slo_targets: List[dict],
+    slo_targets: list[dict],
     vault_knowledge: str = "",
     metrics_knowledge: str = "",
 ) -> None:
@@ -245,8 +244,8 @@ def sre_autonomous_loop(
 
     Pipeline: Observe → Detect → Diagnose → Decide → Act → Report
     """
+    from agents.sre import detector, diagnoser, healer, observer, reporter
     from observability.metrics import SRE_LOOP_RUNS_TOTAL
-    from agents.sre import observer, detector, diagnoser, healer, reporter
 
     # ── Guardrails de ejecución ───────────────────────────────────────────────
     if circuit_breaker.is_open():
@@ -266,7 +265,7 @@ def sre_autonomous_loop(
         SRE_LOOP_RUNS_TOTAL.labels(result="skipped_not_leader").inc()
         return
 
-    _loop_state.last_run_at = datetime.now(timezone.utc)
+    _loop_state.last_run_at = datetime.now(UTC)
     actions_taken = 0
 
     try:
@@ -340,8 +339,6 @@ def sre_autonomous_loop(
 
             # Schedule verification post-acción (solo ROLLOUT_RESTART)
             if action_type == "ROLLOUT_RESTART" and "✅" in action_result:
-                from agents.sre.healer import schedule_verification
-                from apscheduler.schedulers.background import BackgroundScheduler
                 # Nota: el scheduler se pasa desde el agent.py
                 diagnoser.maybe_save_runbook_entry(anomaly, root_cause, action_type)
 

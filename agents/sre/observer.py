@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from datetime import UTC
 
 from agents.sre.models import Anomaly
 from core.constants import AnomalyType, Severity
@@ -40,7 +40,7 @@ def _get_k8s_client():
     return client
 
 
-def _prometheus_query(url: str, query: str) -> Optional[List[Dict]]:
+def _prometheus_query(url: str, query: str) -> list[dict] | None:
     """Ejecuta una query instant en Prometheus. Retorna los results o None."""
     try:
         import requests as _req
@@ -57,7 +57,7 @@ def _prometheus_query(url: str, query: str) -> Optional[List[Dict]]:
     return None
 
 
-def observe_cluster(namespaces: Optional[List[str]] = None) -> List[Anomaly]:
+def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
     """
     Observa el estado estructural de pods y nodos vía Kubernetes API.
 
@@ -67,13 +67,13 @@ def observe_cluster(namespaces: Optional[List[str]] = None) -> List[Anomaly]:
 
     Migrado desde k8s-agent/main.py → observe_cluster()
     """
-    anomalies: List[Anomaly] = []
+    anomalies: list[Anomaly] = []
     ns_list = namespaces or _OBSERVE_NAMESPACES
 
     try:
         k8s = _get_k8s_client()
-        v1 = k8s.CoreV1Api()
-        apps_v1 = k8s.AppsV1Api()
+        v1      = k8s.CoreV1Api()
+        _ = k8s.AppsV1Api()  # instanciado para warm-up del client; pods via v1
 
         # ── Pods ──────────────────────────────────────────────────────────────
         for ns in ns_list:
@@ -173,8 +173,7 @@ def observe_cluster(namespaces: Optional[List[str]] = None) -> List[Anomaly]:
                     import time as _time
                     creation = pod.metadata.creation_timestamp
                     if creation:
-                        from datetime import timezone as _tz
-                        age = (_time.time() - creation.replace(tzinfo=_tz.utc).timestamp())
+                        age = (_time.time() - creation.replace(tzinfo=UTC).timestamp())
                         if age > 300:
                             anomalies.append(Anomaly(
                                 issue_type=AnomalyType.POD_PENDING_STUCK,
@@ -219,7 +218,7 @@ def observe_cluster(namespaces: Optional[List[str]] = None) -> List[Anomaly]:
     return anomalies
 
 
-def observe_metrics(prometheus_url: str) -> List[Anomaly]:
+def observe_metrics(prometheus_url: str) -> list[Anomaly]:
     """
     Observa métricas de CPU, memoria y tasa de errores vía Prometheus (P4-A).
 
@@ -227,10 +226,9 @@ def observe_metrics(prometheus_url: str) -> List[Anomaly]:
 
     Migrado desde k8s-agent/main.py → observe_metrics()
     """
-    from config.settings import settings
     cpu_threshold    = float(os.environ.get("SRE_CPU_THRESHOLD",    "0.85"))
     memory_threshold = float(os.environ.get("SRE_MEMORY_THRESHOLD", "0.85"))
-    anomalies: List[Anomaly] = []
+    anomalies: list[Anomaly] = []
 
     # CPU
     cpu_results = _prometheus_query(
@@ -311,7 +309,7 @@ def observe_metrics(prometheus_url: str) -> List[Anomaly]:
     return anomalies
 
 
-def observe_trends(prometheus_url: str) -> List[Anomaly]:
+def observe_trends(prometheus_url: str) -> list[Anomaly]:
     """
     Detección predictiva via predict_linear() y deriv() en Prometheus (P5-A).
 
@@ -322,7 +320,7 @@ def observe_trends(prometheus_url: str) -> List[Anomaly]:
 
     Migrado desde k8s-agent/main.py → observe_trends()
     """
-    anomalies: List[Anomaly] = []
+    anomalies: list[Anomaly] = []
     leak_rate = int(os.environ.get("SRE_MEMORY_LEAK_RATE_BYTES", str(1024 * 1024)))
 
     # Predicción de disco lleno en 4 horas
@@ -389,7 +387,7 @@ def observe_trends(prometheus_url: str) -> List[Anomaly]:
     return anomalies
 
 
-def observe_slo(prometheus_url: str, slo_targets: List[Dict]) -> List[Anomaly]:
+def observe_slo(prometheus_url: str, slo_targets: list[dict]) -> list[Anomaly]:
     """
     Verifica burn rate del error budget para cada SLO definido (P5-C).
 
@@ -398,7 +396,7 @@ def observe_slo(prometheus_url: str, slo_targets: List[Dict]) -> List[Anomaly]:
     Migrado desde k8s-agent/main.py → observe_slo()
     """
     from observability.metrics import SRE_SLO_VIOLATIONS_TOTAL
-    anomalies: List[Anomaly] = []
+    anomalies: list[Anomaly] = []
 
     for slo in slo_targets:
         handler = slo.get("handler", "")

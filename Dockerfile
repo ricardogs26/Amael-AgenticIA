@@ -42,9 +42,11 @@ FROM python:3.11-slim AS runtime
 # Runtime deps:
 #   libmagic1 — python-magic
 #   libpq5    — psycopg2-binary en runtime
+#   ffmpeg    — conversión WAV→OGG OPUS para notas de voz WhatsApp
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libmagic1 \
     libpq5 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Usuario no-root

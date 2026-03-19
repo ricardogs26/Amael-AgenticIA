@@ -8,8 +8,8 @@ Migrado desde backend-ia/agents/security.py.
 """
 from __future__ import annotations
 
-import re
 import logging
+import re
 
 logger = logging.getLogger("security.sanitizer")
 

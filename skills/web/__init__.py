@@ -1,7 +1,7 @@
 from skills.web.skill import (
-    WebSkill,
-    SearchInput,
     FetchUrlInput,
+    SearchInput,
+    WebSkill,
 )
 
 __all__ = [

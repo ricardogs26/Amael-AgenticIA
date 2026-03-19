@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional
 
 import requests as _req
 
@@ -37,7 +36,7 @@ _WA_BRIDGE_URL = os.environ.get(
 
 # ── Mapa de dashboards Amael ──────────────────────────────────────────────────
 # Keyed by alias amigable → uid (Grafana) + título
-_AMAEL_DASHBOARDS: Dict[str, Dict[str, str]] = {
+_AMAEL_DASHBOARDS: dict[str, dict[str, str]] = {
     "llm":        {"uid": "amael-llm",        "title": "LLM & HTTP"},
     "agent":      {"uid": "amael-agent",      "title": "Pipeline de Agente"},
     "rag":        {"uid": "amael-rag",        "title": "RAG Performance"},

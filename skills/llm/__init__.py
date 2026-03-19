@@ -1,7 +1,7 @@
 from skills.llm.skill import (
-    LLMSkill,
-    InvokeInput,
     ChatInput,
+    InvokeInput,
+    LLMSkill,
 )
 
 __all__ = [

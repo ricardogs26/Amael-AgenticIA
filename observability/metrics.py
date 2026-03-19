@@ -9,7 +9,7 @@ Uso:
     with PLANNER_LATENCY_SECONDS.time():
         ...
 """
-from prometheus_client import Counter, Histogram, Gauge
+from prometheus_client import Counter, Gauge, Histogram
 
 # ── Planner ───────────────────────────────────────────────────────────────────
 PLANNER_LATENCY_SECONDS = Histogram(
@@ -178,6 +178,11 @@ SRE_DIAGNOSIS_CONFIDENCE = Histogram(
     "Confianza de diagnóstico LLM del SRE agent (0.0 a 1.0)",
     buckets=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
 )
+SRE_DIAGNOSIS_LLM_TOTAL = Counter(
+    "amael_sre_diagnosis_llm_total",
+    "Total de diagnósticos LLM del SRE agent por resultado",
+    ["result"],   # ok | timeout | error
+)
 SRE_CIRCUIT_BREAKER_STATE = Gauge(
     "amael_sre_circuit_breaker_state",
     "Estado del circuit breaker: 0=cerrado, 1=abierto, 2=semi-abierto",
@@ -210,6 +215,40 @@ SRE_WA_COMMANDS_TOTAL = Counter(
     "amael_sre_wa_commands_total",
     "Comandos WhatsApp /sre procesados",
     ["command"],
+)
+SRE_RUNBOOK_HITS_TOTAL = Counter(
+    "amael_sre_runbook_hits_total",
+    "Runbooks encontrados en Qdrant durante diagnóstico",
+)
+SRE_LEARNING_ADJUSTED_TOTAL = Counter(
+    "amael_sre_learning_adjusted_total",
+    "Diagnósticos cuya confianza fue ajustada por histórico de aprendizaje",
+)
+SRE_CORRELATION_GROUPED = Counter(
+    "amael_sre_correlation_grouped_total",
+    "Anomalías agrupadas por correlación multi-pod",
+)
+SRE_RESTART_LIMIT_HIT = Counter(
+    "amael_sre_restart_limit_hit_total",
+    "Veces que el guardrail de restart limit bloqueó una acción",
+)
+SRE_POSTMORTEM_TOTAL = Counter(
+    "amael_sre_postmortem_total",
+    "Postmortems LLM generados",
+)
+SRE_NOTIFY_TOTAL = Counter(
+    "amael_sre_notify_total",
+    "Notificaciones WhatsApp enviadas por el SRE agent",
+    ["severity"],
+)
+SRE_MAINTENANCE_ACTIVE = Gauge(
+    "amael_sre_maintenance_active",
+    "1 si hay ventana de mantenimiento activa, 0 si no",
+)
+SRE_LANGGRAPH_REQUESTS = Counter(
+    "amael_sre_langgraph_requests_total",
+    "Requests al agente LangGraph del SRE (modo conversacional)",
+    ["result"],   # ok | fallback | error
 )
 
 # ── Skills ────────────────────────────────────────────────────────────────────

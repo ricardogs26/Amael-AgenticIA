@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
 
 import requests as _req
 
@@ -30,13 +29,13 @@ _ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "")
 
 class SynthesizeInput(ToolInput):
     text:  str
-    voice: Optional[str] = None    # None → usa default del servicio (es_MX-claude-high)
+    voice: str | None = None    # None → usa default del servicio (es_MX-claude-high)
     speed: float = 1.0
 
 class SynthesizeAndSendInput(ToolInput):
     text:  str
-    phone: Optional[str] = None    # None → usa ADMIN_PHONE
-    voice: Optional[str] = None
+    phone: str | None = None    # None → usa ADMIN_PHONE
+    voice: str | None = None
     speed: float = 1.0
 
 

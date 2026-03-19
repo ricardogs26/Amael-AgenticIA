@@ -82,6 +82,9 @@ spec:
         app: github-runner
     spec:
       serviceAccountName: github-runner-sa
+      # GID 125 = grupo docker en lab-home — permite acceder a /var/run/docker.sock
+      securityContext:
+        supplementalGroups: [125]
 
       containers:
         - name: runner
@@ -112,9 +115,12 @@ spec:
             - name: RUNNER_WORKDIR
               value: "/tmp/github-runner-work"
 
-            # No registrar como ephemeral (para que persista entre reinicios)
+            # Modo ephemeral: el runner se da de baja y sale tras cada job.
+            # K8s lo reinicia (restartPolicy: Always) para el siguiente job.
+            # "false" en la imagen se evalúa como truthy (if [ -n "$EPHEMERAL" ]),
+            # así que se usa "true" para alinear config con comportamiento real.
             - name: EPHEMERAL
-              value: "false"
+              value: "true"
 
             # Correr como usuario runner (UID 1001), no root
             - name: RUN_AS_ROOT
@@ -123,19 +129,25 @@ spec:
           resources:
             requests:
               cpu: "250m"
-              memory: "256Mi"
-            limits:
-              cpu: "1"
               memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
 
           # El runner necesita escribir en /tmp para los jobs
           volumeMounts:
             - name: runner-work
               mountPath: /tmp/github-runner-work
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
 
       volumes:
         - name: runner-work
           emptyDir: {}
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
 
       # Sin affinity especial — single-node MicroK8s
       restartPolicy: Always

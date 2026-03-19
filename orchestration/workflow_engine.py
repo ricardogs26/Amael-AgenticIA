@@ -15,7 +15,7 @@ Flujo:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from langgraph.graph import END, StateGraph
 
@@ -30,7 +30,7 @@ from orchestration.state import AgentState
 logger = logging.getLogger("orchestration.workflow")
 
 # Cache global del grafo compilado — un grafo por configuración de redis_client
-_WORKFLOW_CACHE: Optional[Any] = None
+_WORKFLOW_CACHE: Any | None = None
 
 
 def _compile_graph(redis_client=None):
@@ -126,11 +126,11 @@ def create_orchestrator(llm=None, tools_map=None, redis_client=None):
 async def run_workflow(
     question: str,
     user_id: str,
-    tools_map: Dict[str, Any],
+    tools_map: dict[str, Any],
     redis_client=None,
     request_id: str = "",
     conversation_id: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Ejecuta el workflow completo para un request.
 

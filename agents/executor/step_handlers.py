@@ -7,7 +7,7 @@ Migrado desde backend-ia/agents/executor.py, separado por responsabilidad.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from observability.metrics import EXECUTOR_ERRORS_TOTAL
 
@@ -41,7 +41,7 @@ def _user_can_use_k8s(user_id: str) -> bool:
         return False
 
 
-def handle_k8s_tool(query: str, state: Dict[str, Any], tools_map: Dict[str, Any]) -> str:
+def handle_k8s_tool(query: str, state: dict[str, Any], tools_map: dict[str, Any]) -> str:
     """Ejecuta una consulta K8s/infraestructura."""
     user_id = state.get("user_id", "unknown")
 
@@ -57,7 +57,7 @@ def handle_k8s_tool(query: str, state: Dict[str, Any], tools_map: Dict[str, Any]
     return k8s_func(query)
 
 
-def handle_rag_retrieval(query: str, state: Dict[str, Any], tools_map: Dict[str, Any]) -> str:
+def handle_rag_retrieval(query: str, state: dict[str, Any], tools_map: dict[str, Any]) -> str:
     """Ejecuta una búsqueda RAG en Qdrant."""
     rag_func = tools_map.get("rag")
     if not rag_func:
@@ -67,7 +67,7 @@ def handle_rag_retrieval(query: str, state: Dict[str, Any], tools_map: Dict[str,
 
 
 def handle_productivity_tool(
-    query: str, state: Dict[str, Any], tools_map: Dict[str, Any]
+    query: str, state: dict[str, Any], tools_map: dict[str, Any]
 ) -> str:
     """Ejecuta una consulta de productividad (calendario/email)."""
     prod_func = tools_map.get("productivity")
@@ -77,7 +77,7 @@ def handle_productivity_tool(
     return prod_func(query)
 
 
-def handle_web_search(query: str, state: Dict[str, Any], tools_map: Dict[str, Any]) -> str:
+def handle_web_search(query: str, state: dict[str, Any], tools_map: dict[str, Any]) -> str:
     """Ejecuta una búsqueda web (DuckDuckGo)."""
     web_func = tools_map.get("web_search")
     if not web_func:
@@ -87,7 +87,7 @@ def handle_web_search(query: str, state: Dict[str, Any], tools_map: Dict[str, An
 
 
 def handle_document_tool(
-    query: str, state: Dict[str, Any], tools_map: Dict[str, Any]
+    query: str, state: dict[str, Any], tools_map: dict[str, Any]
 ) -> str:
     """Genera un documento formal (oficio, reporte, memorando)."""
     doc_func = tools_map.get("document")
@@ -97,10 +97,11 @@ def handle_document_tool(
     return doc_func(query)
 
 
-def handle_tts_tool(query: str, state: Dict[str, Any], tools_map: Dict[str, Any]) -> str:
+def handle_tts_tool(query: str, state: dict[str, Any], tools_map: dict[str, Any]) -> str:
     """
     Síntesis de voz y envío como nota de voz WhatsApp.
 
+    Prefiere CosyVoice (alta calidad) sobre Piper (rápido).
     El query puede ser solo texto, o con formato:
       "para <phone>: <texto>"   → envía al número indicado
       "<texto>"                 → envía al ADMIN_PHONE configurado
@@ -108,10 +109,12 @@ def handle_tts_tool(query: str, state: Dict[str, Any], tools_map: Dict[str, Any]
     import asyncio
     import re
 
-    tts_tool = tools_map.get("piper")
+    # Preferir CosyVoice (alta calidad), fallback a Piper (rápido)
+    tts_tool   = tools_map.get("cosyvoice") or tools_map.get("piper")
+    use_cosy   = "cosyvoice" in tools_map
     if not tts_tool:
         EXECUTOR_ERRORS_TOTAL.labels(step_type="TTS_TOOL").inc()
-        return "Error: Herramienta TTS no disponible (cosyvoice-service no registrado)."
+        return "Error: Herramienta TTS no disponible."
 
     # Parsear "para <phone>: <texto>"
     phone = None
@@ -121,24 +124,23 @@ def handle_tts_tool(query: str, state: Dict[str, Any], tools_map: Dict[str, Any]
         phone = m.group(1)
         text  = m.group(2).strip()
 
-    # Determinar idioma desde el texto
-    language = "es"
-    en_markers = ("the ", "this ", "hello", "please", "generate", " is ", " are ")
-    if any(mk in text.lower() for mk in en_markers):
-        language = "en"
-
     try:
-        from tools.piper.tool import SynthesizeAndSendInput
+        if use_cosy:
+            from tools.cosyvoice.tool import SynthesizeAndSendInput
+            inp = SynthesizeAndSendInput(text=text, phone=phone, language="es")
+        else:
+            from tools.piper.tool import SynthesizeAndSendInput
+            inp = SynthesizeAndSendInput(text=text, phone=phone)
+
         result = asyncio.get_event_loop().run_until_complete(
-            tts_tool.synthesize_and_send(
-                SynthesizeAndSendInput(text=text, phone=phone)
-            )
+            tts_tool.synthesize_and_send(inp)
         )
         if result.success:
             d = result.data
+            engine = "CosyVoice" if use_cosy else "Piper"
             return (
                 f"Nota de voz enviada a {d['phone']} "
-                f"({d['duration_seconds']:.1f}s, {d['chars']} caracteres)."
+                f"({d['duration_seconds']:.1f}s, {d['chars']} caracteres) via {engine}."
             )
         return f"Error al enviar nota de voz: {result.error}"
     except Exception as exc:
@@ -148,7 +150,7 @@ def handle_tts_tool(query: str, state: Dict[str, Any], tools_map: Dict[str, Any]
 
 
 def handle_code_generation(
-    query: str, state: Dict[str, Any], tools_map: Dict[str, Any]
+    query: str, state: dict[str, Any], tools_map: dict[str, Any]
 ) -> str:
     """
     Ejecuta una tarea de generación/modificación de código usando GitHubTool (Gabriel).
@@ -171,7 +173,6 @@ def handle_code_generation(
     try:
         from tools.github.tool import (
             CreateBranchInput,
-            CreateCommitInput,
             CreatePullRequestInput,
             GetFileContentsInput,
         )

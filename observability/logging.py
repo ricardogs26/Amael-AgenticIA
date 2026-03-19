@@ -16,8 +16,8 @@ import logging
 import os
 import sys
 from contextvars import ContextVar
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 # ── Context variables para correlación de requests ────────────────────────────
 # Se populan en el middleware HTTP y en AgentDispatcher
@@ -40,7 +40,7 @@ def set_log_context(
         _conversation_id_var.set(conversation_id)
 
 
-def _get_otel_trace_context() -> Dict[str, str]:
+def _get_otel_trace_context() -> dict[str, str]:
     """
     Extrae trace_id y span_id del span OTel activo.
     Retorna dict vacío si OTel no está disponible o no hay span activo.
@@ -83,8 +83,8 @@ class JsonFormatter(logging.Formatter):
     """
 
     def format(self, record: logging.LogRecord) -> str:
-        log_entry: Dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+        log_entry: dict[str, Any] = {
+            "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level":     record.levelname,
             "logger":    record.name,
             "message":   record.getMessage(),
@@ -124,8 +124,8 @@ class ReadableFormatter(logging.Formatter):
 
 
 def setup_logging(
-    level: Optional[str] = None,
-    json_output: Optional[bool] = None,
+    level: str | None = None,
+    json_output: bool | None = None,
 ) -> None:
     """
     Configura el sistema de logging de la plataforma.

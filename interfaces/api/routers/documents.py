@@ -8,7 +8,6 @@ Fuente de respaldo: Qdrant (chunks deduplicados por filename).
 from __future__ import annotations
 
 import logging
-from typing import List
 
 from fastapi import APIRouter, Depends
 
@@ -20,7 +19,7 @@ router = APIRouter(prefix="/api", tags=["documents"])
 
 
 @router.get("/documents")
-async def list_documents(user: str = Depends(get_current_user)) -> List[dict]:
+async def list_documents(user: str = Depends(get_current_user)) -> list[dict]:
     """
     Retorna la lista de documentos indexados para el usuario autenticado.
 
@@ -36,7 +35,7 @@ async def list_documents(user: str = Depends(get_current_user)) -> List[dict]:
     return _from_qdrant(user)
 
 
-def _from_postgres(user: str) -> List[dict] | None:
+def _from_postgres(user: str) -> list[dict] | None:
     """Consulta user_documents en PostgreSQL."""
     try:
         from storage.postgres.client import get_connection
@@ -67,7 +66,7 @@ def _from_postgres(user: str) -> List[dict] | None:
         return None
 
 
-def _from_qdrant(user: str) -> List[dict]:
+def _from_qdrant(user: str) -> list[dict]:
     """Genera lista de documentos desde payloads de Qdrant (deduplicado por filename)."""
     try:
         from agents.researcher.rag_retriever import list_user_documents

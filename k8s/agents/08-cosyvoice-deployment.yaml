@@ -43,7 +43,7 @@ spec:
     spec:
       containers:
         - name: cosyvoice
-          image: registry.richardx.dev/cosyvoice-service:1.0.9
+          image: registry.richardx.dev/cosyvoice-service:1.1.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8010

@@ -13,7 +13,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any
 
 logger = logging.getLogger("agents.productivity.planner")
 
@@ -88,7 +88,7 @@ def _format_emails(emails: list) -> str:
     return "\n".join(lines)
 
 
-async def organize_day_for_user(user_email: str) -> Dict[str, Any]:
+async def organize_day_for_user(user_email: str) -> dict[str, Any]:
     """
     Pipeline completo de organización del día para un usuario:
       1. Obtiene credenciales Google desde Vault
@@ -99,9 +99,9 @@ async def organize_day_for_user(user_email: str) -> Dict[str, Any]:
 
     Migrado desde productivity-service/app/services/planner_service.py → organize_day_for_user()
     """
+    from agents.productivity.calendar_manager import get_todays_events, sync_plan_to_calendar
+    from agents.productivity.email_manager import get_unread_emails
     from agents.productivity.vault_credentials import get_user_credentials
-    from agents.productivity.calendar_manager  import get_todays_events, sync_plan_to_calendar
-    from agents.productivity.email_manager     import get_unread_emails
 
     # 1. Credenciales
     credentials = get_user_credentials(user_email)

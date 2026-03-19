@@ -9,8 +9,8 @@ Migrado desde productivity-service/app/services/:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 logger = logging.getLogger("agents.productivity.calendar")
 
@@ -21,7 +21,7 @@ def _build_calendar_service(credentials):
     return build("calendar", "v3", credentials=credentials)
 
 
-def get_todays_events(credentials) -> List[Dict[str, Any]]:
+def get_todays_events(credentials) -> list[dict[str, Any]]:
     """
     Recupera los eventos del día actual del calendario del usuario.
 
@@ -30,7 +30,7 @@ def get_todays_events(credentials) -> List[Dict[str, Any]]:
     """
     try:
         service = _build_calendar_service(credentials)
-        now     = datetime.now(timezone.utc)
+        now     = datetime.now(UTC)
         start_of_day = now.replace(hour=0, minute=0, second=0).isoformat()
         end_of_day   = now.replace(hour=23, minute=59, second=59).isoformat()
 
@@ -70,7 +70,7 @@ def create_calendar_event(
     description: str = "",
     location: str = "",
     timezone_id: str = "America/Mexico_City",
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     Crea un evento en el calendario principal del usuario.
 
@@ -103,7 +103,7 @@ def create_calendar_event(
         return None
 
 
-def sync_plan_to_calendar(credentials, plan_data: Dict[str, Any]) -> int:
+def sync_plan_to_calendar(credentials, plan_data: dict[str, Any]) -> int:
     """
     Sincroniza un plan de día (generado por LLM) al calendario del usuario.
 

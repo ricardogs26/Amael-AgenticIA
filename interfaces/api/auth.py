@@ -5,13 +5,16 @@ Provee:
   - get_current_user(token)  — decodifica JWT → email del usuario
   - require_internal_secret  — verifica INTERNAL_API_SECRET (CronJobs / WhatsApp bridge)
   - check_rate_limit(user_id)— 15 req / 60s por usuario via Redis
+  - get_user_role(user_id)   — consulta PostgreSQL → rol del usuario
+  - has_min_role(role, req)  — compara nivel de rol (user < operator < admin)
+  - require_operator         — dependencia FastAPI: mínimo rol operator
 """
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Optional
+from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = logging.getLogger("interfaces.api.auth")
@@ -22,7 +25,7 @@ _bearer = HTTPBearer(auto_error=False)
 # ── JWT ───────────────────────────────────────────────────────────────────────
 
 def get_current_user(
-    credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(_bearer)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> str:
     """
     Dependencia FastAPI: extrae el email del usuario desde el JWT Bearer.
@@ -39,7 +42,8 @@ def get_current_user(
         )
 
     try:
-        from jose import JWTError, jwt
+        from jose import jwt
+
         from config.settings import settings
 
         payload = jwt.decode(
@@ -47,7 +51,7 @@ def get_current_user(
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
         )
-        user_id: Optional[str] = payload.get("sub") or payload.get("email")
+        user_id: str | None = payload.get("sub") or payload.get("email")
         if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -64,8 +68,75 @@ def get_current_user(
         )
 
 
+# ── RBAC — jerarquía de roles ─────────────────────────────────────────────────
+
+# Nivel numérico de cada rol: a mayor número, más privilegios.
+_ROLE_LEVELS: dict[str, int] = {
+    "user":     1,
+    "operator": 2,
+    "admin":    3,
+}
+
+
+def get_user_role(user_id: str) -> str:
+    """
+    Retorna el rol del usuario desde PostgreSQL.
+    Si user_id es un número de teléfono u otra identidad alternativa (WhatsApp),
+    resuelve el canonical_user_id via user_identities antes de consultar user_profile.
+    Devuelve "user" si el usuario no existe o si falla la consulta.
+    """
+    try:
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                # Búsqueda directa en user_profile
+                cur.execute(
+                    "SELECT role FROM user_profile WHERE user_id = %s",
+                    (user_id,),
+                )
+                row = cur.fetchone()
+                if row and row[0]:
+                    return row[0]
+                # Fallback: resolver identidad alternativa (ej. número WhatsApp)
+                cur.execute(
+                    "SELECT canonical_user_id FROM user_identities WHERE identity_value = %s",
+                    (user_id,),
+                )
+                identity = cur.fetchone()
+                if identity and identity[0]:
+                    cur.execute(
+                        "SELECT role FROM user_profile WHERE user_id = %s",
+                        (identity[0],),
+                    )
+                    row = cur.fetchone()
+                    return row[0] if row and row[0] else "user"
+                return "user"
+    except Exception as exc:
+        logger.warning(f"[auth] get_user_role falló para {user_id}: {exc}")
+        return "user"
+
+
+def has_min_role(user_role: str, required_role: str) -> bool:
+    """Devuelve True si user_role tiene al menos el nivel de required_role."""
+    return _ROLE_LEVELS.get(user_role, 0) >= _ROLE_LEVELS.get(required_role, 99)
+
+
+def require_operator(user_id: Annotated[str, Depends(get_current_user)]) -> str:
+    """
+    Dependencia FastAPI: exige rol 'operator' o superior (admin).
+    Lanza HTTP 403 si el usuario tiene rol 'user'.
+    """
+    role = get_user_role(user_id)
+    if not has_min_role(role, "operator"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso restringido: se requiere rol operator o admin",
+        )
+    return user_id
+
+
 def require_internal_secret(
-    authorization: Annotated[Optional[str], Header()] = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> None:
     """
     Dependencia para endpoints internos (CronJobs, WhatsApp bridge).
@@ -94,9 +165,9 @@ def check_rate_limit(user_id: str) -> None:
     Lanza HTTP 429 si se excede el límite.
     """
     try:
-        from storage.redis.client import get_client
         from config.settings import settings
         from observability.metrics import SECURITY_RATE_LIMITED_TOTAL
+        from storage.redis.client import get_client
 
         redis = get_client()
         key   = f"rate_limit:{user_id}"
