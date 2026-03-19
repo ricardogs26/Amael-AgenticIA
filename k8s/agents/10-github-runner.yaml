@@ -115,9 +115,12 @@ spec:
             - name: RUNNER_WORKDIR
               value: "/tmp/github-runner-work"
 
-            # No registrar como ephemeral (para que persista entre reinicios)
+            # Modo ephemeral: el runner se da de baja y sale tras cada job.
+            # K8s lo reinicia (restartPolicy: Always) para el siguiente job.
+            # "false" en la imagen se evalúa como truthy (if [ -n "$EPHEMERAL" ]),
+            # así que se usa "true" para alinear config con comportamiento real.
             - name: EPHEMERAL
-              value: "false"
+              value: "true"
 
             # Correr como usuario runner (UID 1001), no root
             - name: RUN_AS_ROOT
