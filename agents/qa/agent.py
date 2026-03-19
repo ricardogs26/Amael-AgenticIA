@@ -318,10 +318,10 @@ def _gh_headers() -> dict[str, str]:
 
 def _calc_duration(run: dict) -> int:
     try:
-        from datetime import datetime, timezone
+        from datetime import UTC, datetime
         fmt = "%Y-%m-%dT%H:%M:%SZ"
-        start = datetime.strptime(run["created_at"], fmt).replace(tzinfo=timezone.utc)
-        end   = datetime.strptime(run["updated_at"], fmt).replace(tzinfo=timezone.utc)
+        start = datetime.strptime(run["created_at"], fmt).replace(tzinfo=UTC)
+        end   = datetime.strptime(run["updated_at"], fmt).replace(tzinfo=UTC)
         return int((end - start).total_seconds())
     except Exception:
         return 0
