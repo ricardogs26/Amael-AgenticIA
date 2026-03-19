@@ -13,7 +13,6 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 logger = logging.getLogger("orchestration.router")
 
@@ -25,7 +24,7 @@ _MODEL_NAME = os.environ.get("MODEL_NAME", "qwen2.5:14b")
 class RoutingDecision:
     """Resultado del router: intent detectado y agentes a invocar."""
     intent: str
-    agents: List[str]
+    agents: list[str]
     confidence: float
     routing_reason: str
     llm_classified: bool = False
@@ -161,7 +160,7 @@ class AgentRouter:
             llm_classified=False,
         )
 
-    async def _route_with_llm(self, question: str) -> Optional[RoutingDecision]:
+    async def _route_with_llm(self, question: str) -> RoutingDecision | None:
         """
         Clasifica el intent usando el LLM cuando el keyword matching no aplica.
         Timeout de 10s — si falla, retorna None para usar el default.

@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Optional
 
 logger = logging.getLogger("agents.productivity.vault")
 
@@ -39,6 +38,7 @@ def _vault_client():
     Requiere VAULT_ADDR y VAULT_ROLE en el entorno.
     """
     import hvac
+
     from config.settings import get_settings
     settings = get_settings()
 
@@ -57,13 +57,12 @@ def _vault_client():
     return client
 
 
-def get_user_credentials(user_email: str) -> Optional[object]:
+def get_user_credentials(user_email: str) -> object | None:
     """
     Recupera las credenciales OAuth de Google desde Vault KV v2.
     Retorna None si el usuario no tiene credenciales o hubo un error.
     """
     try:
-        import hvac
         from google.oauth2.credentials import Credentials
 
         client = _vault_client()
@@ -118,6 +117,7 @@ def get_auth_flow():
     Migrado desde productivity-service/app/services/auth_service.py → get_auth_flow()
     """
     from google_auth_oauthlib.flow import Flow
+
     from config.settings import get_settings
     settings = get_settings()
 

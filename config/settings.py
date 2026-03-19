@@ -10,9 +10,7 @@ Uso:
 """
 from __future__ import annotations
 
-import os
 from functools import lru_cache
-from typing import List, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
@@ -76,8 +74,8 @@ class Settings(BaseSettings):
     )
 
     # ── OAuth (Google) ────────────────────────────────────────────────────────
-    google_client_id: Optional[str] = Field(default=None, alias="GOOGLE_CLIENT_ID")
-    google_client_secret: Optional[str] = Field(default=None, alias="GOOGLE_CLIENT_SECRET")
+    google_client_id: str | None = Field(default=None, alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str | None = Field(default=None, alias="GOOGLE_CLIENT_SECRET")
     google_redirect_uri: str = Field(
         default="https://amael-ia.richardx.dev/auth/callback",
         alias="GOOGLE_REDIRECT_URI",
@@ -103,7 +101,7 @@ class Settings(BaseSettings):
 
     # ── Qdrant ────────────────────────────────────────────────────────────────
     qdrant_url: str = Field(default="http://qdrant-service:6333", alias="QDRANT_URL")
-    qdrant_api_key: Optional[str] = Field(default=None, alias="QDRANT_API_KEY")
+    qdrant_api_key: str | None = Field(default=None, alias="QDRANT_API_KEY")
 
     # ── MinIO ─────────────────────────────────────────────────────────────────
     minio_endpoint: str = Field(default="minio-service:9000", alias="MINIO_ENDPOINT")

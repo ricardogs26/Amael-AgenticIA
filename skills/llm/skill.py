@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
 
 from core.skill_base import BaseSkill, SkillInput, SkillOutput
 
@@ -50,7 +49,7 @@ class InvokeInput(SkillInput):
     timeout_seconds: int = 60
 
 class ChatInput(SkillInput):
-    messages: List[Dict[str, str]]
+    messages: list[dict[str, str]]
     """Lista de {"role": "user"|"system"|"assistant", "content": str}"""
     temperature: float = 0.7
 
@@ -113,9 +112,7 @@ class LLMSkill(BaseSkill):
         import concurrent.futures
 
         try:
-            from langchain_core.messages import (
-                HumanMessage, SystemMessage, AIMessage
-            )
+            from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
             chat_llm = _get_chat_ollama()
 
             lc_messages = []

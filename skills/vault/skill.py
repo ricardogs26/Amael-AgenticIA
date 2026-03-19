@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.skill_base import BaseSkill, SkillInput, SkillOutput
 
@@ -35,7 +35,7 @@ class GetSecretInput(SkillInput):
 
 class PutSecretInput(SkillInput):
     path: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     mount: str = _VAULT_MOUNT
 
 class DeleteSecretInput(SkillInput):

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 logger = logging.getLogger("agents.productivity.email")
 
@@ -28,7 +28,7 @@ def _decode_body(data: str) -> str:
         return ""
 
 
-def get_unread_emails(credentials, max_results: int = 10) -> List[Dict[str, Any]]:
+def get_unread_emails(credentials, max_results: int = 10) -> list[dict[str, Any]]:
     """
     Recupera los últimos N emails no leídos del inbox del usuario.
 

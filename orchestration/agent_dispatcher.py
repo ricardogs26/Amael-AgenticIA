@@ -22,15 +22,32 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any
 
 from orchestration.agent_router import RoutingDecision
 
 logger = logging.getLogger("orchestration.dispatcher")
 
-# Intents que van directamente a un agente específico (sin LangGraph)
+# ── Permisos por agente ───────────────────────────────────────────────────────
+# Rol mínimo requerido para invocar cada agente via /api/chat.
+# Si un agente no aparece aquí el mínimo es "user".
+#
+# Jerarquía: user (1) < operator (2) < admin (3)
+_AGENT_MIN_ROLE: dict[str, str] = {
+    # operator+: pueden consultar SRE, hacer código y ver arquitectura
+    "raphael":    "operator",  # SRE — operator puede pedir status/diagnóstico
+    "gabriel":    "operator",  # GitHub commits y PRs
+    "raziel":     "operator",  # CTO / estrategia técnica
+    "uriel":      "operator",  # Arquitectura y ADRs
+    # admin only: operaciones destructivas o de entrega a producción
+    "camael":     "admin",     # CI/CD deploys y operaciones de entrega
+}
+# Agentes sin entrada = accesibles por cualquier usuario autenticado (rol "user")
+
+
+# ── Intents que van directamente a un agente específico (sin LangGraph)
 # Formato: "intent_keyword" → "agent_registry_name"
-_DIRECT_DISPATCH: Dict[str, str] = {
+_DIRECT_DISPATCH: dict[str, str] = {
     "sre":          "raphael",    # Raphael — SRE autónomo
     "productivity": "haniel",     # Haniel — Calendar/Gmail
     "research":     "sandalphon", # Sandalphon — RAG + web
@@ -38,10 +55,13 @@ _DIRECT_DISPATCH: Dict[str, str] = {
     "dev":          "gabriel",    # Gabriel — código y PRs
     "arch":         "uriel",      # Uriel — arquitectura
     "coding":       "gabriel",    # alias legacy → Gabriel
+    "coder":        "jophiel",    # Jophiel — generación/análisis de código en memoria
+    "devops":       "camael",     # Camael — CI/CD y operaciones de entrega
+    "qa":           "qa",         # Phanuel — ejecución de tests y reporte CI
 }
 
 # Intents que pasan por el pipeline LangGraph completo
-_PIPELINE_INTENTS = {"general", "kubernetes", "monitoring", "qa", "memory"}
+_PIPELINE_INTENTS = {"general", "kubernetes", "monitoring", "memory"}
 
 
 class AgentDispatcher:
@@ -58,12 +78,13 @@ class AgentDispatcher:
         self,
         question: str,
         user_id: str,
-        tools_map: Dict[str, Any],
-        routing_decision: Optional[RoutingDecision] = None,
+        tools_map: dict[str, Any],
+        routing_decision: RoutingDecision | None = None,
         request_id: str = "",
         conversation_id: str = "",
-        extra_metadata: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        extra_metadata: dict[str, Any] | None = None,
+        user_role: str = "user",
+    ) -> dict[str, Any]:
         """
         Ejecuta el request según el routing_decision.
 
@@ -86,6 +107,29 @@ class AgentDispatcher:
         start  = time.time()
 
         try:
+            # ── Verificar permiso de rol antes de despachar ───────────────────
+            if intent in _DIRECT_DISPATCH:
+                agent_name   = _DIRECT_DISPATCH[intent]
+                min_role     = _AGENT_MIN_ROLE.get(agent_name, "user")
+                from interfaces.api.auth import has_min_role
+                if not has_min_role(user_role, min_role):
+                    role_labels = {"operator": "operator o admin", "admin": "admin"}
+                    needed = role_labels.get(min_role, min_role)
+                    logger.warning(
+                        f"[dispatcher] Acceso denegado: user_id={user_id} "
+                        f"role={user_role} agent={agent_name} required={min_role}"
+                    )
+                    return {
+                        "final_answer":  (
+                            f"⛔ No tienes permiso para usar este agente. "
+                            f"Se requiere rol *{needed}*."
+                        ),
+                        "intent":        intent,
+                        "request_id":    request_id,
+                        "dispatch_mode": "denied",
+                        "elapsed_ms":    0.0,
+                    }
+
             if intent in _DIRECT_DISPATCH:
                 result = await self._dispatch_direct(
                     agent_name=_DIRECT_DISPATCH[intent],
@@ -139,8 +183,8 @@ class AgentDispatcher:
         intent: str,
         request_id: str,
         conversation_id: str,
-        extra_metadata: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        extra_metadata: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         """
         Invoca un agente especializado directamente, sin pasar por LangGraph.
         Más rápido para intents claros (SRE, Productivity, Researcher).
@@ -241,10 +285,10 @@ class AgentDispatcher:
         self,
         question: str,
         user_id: str,
-        tools_map: Dict[str, Any],
+        tools_map: dict[str, Any],
         request_id: str,
         conversation_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Ejecuta el pipeline LangGraph completo:
         planner → grouper → batch_executor → supervisor
@@ -295,11 +339,12 @@ _dispatcher = AgentDispatcher()
 async def dispatch(
     question: str,
     user_id: str,
-    tools_map: Dict[str, Any],
-    routing_decision: Optional[RoutingDecision] = None,
+    tools_map: dict[str, Any],
+    routing_decision: RoutingDecision | None = None,
     request_id: str = "",
     conversation_id: str = "",
-) -> Dict[str, Any]:
+    user_role: str = "user",
+) -> dict[str, Any]:
     """
     Shortcut funcional que usa la instancia global del dispatcher.
 
@@ -313,4 +358,5 @@ async def dispatch(
         routing_decision=routing_decision,
         request_id=request_id,
         conversation_id=conversation_id,
+        user_role=user_role,
     )

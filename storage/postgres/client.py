@@ -7,15 +7,15 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator, Optional
 
 import psycopg2
 from psycopg2 import pool as pg_pool
 
 logger = logging.getLogger("storage.postgres")
 
-_connection_pool: Optional[pg_pool.ThreadedConnectionPool] = None
+_connection_pool: pg_pool.ThreadedConnectionPool | None = None
 
 
 def init_pool(

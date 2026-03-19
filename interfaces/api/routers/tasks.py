@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -39,22 +39,22 @@ class AgentTaskRequest(BaseModel):
       user_id     — usuario propietario del contexto (para RAG y permisos)
     """
     agent_name: str          = Field(..., description="Nombre del agente destino")
-    task:       Dict[str, Any] = Field(..., description="Parámetros de la tarea (depende del agente)")
-    user_id:    Optional[str]  = Field(default=None, description="Sobreescribe el user_id del JWT")
+    task:       dict[str, Any] = Field(..., description="Parámetros de la tarea (depende del agente)")
+    user_id:    str | None  = Field(default=None, description="Sobreescribe el user_id del JWT")
 
 
 class AgentTaskResponse(BaseModel):
     success:    bool
     agent_name: str
-    output:     Optional[Dict[str, Any]]
-    error:      Optional[str]
+    output:     dict[str, Any] | None
+    error:      str | None
     elapsed_ms: float
     request_id: str
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _resolve_user_id(jwt_user: str, body_user_id: Optional[str], request: Request) -> str:
+def _resolve_user_id(jwt_user: str, body_user_id: str | None, request: Request) -> str:
     """
     Determina el user_id efectivo.
     Si body.user_id está presente y el caller es bot o interno → usar body.user_id.
@@ -139,7 +139,7 @@ async def agent_task(
 @router.get("/list")
 async def list_agents(
     _user_id: Annotated[str, Depends(get_current_user)],
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Lista todos los agentes registrados con sus capacidades."""
     from agents.base.agent_registry import AgentRegistry
     return AgentRegistry.list_agents()

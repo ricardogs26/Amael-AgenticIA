@@ -21,13 +21,13 @@ Uso rápido:
     # Health check de todas las tools
     status = await ToolRegistry.health_check_all()
 """
-from tools.registry import ToolRegistry, ToolNotFoundError, register_all_tools
+from tools.github.tool import GitHubTool
+from tools.grafana.tool import GrafanaTool
 
 # Tools individuales
 from tools.prometheus.tool import PrometheusTool
-from tools.grafana.tool    import GrafanaTool
-from tools.whatsapp.tool   import WhatsAppTool
-from tools.github.tool     import GitHubTool
+from tools.registry import ToolNotFoundError, ToolRegistry, register_all_tools
+from tools.whatsapp.tool import WhatsAppTool
 
 __all__ = [
     # Registry

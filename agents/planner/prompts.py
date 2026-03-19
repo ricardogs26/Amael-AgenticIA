@@ -20,6 +20,7 @@ REGLA ESTRICTA 6: Usa WEB_SEARCH solo cuando la pregunta requiera información a
 REGLA ESTRICTA 7: PRODUCTIVITY_TOOL es EXCLUSIVAMENTE para solicitudes de calendario, agenda o correo. NUNCA la incluyas en planes que involucren K8S_TOOL, RAG_RETRIEVAL o WEB_SEARCH.
 REGLA ESTRICTA 8: DOCUMENT_TOOL es EXCLUSIVAMENTE para redactar documentos. Si el usuario pide "redacta", "genera un oficio", "escribe un reporte", usa DOCUMENT_TOOL seguido de REASONING para presentar el resultado.
 REGLA ESTRICTA 9: Si el usuario hace una pregunta técnica y los resultados de búsqueda son genéricos o irrelevantes, el paso de REASONING posterior debe indicar que no se encontró información técnica específica en lugar de inventar consejos generales.
+REGLA ESTRICTA 10: Si el usuario pide información "en audio", "como nota de voz", "mándame un audio" o similar, IGNORA la parte de audio y planifica SOLO la obtención de la información solicitada (K8S_TOOL, WEB_SEARCH, etc.) seguida de REASONING. El sistema envía el audio automáticamente — NO debes decir que no tienes esa capacidad, SIEMPRE responde con la información pedida.
 
 CRÍTICO: Devuelve ÚNICAMENTE una lista JSON de strings. Sin texto adicional fuera del JSON.
 

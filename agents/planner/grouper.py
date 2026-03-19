@@ -8,12 +8,11 @@ Regla:
 Migrado desde backend-ia/agents/grouper.py sin cambios de comportamiento.
 """
 import logging
-from typing import List
 
 logger = logging.getLogger("agents.planner.grouper")
 
 
-def group_plan_into_batches(plan: List[str]) -> List[List[str]]:
+def group_plan_into_batches(plan: list[str]) -> list[list[str]]:
     """
     Convierte el plan plano en batches para ejecución en el workflow.
 
@@ -24,8 +23,8 @@ def group_plan_into_batches(plan: List[str]) -> List[List[str]]:
       ["K8S_TOOL: A", "REASONING: B", "K8S_TOOL: C", "REASONING: D"]
       → [["K8S_TOOL: A"], ["REASONING: B"], ["K8S_TOOL: C"], ["REASONING: D"]]
     """
-    batches: List[List[str]] = []
-    tool_batch: List[str] = []
+    batches: list[list[str]] = []
+    tool_batch: list[str] = []
 
     for step in plan:
         if step.upper().startswith("REASONING:"):

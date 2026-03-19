@@ -12,8 +12,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
-from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("agents.sre.diagnoser")
 
@@ -29,8 +27,9 @@ _diag_llm = None
 def _get_diag_llm():
     global _diag_llm
     if _diag_llm is None:
-        from config.settings import settings
         from langchain_ollama import OllamaLLM
+
+        from config.settings import settings
         _diag_llm = OllamaLLM(
             model=settings.llm_model,
             base_url=settings.ollama_base_url,
@@ -38,7 +37,7 @@ def _get_diag_llm():
     return _diag_llm
 
 
-def _get_embedding(text: str) -> Optional[List[float]]:
+def _get_embedding(text: str) -> list[float] | None:
     """Genera embedding via Ollama nomic-embed-text."""
     try:
         import requests as _req
@@ -63,7 +62,6 @@ def search_runbooks(issue_type: str, details: str) -> str:
     """
     try:
         from qdrant_client import QdrantClient
-        from qdrant_client.models import NamedVector
 
         query_text = f"{issue_type}: {details}"
         embedding  = _get_embedding(query_text)
@@ -223,9 +221,10 @@ def maybe_save_runbook_entry(anomaly, root_cause: str, action_taken: str) -> Non
         return
 
     try:
+        import uuid
+
         from qdrant_client import QdrantClient
         from qdrant_client.models import PointStruct
-        import uuid
 
         client = QdrantClient(url=_QDRANT_URL)
         point = PointStruct(

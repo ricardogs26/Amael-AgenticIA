@@ -9,7 +9,7 @@ El estado es un TypedDict que fluye a través del grafo:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, TypedDict
 
 
 class AgentState(TypedDict):
@@ -41,13 +41,13 @@ class AgentState(TypedDict):
 
     # ── Pipeline original ─────────────────────────────────────────────────────
     question: str
-    plan: List[str]
-    batches: List[List[str]]
+    plan: list[str]
+    batches: list[list[str]]
     current_batch: int
     current_step: int
     context: str
-    tool_results: List[Dict[str, Any]]
-    final_answer: Optional[str]
+    tool_results: list[dict[str, Any]]
+    final_answer: str | None
     user_id: str
 
     # ── Supervisor (P3) ───────────────────────────────────────────────────────
@@ -57,19 +57,19 @@ class AgentState(TypedDict):
     supervisor_decision: str       # "ACCEPT" | "REPLAN"
 
     # ── Tools inyectadas por request (P5-2) ───────────────────────────────────
-    tools_map: Dict[str, Any]
+    tools_map: dict[str, Any]
 
     # ── Campos extendidos (nueva arquitectura) ────────────────────────────────
     request_id: str
     conversation_id: str
     routing_intent: str            # intent del AgentRouter
-    agents_invoked: List[str]      # agentes que participaron
+    agents_invoked: list[str]      # agentes que participaron
 
 
 def initial_state(
     question: str,
     user_id: str,
-    tools_map: Dict[str, Any],
+    tools_map: dict[str, Any],
     request_id: str = "",
     conversation_id: str = "",
 ) -> AgentState:

@@ -14,9 +14,8 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from pydantic import Field
 from core.skill_base import BaseSkill, SkillInput, SkillOutput
 
 logger = logging.getLogger("skill.kubernetes")
@@ -49,7 +48,8 @@ class GetEventsInput(SkillInput):
 # ── K8s client factory ────────────────────────────────────────────────────────
 
 def _get_core_v1():
-    from kubernetes import client, config as k8s_config
+    from kubernetes import client
+    from kubernetes import config as k8s_config
     try:
         k8s_config.load_incluster_config()
     except Exception:
@@ -57,7 +57,8 @@ def _get_core_v1():
     return client.CoreV1Api()
 
 def _get_apps_v1():
-    from kubernetes import client, config as k8s_config
+    from kubernetes import client
+    from kubernetes import config as k8s_config
     try:
         k8s_config.load_incluster_config()
     except Exception:
@@ -95,7 +96,7 @@ class KubernetesSkill(BaseSkill):
         """Lista pods de un namespace con estado, phase y conteo de reinicios."""
         try:
             v1    = _get_core_v1()
-            kwargs: Dict[str, Any] = {"namespace": input.namespace}
+            kwargs: dict[str, Any] = {"namespace": input.namespace}
             if input.label_selector:
                 kwargs["label_selector"] = input.label_selector
 
@@ -255,7 +256,7 @@ class KubernetesSkill(BaseSkill):
         """Retorna los últimos N eventos del namespace (Warning primero)."""
         try:
             v1  = _get_core_v1()
-            kwargs: Dict[str, Any] = {"namespace": input.namespace}
+            kwargs: dict[str, Any] = {"namespace": input.namespace}
             if input.field_selector:
                 kwargs["field_selector"] = input.field_selector
 
@@ -283,7 +284,8 @@ class KubernetesSkill(BaseSkill):
     async def health_check(self) -> bool:
         """Verifica que la API de Kubernetes responde."""
         try:
-            from kubernetes import client, config as k8s_config
+            from kubernetes import client
+            from kubernetes import config as k8s_config
             try:
                 k8s_config.load_incluster_config()
             except Exception:

@@ -2,9 +2,9 @@
 tools.grafana — Dashboards e imágenes Grafana.
 """
 from tools.grafana.tool import (
+    GetDashboardInput,
     GrafanaTool,
     ListDashboardsInput,
-    GetDashboardInput,
     ScreenshotInput,
     SearchDashboardsInput,
 )

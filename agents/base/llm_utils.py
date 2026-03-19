@@ -44,6 +44,7 @@ async def invoke_llm(prompt: str, context: Any, agent_name: str = "agent") -> st
     # Intentar vía ChatOllama singleton
     try:
         from langchain_core.messages import HumanMessage, SystemMessage
+
         from skills.llm.skill import _get_chat_ollama
 
         chat_llm = _get_chat_ollama()

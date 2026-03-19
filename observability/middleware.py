@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Callable
+from collections.abc import Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -25,7 +25,7 @@ from starlette.responses import Response
 from starlette.types import ASGIApp
 
 from observability.logging import set_log_context
-from observability.metrics import HTTP_REQUESTS_TOTAL, HTTP_REQUEST_LATENCY_SECONDS
+from observability.metrics import HTTP_REQUEST_LATENCY_SECONDS, HTTP_REQUESTS_TOTAL
 
 logger = logging.getLogger("observability.middleware")
 

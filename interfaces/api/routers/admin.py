@@ -15,9 +15,8 @@ Endpoints:
 """
 from __future__ import annotations
 
-import json
 import logging
-from typing import Annotated, List, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -63,33 +62,33 @@ class IdentityOut(BaseModel):
 
 class AdminUser(BaseModel):
     user_id:      str
-    display_name: Optional[str]
+    display_name: str | None
     role:         str
     status:       str
-    identities:   List[IdentityOut] = []
+    identities:   list[IdentityOut] = []
 
 class CreateUserRequest(BaseModel):
     email:        str
-    display_name: Optional[str] = None
+    display_name: str | None = None
     role:         str = "user"
-    phone:        Optional[str] = None
+    phone:        str | None = None
 
 class UpdateUserRequest(BaseModel):
-    display_name: Optional[str] = None
-    role:         Optional[str] = None
-    status:       Optional[str] = None
+    display_name: str | None = None
+    role:         str | None = None
+    status:       str | None = None
 
 class AddIdentityRequest(BaseModel):
     identity_type:  str   # "whatsapp"
     identity_value: str
 
 class SettingsUpdate(BaseModel):
-    allow_access_requests: Optional[bool] = None
+    allow_access_requests: bool | None = None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _load_users(cur) -> List[AdminUser]:
+def _load_users(cur) -> list[AdminUser]:
     cur.execute(
         "SELECT user_id, display_name, role, status FROM user_profile ORDER BY user_id"
     )
@@ -195,11 +194,14 @@ def update_user(
                 updates = []
                 params  = []
                 if body.display_name is not None:
-                    updates.append("display_name = %s"); params.append(body.display_name)
+                    updates.append("display_name = %s")
+                    params.append(body.display_name)
                 if body.role is not None:
-                    updates.append("role = %s"); params.append(body.role)
+                    updates.append("role = %s")
+                    params.append(body.role)
                 if body.status is not None:
-                    updates.append("status = %s"); params.append(body.status)
+                    updates.append("status = %s")
+                    params.append(body.status)
                 if not updates:
                     return {"status": "ok"}
                 updates.append("updated_at = NOW()")

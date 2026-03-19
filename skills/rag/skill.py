@@ -12,7 +12,7 @@ Wrapper sobre agents/researcher/rag_retriever.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.skill_base import BaseSkill, SkillInput, SkillOutput
 
@@ -28,8 +28,8 @@ class RetrieveInput(SkillInput):
 
 class IngestInput(SkillInput):
     user_email: str
-    chunks: List[str]
-    metadata: Dict[str, Any] = {}
+    chunks: list[str]
+    metadata: dict[str, Any] = {}
 
 class ListDocsInput(SkillInput):
     user_email: str

@@ -54,6 +54,12 @@ dependencies = [
     "python-magic>=0.4.27",
     "Pillow>=10.3.0",
     "numpy>=1.26.0",
+    "hvac>=2.1.0",
+    "google-auth>=2.29.0",
+    "google-auth-oauthlib>=1.2.0",
+
+    # Transcripción de audio (notas de voz WhatsApp)
+    "faster-whisper>=1.0.0",
 ]
 
 [project.optional-dependencies]

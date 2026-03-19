@@ -24,10 +24,9 @@ Uso:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Type
 
-from core.tool_base import BaseTool
 from core.exceptions import AmaelError
+from core.tool_base import BaseTool
 
 logger = logging.getLogger("tools.registry")
 
@@ -47,13 +46,13 @@ class ToolRegistry:
       - health_check_all(): verifica conectividad de todas las tools registradas
     """
 
-    _classes:   Dict[str, Type[BaseTool]] = {}   # nombre → clase
-    _instances: Dict[str, BaseTool]       = {}   # nombre → instancia singleton
+    _classes:   dict[str, type[BaseTool]] = {}   # nombre → clase
+    _instances: dict[str, BaseTool]       = {}   # nombre → instancia singleton
 
     # ── Registro ──────────────────────────────────────────────────────────────
 
     @classmethod
-    def register(cls, tool_class: Type[BaseTool]) -> Type[BaseTool]:
+    def register(cls, tool_class: type[BaseTool]) -> type[BaseTool]:
         """
         Decorador para registrar una Tool.
 
@@ -92,7 +91,7 @@ class ToolRegistry:
         return cls._instances[name]
 
     @classmethod
-    def get_or_none(cls, name: str) -> Optional[BaseTool]:
+    def get_or_none(cls, name: str) -> BaseTool | None:
         """Retorna la instancia singleton o None si no está registrada."""
         try:
             return cls.get(name)
@@ -102,12 +101,12 @@ class ToolRegistry:
     # ── Introspección ─────────────────────────────────────────────────────────
 
     @classmethod
-    def names(cls) -> List[str]:
+    def names(cls) -> list[str]:
         """Lista de nombres de tools registradas."""
         return list(cls._classes.keys())
 
     @classmethod
-    def all_tools(cls) -> Dict[str, BaseTool]:
+    def all_tools(cls) -> dict[str, BaseTool]:
         """Retorna un dict con todas las tools instanciadas."""
         return {name: cls.get(name) for name in cls._classes}
 
@@ -126,14 +125,14 @@ class ToolRegistry:
     # ── Health check ──────────────────────────────────────────────────────────
 
     @classmethod
-    async def health_check_all(cls) -> Dict[str, bool]:
+    async def health_check_all(cls) -> dict[str, bool]:
         """
         Ejecuta health_check() en todas las tools registradas.
 
         Returns:
             Dict {tool_name: bool} — True si la tool está disponible.
         """
-        results: Dict[str, bool] = {}
+        results: dict[str, bool] = {}
         for name in cls._classes:
             try:
                 tool    = cls.get(name)
@@ -162,6 +161,7 @@ def register_all_tools() -> None:
         ("tools.whatsapp.tool",    "WhatsAppTool"),
         ("tools.github.tool",      "GitHubTool"),
         ("tools.piper.tool",       "PiperTool"),
+        ("tools.cosyvoice.tool",   "CosyVoiceTool"),  # TTS alta calidad → notas de voz WA
     ]
 
     for module_path, class_name in _tools:

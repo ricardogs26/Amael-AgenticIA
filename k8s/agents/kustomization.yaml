@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - 05-backend-deployment.yaml
+  - 07-day-planner-cronjob.yaml
+  - 08-cosyvoice-deployment.yaml
+  - 08-morning-audio-cronjob.yaml
+  - 09-piper-deployment.yaml
+  - 10-github-runner.yaml

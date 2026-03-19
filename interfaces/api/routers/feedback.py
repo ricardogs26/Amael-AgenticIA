@@ -3,7 +3,7 @@ Router /api/feedback — recibe feedback de mensajes del frontend-next.
 """
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -14,8 +14,8 @@ router = APIRouter(prefix="/api", tags=["feedback"])
 
 
 class FeedbackRequest(BaseModel):
-    conversation_id: Optional[str] = None
-    message_index:   Optional[int] = None
+    conversation_id: str | None = None
+    message_index:   int | None = None
     sentiment:       str            # "positive" | "negative"
 
 
