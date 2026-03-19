@@ -10,7 +10,6 @@ from core.constants import MAX_PROMPT_CHARS
 from core.exceptions import PromptInjectionError
 from security.validator import validate_prompt, validate_prompt_strict
 
-
 # ── Casos válidos ─────────────────────────────────────────────────────────────
 
 class TestValidatePromptValid:

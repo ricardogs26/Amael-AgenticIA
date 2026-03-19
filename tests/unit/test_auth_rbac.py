@@ -11,11 +11,9 @@ Nota: get_user_role() usa un import lazy (dentro de la función):
 Se mockea a nivel de sys.modules para interceptar el import perezoso.
 """
 import sys
-import pytest
 from unittest.mock import MagicMock, patch
 
-from interfaces.api.auth import has_min_role, get_user_role
-
+from interfaces.api.auth import get_user_role, has_min_role
 
 # ── has_min_role ──────────────────────────────────────────────────────────────
 
