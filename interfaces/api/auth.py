@@ -81,18 +81,36 @@ _ROLE_LEVELS: dict[str, int] = {
 def get_user_role(user_id: str) -> str:
     """
     Retorna el rol del usuario desde PostgreSQL.
+    Si user_id es un número de teléfono u otra identidad alternativa (WhatsApp),
+    resuelve el canonical_user_id via user_identities antes de consultar user_profile.
     Devuelve "user" si el usuario no existe o si falla la consulta.
     """
     try:
         from storage.postgres.client import get_connection
         with get_connection() as conn:
             with conn.cursor() as cur:
+                # Búsqueda directa en user_profile
                 cur.execute(
                     "SELECT role FROM user_profile WHERE user_id = %s",
                     (user_id,),
                 )
                 row = cur.fetchone()
-                return row[0] if row and row[0] else "user"
+                if row and row[0]:
+                    return row[0]
+                # Fallback: resolver identidad alternativa (ej. número WhatsApp)
+                cur.execute(
+                    "SELECT canonical_user_id FROM user_identities WHERE identity_value = %s",
+                    (user_id,),
+                )
+                identity = cur.fetchone()
+                if identity and identity[0]:
+                    cur.execute(
+                        "SELECT role FROM user_profile WHERE user_id = %s",
+                        (identity[0],),
+                    )
+                    row = cur.fetchone()
+                    return row[0] if row and row[0] else "user"
+                return "user"
     except Exception as exc:
         logger.warning(f"[auth] get_user_role falló para {user_id}: {exc}")
         return "user"
