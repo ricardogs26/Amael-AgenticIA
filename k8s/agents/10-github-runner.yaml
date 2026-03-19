@@ -126,10 +126,10 @@ spec:
           resources:
             requests:
               cpu: "250m"
-              memory: "256Mi"
-            limits:
-              cpu: "1"
               memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
 
           # El runner necesita escribir en /tmp para los jobs
           volumeMounts:

@@ -5,7 +5,7 @@ metadata:
   namespace: amael-ia
   labels:
     app: amael-agentic-backend
-    version: "1.8.1"
+    version: "1.9.3"
 spec:
   replicas: 1
   selector:
@@ -20,7 +20,7 @@ spec:
     metadata:
       labels:
         app: amael-agentic-backend
-        version: "1.8.1"
+        version: "1.9.3"
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port:   "8000"
