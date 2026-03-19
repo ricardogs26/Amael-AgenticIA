@@ -4,6 +4,7 @@ Router /api/devops — webhooks y operaciones DevOps (Camael).
 Endpoints:
   POST /api/devops/ci-hook   — GitHub webhook para workflow_run events
                                Notifica por WhatsApp cuando un workflow falla
+                             — pull_request events: notifica cuando se abre un PR hacia main
 """
 from __future__ import annotations
 
@@ -55,6 +56,10 @@ async def github_ci_hook(request: Request):
         raise HTTPException(status_code=400, detail="Payload JSON inválido")
 
     event_type = request.headers.get("X-GitHub-Event", "")
+
+    if event_type == "pull_request":
+        return await _handle_pull_request(payload)
+
     if event_type != "workflow_run":
         # Ignorar otros eventos (ping, push, etc.)
         return {"status": "ignored", "event": event_type}
@@ -94,6 +99,43 @@ async def github_ci_hook(request: Request):
     # cancelled, skipped, timed_out, action_required, neutral, stale
     logger.info(f"[devops/ci-hook] conclusion={conclusion} — sin acción")
     return {"status": "ignored", "conclusion": conclusion}
+
+
+# ── Pull Request handler ──────────────────────────────────────────────────────
+
+async def _handle_pull_request(payload: dict) -> dict:
+    """
+    Maneja eventos pull_request de GitHub.
+    Notifica por WhatsApp cuando se abre (o re-abre) un PR cuyo base es 'main'.
+    """
+    action = payload.get("action", "")
+    if action not in ("opened", "reopened", "ready_for_review"):
+        return {"status": "ignored", "action": action}
+
+    pr   = payload.get("pull_request", {})
+    base = pr.get("base", {}).get("ref", "")
+    if base != "main":
+        return {"status": "ignored", "base": base}
+
+    number  = pr.get("number", "?")
+    title   = pr.get("title", "sin título")
+    author  = pr.get("user", {}).get("login", "unknown")
+    head    = pr.get("head", {}).get("ref", "?")
+    pr_url  = pr.get("html_url", "")
+    draft   = pr.get("draft", False)
+
+    estado = "📝 *Draft PR*" if draft else "🔔 *PR listo para revisión*"
+    msg = (
+        f"{estado}\n"
+        f"• #{number}: {title}\n"
+        f"• Rama: `{head}` → `main`\n"
+        f"• Autor: @{author}\n"
+        f"• {pr_url}"
+    )
+
+    logger.info(f"[devops/ci-hook] PR #{number} abierto hacia main por @{author}")
+    await _notify_whatsapp(msg)
+    return {"status": "notified", "pr": number, "action": action}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
