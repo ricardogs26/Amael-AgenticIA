@@ -567,7 +567,8 @@ async def _send_voice_note(phone: str, text: str) -> None:
 
     # 1. Piper (rápido, estable, voz latina consistente)
     try:
-        from tools.piper.tool import PiperTool, SynthesizeAndSendInput as PiperInput
+        from tools.piper.tool import PiperTool
+        from tools.piper.tool import SynthesizeAndSendInput as PiperInput
         result = await PiperTool().synthesize_and_send(
             PiperInput(text=truncated, phone=phone)
         )
@@ -580,7 +581,8 @@ async def _send_voice_note(phone: str, text: str) -> None:
 
     # 2. Fallback a CosyVoice
     try:
-        from tools.cosyvoice.tool import CosyVoiceTool, SynthesizeAndSendInput as CosyInput
+        from tools.cosyvoice.tool import CosyVoiceTool
+        from tools.cosyvoice.tool import SynthesizeAndSendInput as CosyInput
         result = await CosyVoiceTool().synthesize_and_send(
             CosyInput(text=truncated, phone=phone, language="es")
         )
