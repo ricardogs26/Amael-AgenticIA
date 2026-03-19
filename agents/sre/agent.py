@@ -471,15 +471,14 @@ def _build_system_prompt() -> str:
     )
 
 
-# ── LangGraph ReAct agent (primary) + LangChain fallback ─────────────────────
+# ── LangGraph ReAct agent ─────────────────────────────────────────────────────
 
 _langgraph_agent   = None
-_classic_agent     = None
 _langgraph_enabled = False
 
 
 def _get_langgraph_agent():
-    """Lazy init del agente LangGraph ReAct (primary)."""
+    """Lazy init del agente LangGraph ReAct."""
     global _langgraph_agent, _langgraph_enabled
     if _langgraph_agent is not None:
         return _langgraph_agent
@@ -494,34 +493,9 @@ def _get_langgraph_agent():
         )
         _langgraph_enabled = True
         logger.info("[sre.agent] LangGraph ReAct compilado correctamente.")
-    except ImportError as exc:
-        logger.warning(f"[sre.agent] LangGraph no disponible ({exc}). Usando fallback clásico.")
     except Exception as exc:
-        logger.warning(f"[sre.agent] Error compilando LangGraph ({exc}). Usando fallback clásico.")
+        logger.error(f"[sre.agent] Error compilando LangGraph: {exc}")
     return _langgraph_agent
-
-
-def _get_classic_agent():
-    """Lazy init del agente LangChain clásico (fallback)."""
-    global _classic_agent
-    if _classic_agent is not None:
-        return _classic_agent
-
-    from langchain.agents import initialize_agent
-    _classic_agent = initialize_agent(
-        _build_tools(),
-        _get_classic_llm(),
-        agent="zero-shot-react-description",
-        verbose=True,
-        handle_parsing_errors="Use 'Action:' and 'Action Input:' or 'Final Answer:'.",
-        max_iterations=10,
-        early_stopping_method="generate",
-        agent_kwargs={
-            "prefix": _build_system_prompt(),
-            "suffix": "Pregunta: {input}\n{agent_scratchpad}",
-        },
-    )
-    return _classic_agent
 
 
 def query_agent(query: str) -> str:
@@ -549,30 +523,23 @@ def query_agent(query: str) -> str:
             logger.error(f"[sre.agent] Vault LLM error: {exc}")
             return f"❌ Error consultando Vault: {exc}"
 
-    # Primary: LangGraph ReAct
+    # LangGraph ReAct
     lg_agent = _get_langgraph_agent()
-    if lg_agent is not None:
-        try:
-            from langchain_core.messages import HumanMessage
-            result = lg_agent.invoke({"messages": [HumanMessage(content=query)]})
-            messages = result.get("messages", [])
-            # El último mensaje es la respuesta final del agente
-            if messages:
-                last = messages[-1]
-                content = last.content if hasattr(last, "content") else str(last)
-                SRE_LANGGRAPH_REQUESTS.labels(result="ok").inc()
-                return content
-        except Exception as exc:
-            logger.warning(f"[sre.agent] LangGraph error ({exc}). Usando fallback clásico.")
-            SRE_LANGGRAPH_REQUESTS.labels(result="error").inc()
-
-    # Fallback: LangChain clásico
+    if lg_agent is None:
+        return "❌ Agente SRE no disponible: error inicializando LangGraph."
     try:
-        result = _get_classic_agent().run(query)
-        SRE_LANGGRAPH_REQUESTS.labels(result="fallback").inc()
-        return result
+        from langchain_core.messages import HumanMessage
+        result = lg_agent.invoke({"messages": [HumanMessage(content=query)]})
+        messages = result.get("messages", [])
+        if messages:
+            last = messages[-1]
+            content = last.content if hasattr(last, "content") else str(last)
+            SRE_LANGGRAPH_REQUESTS.labels(result="ok").inc()
+            return content
+        SRE_LANGGRAPH_REQUESTS.labels(result="ok").inc()
+        return "Sin respuesta del agente."
     except Exception as exc:
-        logger.error(f"[sre.agent] Classic agent error: {exc}")
+        logger.error(f"[sre.agent] LangGraph error: {exc}")
         SRE_LANGGRAPH_REQUESTS.labels(result="error").inc()
         return f"❌ Error ejecutando agente SRE: {exc}"
 
