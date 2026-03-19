@@ -12,7 +12,7 @@ Módulos:
   agent     — SREAgent (BaseAgent), start_sre_loop, init_sre_db, init_runbooks_qdrant
 """
 from agents.sre.agent import (
-    SREAgent,
+    RaphaelAgent as SREAgent,
     get_scheduler,
     init_runbooks_qdrant,
     init_sre_db,

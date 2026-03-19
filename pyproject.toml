@@ -57,6 +57,9 @@ dependencies = [
     "hvac>=2.1.0",
     "google-auth>=2.29.0",
     "google-auth-oauthlib>=1.2.0",
+
+    # Transcripción de audio (notas de voz WhatsApp)
+    "faster-whisper>=1.0.0",
 ]
 
 [project.optional-dependencies]

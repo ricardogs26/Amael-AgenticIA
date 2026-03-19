@@ -8,7 +8,7 @@ Módulos:
   day_planner       — Pipeline LLM: eventos + emails → plan → calendario
   agent             — ProductivityAgent(BaseAgent) registrado en AgentRegistry
 """
-from agents.productivity.agent import ProductivityAgent
+from agents.productivity.agent import HanielAgent as ProductivityAgent
 from agents.productivity.calendar_manager import (
     create_calendar_event,
     get_todays_events,

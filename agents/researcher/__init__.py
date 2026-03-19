@@ -6,7 +6,7 @@ Módulos:
   web_searcher  — DuckDuckGo + fast-path tipo de cambio
   agent         — ResearchAgent(BaseAgent) registrado en AgentRegistry
 """
-from agents.researcher.agent import ResearchAgent
+from agents.researcher.agent import SandalphonAgent as ResearchAgent
 from agents.researcher.rag_retriever import (
     delete_user_collection,
     get_user_vectorstore,
