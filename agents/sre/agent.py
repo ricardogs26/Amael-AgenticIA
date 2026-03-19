@@ -507,11 +507,11 @@ def _get_classic_agent():
     if _classic_agent is not None:
         return _classic_agent
 
-    from langchain.agents import AgentType, initialize_agent
+    from langchain.agents import initialize_agent
     _classic_agent = initialize_agent(
         _build_tools(),
         _get_classic_llm(),
-        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+        agent="zero-shot-react-description",
         verbose=True,
         handle_parsing_errors="Use 'Action:' and 'Action Input:' or 'Final Answer:'.",
         max_iterations=10,
