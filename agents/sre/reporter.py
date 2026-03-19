@@ -109,7 +109,8 @@ def get_recent_incidents(limit: int = 10) -> list[dict]:
                 cur.execute(
                     """
                     SELECT incident_key, created_at, namespace, resource_name,
-                           issue_type, severity, action_taken, action_result, confidence
+                           issue_type, severity, details, root_cause, confidence,
+                           action_taken, action_result
                     FROM sre_incidents
                     ORDER BY created_at DESC
                     LIMIT %s;
