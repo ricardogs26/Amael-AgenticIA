@@ -43,8 +43,10 @@ class SRECommandRequest(BaseModel):
 def get_loop_status() -> dict[str, Any]:
     """Estado del loop SRE: circuit breaker, mantenimiento, config."""
     try:
+        import dataclasses
         from agents.sre import get_loop_state
-        return get_loop_state()
+        state = get_loop_state()
+        return dataclasses.asdict(state) if dataclasses.is_dataclass(state) else state
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

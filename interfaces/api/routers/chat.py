@@ -38,6 +38,9 @@ class ChatRequest(BaseModel):
     # phone opcional: número WhatsApp original del remitente (enviado por whatsapp-bridge)
     # permite enviar nota de voz aunque canonical_user_id sea un email
     phone:           str | None = None
+    # audio_base64: nota de voz recibida por WhatsApp — se transcribe antes de procesar
+    audio_base64:    str | None = None
+    audio_mimetype:  str | None = Field(default="audio/ogg; codecs=opus")
 
     @property
     def effective_question(self) -> str:
@@ -112,6 +115,31 @@ async def chat(
         user_id=effective_user,
         conversation_id=conversation_id,
     )
+
+    # Transcripción de audio (si viene nota de voz de WhatsApp)
+    if body.audio_base64:
+        try:
+            from audio.transcriber import transcribe_audio_base64
+            transcript = await asyncio.get_event_loop().run_in_executor(
+                None,
+                transcribe_audio_base64,
+                body.audio_base64,
+                body.audio_mimetype or "audio/ogg; codecs=opus",
+            )
+            if transcript:
+                logger.info(f"[chat] Audio transcripto: '{transcript[:80]}'")
+                # Sobreescribe el prompt con el texto transcripto
+                body = body.model_copy(update={"question": transcript, "prompt": None, "audio_base64": None})
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="No se detectó voz en el audio enviado.",
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error(f"[chat] Error transcribiendo audio: {exc}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al transcribir el audio.")
 
     # Input validation
     from security.validator import validate_prompt
@@ -245,6 +273,9 @@ async def chat_stream(
         conversation_id=conversation_id,
     )
 
+    from interfaces.api.auth import get_user_role
+    user_role = get_user_role(user_id)
+
     from security.validator import validate_prompt
     valid, result = validate_prompt(body.prompt or "")
     if not valid:
@@ -270,6 +301,7 @@ async def chat_stream(
                 routing_decision=decision,
                 request_id=request_id,
                 conversation_id=conversation_id,
+                user_role=user_role,
             )
 
             from security.sanitizer import sanitize_output
