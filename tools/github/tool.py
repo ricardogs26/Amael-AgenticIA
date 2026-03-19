@@ -402,8 +402,20 @@ class GitHubTool(BaseTool):
                     source=self.name,
                 )
             if resp.status_code == 422:
+                # La rama ya existe — resetearla al SHA actual de from_ref (force update)
+                patch_resp = _req.patch(
+                    f"{_GITHUB_API}/repos/{input.owner}/{input.repo}/git/refs/heads/{input.branch}",
+                    headers=_headers(),
+                    json={"sha": sha, "force": True},
+                    timeout=15,
+                )
+                if patch_resp.status_code == 200:
+                    return ToolOutput.ok(
+                        data={"branch": input.branch, "sha": sha, "from_ref": input.from_ref, "reset": True},
+                        source=self.name,
+                    )
                 return ToolOutput.fail(
-                    f"La rama '{input.branch}' ya existe.",
+                    f"La rama '{input.branch}' ya existe y no se pudo resetear: HTTP {patch_resp.status_code}",
                     source=self.name,
                 )
             return ToolOutput.fail(
