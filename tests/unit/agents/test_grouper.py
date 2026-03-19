@@ -8,7 +8,6 @@ Verifica la lógica de agrupación de pasos del plan en batches paralelos:
 """
 from agents.planner.grouper import group_plan_into_batches
 
-
 # ── Casos básicos ─────────────────────────────────────────────────────────────
 
 class TestGroupPlanIntoBatchesBasic:
