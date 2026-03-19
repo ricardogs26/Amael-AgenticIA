@@ -57,10 +57,11 @@ _DIRECT_DISPATCH: dict[str, str] = {
     "coding":       "gabriel",    # alias legacy → Gabriel
     "coder":        "jophiel",    # Jophiel — generación/análisis de código en memoria
     "devops":       "camael",     # Camael — CI/CD y operaciones de entrega
+    "qa":           "qa",         # Phanuel — ejecución de tests y reporte CI
 }
 
 # Intents que pasan por el pipeline LangGraph completo
-_PIPELINE_INTENTS = {"general", "kubernetes", "monitoring", "qa", "memory"}
+_PIPELINE_INTENTS = {"general", "kubernetes", "monitoring", "memory"}
 
 
 class AgentDispatcher:

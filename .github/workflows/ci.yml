@@ -12,6 +12,17 @@ on:
       - ".github/workflows/**"
   pull_request:
     branches: [main]
+  # Permite disparar el job de tests manualmente (QAAgent vía chat o GitHub UI)
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Rama o commit a testear"
+        required: false
+        default: "develop"
+      reason:
+        description: "Motivo de la ejecución manual"
+        required: false
+        default: "on-demand"
 
 env:
   REGISTRY: registry.richardx.dev
@@ -24,6 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
 
       - uses: actions/setup-python@v5
         with:
