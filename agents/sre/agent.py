@@ -264,7 +264,7 @@ def _is_vault_question(query: str) -> bool:
 
 def _build_tools() -> list:
     """Construye la lista de LangChain Tools para el agente SRE."""
-    from langchain_core.tools import Tool
+    from langchain_core.tools import StructuredTool
 
     from agents.sre import healer, reporter, scheduler
 
@@ -380,10 +380,10 @@ def _build_tools() -> list:
             m = 60
         return scheduler.activate_maintenance(m)
 
-    def _deactivate_maint(_: str) -> str:
+    def _deactivate_maint() -> str:
         return scheduler.deactivate_maintenance()
 
-    def _get_sre_status(_: str) -> str:
+    def _get_sre_status() -> str:
         state = scheduler.get_loop_state()
         return (
             f"Loop: {'enabled' if state.loop_enabled else 'disabled'}\n"
@@ -405,39 +405,28 @@ def _build_tools() -> list:
         return "No se encontró la base de conocimiento de Vault."
 
     return [
-        Tool(name="Listar_Pods",
-             func=_get_pods,
-             description="Lista pods de un namespace con su estado y reinicios. Input: namespace (opcional)."),
-        Tool(name="Describir_Pod",
-             func=_describe_pod,
-             description="Describe un pod y sus eventos. Usar cuando un pod tiene problemas. Input: nombre del pod."),
-        Tool(name="Reiniciar_Deployment",
-             func=_restart_deployment,
-             description="Ejecuta rollout restart de un deployment. Input: 'deployment_name' o 'deployment_name, namespace'."),
-        Tool(name="Revertir_Deployment",
-             func=_rollback_deployment,
-             description="Rollback de deployment a revisión anterior (kubectl rollout undo). Input: 'deployment_name' o 'deployment_name, namespace'."),
-        Tool(name="Consultar_Prometheus",
-             func=_get_prometheus_metrics,
-             description="Ejecuta una query PromQL y retorna los resultados. Input: query PromQL."),
-        Tool(name="Consultar_Base_Conocimiento",
-             func=_search_runbooks,
-             description="Busca runbooks y procedimientos relevantes. Input: 'tipo_de_error: descripción'."),
-        Tool(name="Consultar_Vault",
-             func=_vault_query,
-             description="Consulta información sobre HashiCorp Vault, secrets, policies. Usar SIEMPRE para preguntas de Vault. Input: pregunta."),
-        Tool(name="Estado_SRE",
-             func=_get_sre_status,
-             description="Retorna el estado actual del loop SRE autónomo. Input: vacío."),
-        Tool(name="Notificar_WhatsApp",
-             func=_notify_whatsapp,
-             description="Envía alerta SRE urgente por WhatsApp. Input: mensaje."),
-        Tool(name="Activar_Mantenimiento",
-             func=_activate_maint,
-             description="Pausa el loop SRE autónomo durante una ventana de mantenimiento. Input: duración en minutos."),
-        Tool(name="Desactivar_Mantenimiento",
-             func=_deactivate_maint,
-             description="Reactiva el loop SRE autónomo después de mantenimiento. Input: vacío."),
+        StructuredTool.from_function(func=_get_pods,              name="Listar_Pods",
+            description="Lista pods de un namespace con su estado y reinicios. Parámetro: ns (namespace, opcional)."),
+        StructuredTool.from_function(func=_describe_pod,          name="Describir_Pod",
+            description="Describe un pod y sus eventos. Parámetro: pod_name."),
+        StructuredTool.from_function(func=_restart_deployment,    name="Reiniciar_Deployment",
+            description="Ejecuta rollout restart de un deployment. Parámetro: name ('deployment' o 'deployment, namespace')."),
+        StructuredTool.from_function(func=_rollback_deployment,   name="Revertir_Deployment",
+            description="Rollback de deployment a revisión anterior. Parámetro: name ('deployment' o 'deployment, namespace')."),
+        StructuredTool.from_function(func=_get_prometheus_metrics, name="Consultar_Prometheus",
+            description="Ejecuta una query PromQL. Parámetro: query."),
+        StructuredTool.from_function(func=_search_runbooks,       name="Consultar_Base_Conocimiento",
+            description="Busca runbooks y procedimientos. Parámetro: query ('tipo_error: descripción')."),
+        StructuredTool.from_function(func=_vault_query,           name="Consultar_Vault",
+            description="Consulta información sobre Vault, secrets, policies. Usar SIEMPRE para preguntas de Vault. Parámetro: query."),
+        StructuredTool.from_function(func=_get_sre_status,        name="Estado_SRE",
+            description="Retorna el estado actual del loop SRE autónomo, circuit breaker y mantenimiento. Sin parámetros."),
+        StructuredTool.from_function(func=_notify_whatsapp,       name="Notificar_WhatsApp",
+            description="Envía alerta SRE urgente por WhatsApp. Parámetro: message."),
+        StructuredTool.from_function(func=_activate_maint,        name="Activar_Mantenimiento",
+            description="Pausa el loop SRE durante mantenimiento. Parámetro: minutes (duración en minutos)."),
+        StructuredTool.from_function(func=_deactivate_maint,      name="Desactivar_Mantenimiento",
+            description="Reactiva el loop SRE después de mantenimiento. Sin parámetros."),
     ]
 
 
