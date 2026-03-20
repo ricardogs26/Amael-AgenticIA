@@ -9,4 +9,4 @@ resources:
 - 10-github-runner.yaml
 images:
 - name: registry.richardx.dev/amael-agentic-backend
-  newTag: 1.9.6
+  newTag: 1.9.7
