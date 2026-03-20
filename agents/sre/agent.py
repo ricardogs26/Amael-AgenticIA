@@ -264,7 +264,7 @@ def _is_vault_question(query: str) -> bool:
 
 def _build_tools() -> list:
     """Construye la lista de LangChain Tools para el agente SRE."""
-    from langchain.agents import Tool
+    from langchain_core.tools import Tool
 
     from agents.sre import healer, reporter, scheduler
 
