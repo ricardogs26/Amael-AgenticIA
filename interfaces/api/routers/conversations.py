@@ -6,6 +6,7 @@ Endpoints:
   POST /api/conversations              — crea una nueva conversación
   GET  /api/conversations/{id}         — obtiene conversación + mensajes
   DELETE /api/conversations/{id}       — elimina conversación y sus mensajes
+  GET  /api/conversations/{id}/export  — exporta conversación como JSON o Markdown
 """
 from __future__ import annotations
 
@@ -13,7 +14,8 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from interfaces.api.auth import get_current_user
@@ -296,3 +298,76 @@ def delete_conversation(
     except Exception as exc:
         logger.error(f"[conversations] delete error: {exc}")
         raise HTTPException(status_code=500, detail="Error al eliminar conversación")
+
+
+@router.get("/{conversation_id}/export")
+def export_conversation(
+    conversation_id: str,
+    user_id:         Annotated[str, Depends(get_current_user)],
+    fmt:             str = Query(default="json", pattern="^(json|markdown)$"),
+):
+    """
+    Exporta una conversación completa como JSON o Markdown.
+
+    Query params:
+        fmt: "json" (default) | "markdown"
+
+    Returns:
+        application/json o text/plain según fmt.
+    """
+    try:
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT title, created_at FROM conversations WHERE id = %s AND user_id = %s",
+                    (conversation_id, user_id),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="Conversación no encontrada")
+                title, created_at = row[0], row[1]
+
+                cur.execute(
+                    """
+                    SELECT role, content, created_at
+                    FROM messages
+                    WHERE conversation_id = %s
+                    ORDER BY created_at ASC
+                    """,
+                    (conversation_id,),
+                )
+                messages = [
+                    {"role": r[0], "content": r[1], "created_at": r[2].isoformat()}
+                    for r in cur.fetchall()
+                ]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[conversations] export error: {exc}")
+        raise HTTPException(status_code=500, detail="Error al exportar conversación")
+
+    if fmt == "markdown":
+        lines = [
+            f"# {title}",
+            f"*Exportado el {created_at.isoformat() if hasattr(created_at, 'isoformat') else created_at}*",
+            "",
+        ]
+        for msg in messages:
+            role_label = "**Usuario**" if msg["role"] == "user" else "**Asistente**"
+            lines.append(f"### {role_label}  _{msg['created_at']}_")
+            lines.append("")
+            lines.append(msg["content"])
+            lines.append("")
+        return PlainTextResponse(
+            content="\n".join(lines),
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{conversation_id}.md"'},
+        )
+
+    return {
+        "id":         conversation_id,
+        "title":      title,
+        "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
+        "messages":   messages,
+    }

@@ -144,6 +144,46 @@ def run_tool_step(
     return result
 
 
+def _get_user_language_preference(user_id: str) -> str:
+    """
+    Lookup rápido de idioma preferido: Redis (TTL 5min) → PostgreSQL profile.
+    Retorna 'es', 'en', o '' (auto-detect por heurística).
+    """
+    if not user_id:
+        return ""
+    try:
+        from storage.redis.client import get_redis_client
+        rc = get_redis_client()
+        key = f"user_lang_pref:{user_id}"
+        cached = rc.get(key)
+        if cached is not None:
+            return cached.decode() if isinstance(cached, bytes) else (cached or "")
+    except Exception:
+        rc = None
+        key = None
+
+    lang = ""
+    try:
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT preferences->>'language' FROM user_profile WHERE user_id = %s",
+                    (user_id,),
+                )
+                row = cur.fetchone()
+                lang = (row[0] or "") if row else ""
+    except Exception:
+        pass
+
+    try:
+        if rc and key:
+            rc.setex(key, 300, lang)
+    except Exception:
+        pass
+    return lang
+
+
 _ES_MARKERS = {"el", "la", "los", "las", "de", "en", "que", "es", "un", "una",
                "por", "para", "con", "del", "se", "no", "y", "a", "su", "al",
                "lo", "le", "me", "te", "más", "si", "ya", "hay", "como", "pero"}
@@ -188,13 +228,31 @@ def run_reasoning_step(
     from langchain_core.messages import HumanMessage, SystemMessage
 
     user_question = state.get("question", "")
+    user_id = state.get("user_id", "")
+
+    # Idioma preferido: configuración del perfil > heurística sobre la pregunta
+    pref_lang = _get_user_language_preference(user_id)
+    if pref_lang == "es":
+        lang_rule = (
+            "REGLA ABSOLUTA DE IDIOMA: El usuario configuró ESPAÑOL como su idioma preferido. "
+            "Responde SIEMPRE en español, sin excepción, aunque el contexto esté en inglés — "
+            "traduce y sintetiza al español."
+        )
+    elif pref_lang == "en":
+        lang_rule = (
+            "LANGUAGE ABSOLUTE RULE: The user configured ENGLISH as their preferred language. "
+            "Always respond in English, without exception."
+        )
+    else:
+        lang_rule = (
+            "REGLA ABSOLUTA DE IDIOMA: Responde SIEMPRE en el mismo idioma que usó el usuario "
+            "en su pregunta. Si la pregunta está en español, tu respuesta DEBE ser en español, "
+            "aunque el contexto o los documentos estén en inglés — en ese caso traduce y sintetiza "
+            "el contenido al español. Si la pregunta está en inglés, responde en inglés."
+        )
 
     system_prompt = (
-        "Eres un asistente inteligente. "
-        "REGLA ABSOLUTA DE IDIOMA: Responde SIEMPRE en el mismo idioma que usó el usuario "
-        "en su pregunta. Si la pregunta está en español, tu respuesta DEBE ser en español, "
-        "aunque el contexto o los documentos estén en inglés — en ese caso traduce y sintetiza "
-        "el contenido al español. Si la pregunta está en inglés, responde en inglés.\n"
+        f"Eres un asistente inteligente. {lang_rule}\n"
         "REGLAS DE FORMATO:\n"
         "1. Si el contexto contiene un bloque ```bash o ```yaml, CÓPIALO EXACTAMENTE sin modificarlo.\n"
         "2. NUNCA pongas análisis ni texto dentro de un bloque ```bash o ```yaml.\n"

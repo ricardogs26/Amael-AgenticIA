@@ -1,7 +1,12 @@
 """
-Router de ingesta de documentos — POST /api/ingest
+Router de ingesta de documentos.
 
-Flujo:
+Endpoints:
+  POST /api/ingest              — síncrono (retorna cuando completa)
+  POST /api/ingest/async        — asíncrono (retorna job_id inmediatamente)
+  GET  /api/ingest/status/{id}  — estado del job asíncrono
+
+Flujo (ambos endpoints):
   1. Leer y detectar MIME (PDF / TXT / DOCX)
   2. Extraer texto
   3. Chunking + indexar en Qdrant (colección por usuario)
@@ -17,7 +22,7 @@ import logging
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 
 from interfaces.api.auth import get_current_user
 
@@ -186,3 +191,201 @@ async def ingest_document(
         "summary":  summary,
         "chunks":   n_chunks,
     }
+
+
+# ── Job tracking helpers ──────────────────────────────────────────────────────
+
+_JOB_TTL = 3600  # 1 hora — tiempo máximo que se guarda el estado del job en Redis
+
+
+def _job_key(job_id: str) -> str:
+    return f"ingest_job:{job_id}"
+
+
+def _set_job_status(job_id: str, status: str, **extra) -> None:
+    """Actualiza el estado del job en Redis."""
+    import json as _json
+    try:
+        from storage.redis.client import get_redis_client
+        rc = get_redis_client()
+        payload = {"status": status, "job_id": job_id, **extra}
+        rc.setex(_job_key(job_id), _JOB_TTL, _json.dumps(payload))
+    except Exception as exc:
+        logger.warning(f"[ingest] No se pudo actualizar job {job_id}: {exc}")
+
+
+def _run_ingest_job(
+    job_id: str,
+    user: str,
+    filename: str,
+    content: bytes,
+    mime: str,
+) -> None:
+    """
+    Ejecuta el pipeline de ingestión en segundo plano.
+    Actualiza el estado del job en Redis a lo largo del proceso.
+    """
+    import io
+
+    _set_job_status(job_id, "processing", filename=filename)
+
+    try:
+        # ── Extraer texto ──────────────────────────────────────────────────
+        from langchain_core.documents import Document as LCDocument
+
+        full_text = ""
+        documents: list[LCDocument] = []
+        temp_path = None
+
+        if mime == "application/pdf":
+            temp_path = f"/tmp/{uuid.uuid4()}-{filename}"
+            with open(temp_path, "wb") as buf:
+                buf.write(content)
+            try:
+                from langchain_community.document_loaders import PyPDFLoader
+                loader = PyPDFLoader(temp_path)
+                documents = loader.load()
+                full_text = "\n".join(d.page_content for d in documents)
+            finally:
+                if temp_path and os.path.exists(temp_path):
+                    os.remove(temp_path)
+        elif mime == "text/plain":
+            full_text = content.decode("utf-8", errors="replace")
+            documents = [LCDocument(page_content=full_text)]
+        else:
+            full_text = _extract_docx_text(content)
+            documents = [LCDocument(page_content=full_text)]
+
+        if not full_text.strip():
+            _set_job_status(job_id, "failed", error="El documento está vacío o no se pudo extraer texto.")
+            return
+
+        # ── Chunking + Qdrant ─────────────────────────────────────────────
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+        from agents.researcher.rag_retriever import get_user_vectorstore
+        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        chunks = splitter.split_documents(documents)
+        for chunk in chunks:
+            chunk.metadata["filename"] = filename
+        vs = get_user_vectorstore(user)
+        vs.add_documents(chunks)
+        n_chunks = len(chunks)
+
+        # ── Resumen LLM ───────────────────────────────────────────────────
+        summary = ""
+        try:
+            from langchain_ollama import OllamaLLM
+            llm = OllamaLLM(model=_MODEL_NAME, base_url=_OLLAMA_URL)
+            summary = llm.invoke(
+                f"Resume el siguiente documento en 2-3 oraciones en español:\n\n{full_text[:3000]}"
+            ).strip()
+        except Exception:
+            summary = f"Documento procesado ({n_chunks} fragmentos)."
+
+        # ── PostgreSQL ────────────────────────────────────────────────────
+        doc_id = None
+        try:
+            from storage.postgres.client import get_connection
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO user_documents (user_id, doc_type, summary, raw_analysis) "
+                        "VALUES (%s, %s, %s, %s) RETURNING id",
+                        (user, filename, summary, full_text[:10000]),
+                    )
+                    doc_id = cur.fetchone()[0]
+                conn.commit()
+        except Exception as exc:
+            logger.warning(f"[ingest] PostgreSQL insert failed (async job {job_id}): {exc}")
+
+        # ── MinIO backup ──────────────────────────────────────────────────
+        try:
+            from storage.minio.client import get_client
+            minio = get_client()
+            bucket = _sanitize_email(user).replace("_", "-")[:63]
+            if not minio.bucket_exists(bucket):
+                minio.make_bucket(bucket)
+            minio.put_object(bucket, filename, io.BytesIO(content), len(content), content_type=mime)
+        except Exception as exc:
+            logger.warning(f"[ingest] MinIO backup failed (async job {job_id}): {exc}")
+
+        _set_job_status(
+            job_id, "completed",
+            filename=filename,
+            doc_id=str(doc_id) if doc_id else None,
+            summary=summary,
+            chunks=n_chunks,
+        )
+
+    except Exception as exc:
+        logger.error(f"[ingest] Async job {job_id} failed: {exc}", exc_info=True)
+        _set_job_status(job_id, "failed", filename=filename, error=str(exc)[:300])
+
+
+# ── Async endpoints ───────────────────────────────────────────────────────────
+
+@router.post("/ingest/async", status_code=202)
+async def ingest_document_async(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    user: str = Depends(get_current_user),
+):
+    """
+    Inicia la ingestión en segundo plano y retorna inmediatamente con un job_id.
+    Útil para documentos grandes (PDF de muchas páginas) que tardan > 30s.
+
+    Returns:
+        { job_id, status: "queued", filename }
+    """
+    content = await file.read()
+    fname = (file.filename or "").lower()
+
+    # MIME detection
+    try:
+        import magic
+        mime = magic.from_buffer(content, mime=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="No se pudo determinar el tipo de archivo.")
+
+    if fname.endswith(".docx"):
+        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if fname.endswith(".md"):
+        mime = "text/plain"
+
+    supported = {"application/pdf", "text/plain",
+                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+    if mime not in supported and not fname.endswith(".docx"):
+        raise HTTPException(status_code=400, detail=f"Tipo no soportado: '{mime}'")
+
+    job_id = str(uuid.uuid4())
+    _set_job_status(job_id, "queued", filename=file.filename)
+    background_tasks.add_task(_run_ingest_job, job_id, user, file.filename, content, mime)
+
+    return {"job_id": job_id, "status": "queued", "filename": file.filename}
+
+
+@router.get("/ingest/status/{job_id}")
+async def get_ingest_status(
+    job_id: str,
+    user: str = Depends(get_current_user),
+):
+    """
+    Consulta el estado de un job de ingestión asíncrona.
+
+    Returns:
+        { job_id, status: "queued"|"processing"|"completed"|"failed", ... }
+    """
+    import json as _json
+    try:
+        from storage.redis.client import get_redis_client
+        rc = get_redis_client()
+        raw = rc.get(_job_key(job_id))
+        if not raw:
+            raise HTTPException(status_code=404, detail="Job no encontrado o expirado.")
+        return _json.loads(raw)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[ingest] status lookup failed for {job_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Error consultando estado del job.")
