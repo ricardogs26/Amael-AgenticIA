@@ -8,4 +8,4 @@ resources:
 - 10-github-runner.yaml
 images:
 - name: registry.richardx.dev/amael-agentic-backend
-  newTag: 1.10.3
+  newTag: 1.10.4
