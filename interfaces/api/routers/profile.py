@@ -26,6 +26,10 @@ class ProfileUpdate(BaseModel):
     preferences:  dict[str, Any] | None = None
 
 
+class LanguageUpdate(BaseModel):
+    language: str  # "es" | "en" | "" (auto)
+
+
 def _get_or_create_profile(cur, user_id: str) -> dict:
     """Obtiene el perfil, creando uno vacío si no existe."""
     cur.execute(
@@ -60,6 +64,48 @@ def _get_or_create_profile(cur, user_id: str) -> dict:
         "role":         "user",
         "status":       "active",
     }
+
+
+@router.patch("/profile/language")
+def set_language(
+    body:    LanguageUpdate,
+    user_id: Annotated[str, Depends(get_current_user)],
+) -> dict:
+    """
+    Establece el idioma preferido del usuario.
+
+    - language: "es" → siempre español
+    - language: "en" → siempre inglés
+    - language: ""   → auto-detectar por pregunta
+    """
+    import json
+    allowed = {"es", "en", ""}
+    if body.language not in allowed:
+        raise HTTPException(status_code=422, detail=f"language must be one of: {allowed}")
+    try:
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO user_profile (user_id, preferences, updated_at)
+                    VALUES (%s, %s::jsonb, NOW())
+                    ON CONFLICT (user_id) DO UPDATE
+                      SET preferences = user_profile.preferences || %s::jsonb,
+                          updated_at  = NOW()
+                    """,
+                    (user_id, json.dumps({"language": body.language}), json.dumps({"language": body.language})),
+                )
+        # Invalidar caché Redis inmediatamente
+        try:
+            from storage.redis.client import get_redis_client
+            get_redis_client().delete(f"user_lang_pref:{user_id}")
+        except Exception:
+            pass
+        return {"status": "ok", "language": body.language}
+    except Exception as exc:
+        logger.error(f"[profile] set_language error: {exc}")
+        raise HTTPException(status_code=500, detail="Error al actualizar idioma")
 
 
 @router.get("/profile")
@@ -102,6 +148,13 @@ def update_profile(
                     """,
                     (new_display, new_tz, json.dumps(new_prefs), user_id),
                 )
+        # Invalidar caché Redis de idioma cuando cambia la preferencia
+        if body.preferences is not None and "language" in body.preferences:
+            try:
+                from storage.redis.client import get_redis_client
+                get_redis_client().delete(f"user_lang_pref:{user_id}")
+            except Exception:
+                pass
         return {"status": "ok"}
     except Exception as exc:
         logger.error(f"[profile] update error: {exc}")
