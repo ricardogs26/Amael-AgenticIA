@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -37,6 +38,14 @@ _MEDIA_PATTERN = re.compile(r"\[MEDIA:[^\]]+\]", re.DOTALL)
 # Singleton LLM para REASONING — ChatOllama para control de idioma via SystemMessage
 _llm_reasoning: ChatOllama | None = None
 
+# Backpressure: límite de llamadas LLM/herramientas concurrentes
+# Evita que un burst de requests simultáneos sature Ollama o agote threads
+_MAX_CONCURRENT_STEPS = 4
+_MAX_QUEUE_DEPTH = 12
+_step_semaphore = threading.Semaphore(_MAX_CONCURRENT_STEPS)
+_pending_steps = 0
+_pending_lock = threading.Lock()
+
 
 def _get_llm_reasoning() -> ChatOllama:
     global _llm_reasoning
@@ -62,6 +71,17 @@ def _truncate(text: str, max_chars: int, label: str) -> str:
 
 def _step_type(step: str) -> str:
     return step.split(":")[0].strip().upper()
+
+
+def _run_tool_step_guarded(
+    step: str, state: dict[str, Any], tools_map: dict[str, Any]
+) -> str:
+    """Wrapper con semáforo de backpressure sobre run_tool_step."""
+    global _pending_steps
+    with _pending_lock:
+        _pending_steps -= 1
+    with _step_semaphore:
+        return run_tool_step(step, state, tools_map)
 
 
 def run_tool_step(
@@ -207,10 +227,24 @@ def run_parallel_batch(
     EXECUTOR_PARALLEL_BATCHES_TOTAL.inc()
     EXECUTOR_PARALLEL_BATCH_SIZE.observe(len(batch))
 
+    # Backpressure: rechazar si hay demasiados pasos pendientes en el sistema
+    global _pending_steps
+    with _pending_lock:
+        if _pending_steps + len(batch) > _MAX_QUEUE_DEPTH:
+            logger.warning(
+                f"[executor] Backpressure: {_pending_steps} pasos pendientes, "
+                f"rechazando batch de {len(batch)}"
+            )
+            return (
+                "Sistema ocupado. Demasiadas tareas concurrentes — intenta de nuevo en unos segundos.",
+                state.get("context", "") or "",
+            )
+        _pending_steps += len(batch)
+
     results: dict[str, str] = {}
-    with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+    with ThreadPoolExecutor(max_workers=min(len(batch), _MAX_CONCURRENT_STEPS)) as pool:
         future_to_step = {
-            pool.submit(run_tool_step, step, state, tools_map): step
+            pool.submit(_run_tool_step_guarded, step, state, tools_map): step
             for step in batch
         }
         for future in as_completed(future_to_step):
