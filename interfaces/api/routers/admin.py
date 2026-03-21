@@ -318,3 +318,58 @@ def update_settings(
     except Exception as exc:
         logger.error(f"[admin] update_settings error: {exc}")
         raise HTTPException(status_code=500, detail="Error al actualizar configuración")
+
+
+@router.get("/stats")
+def get_stats(_: Annotated[str, Depends(require_admin)]) -> dict:
+    """
+    Estadísticas globales del sistema — solo accesible por admins.
+
+    Returns:
+        {
+          users: int,
+          conversations: int,
+          messages: int,
+          documents: int,
+          active_users_24h: int,  — usuarios con conversaciones en las últimas 24h
+          agents_registered: int,
+          generated_at: str
+        }
+    """
+    import datetime
+
+    stats: dict = {}
+    try:
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM user_profile")
+                stats["users"] = cur.fetchone()[0]
+
+                cur.execute("SELECT COUNT(*) FROM conversations")
+                stats["conversations"] = cur.fetchone()[0]
+
+                cur.execute("SELECT COUNT(*) FROM messages")
+                stats["messages"] = cur.fetchone()[0]
+
+                cur.execute("SELECT COUNT(*) FROM user_documents")
+                stats["documents"] = cur.fetchone()[0]
+
+                cur.execute(
+                    "SELECT COUNT(DISTINCT user_id) FROM conversations "
+                    "WHERE last_active_at > NOW() - INTERVAL '24 hours'"
+                )
+                stats["active_users_24h"] = cur.fetchone()[0]
+    except Exception as exc:
+        logger.error(f"[admin] stats PostgreSQL error: {exc}")
+        stats.update({"users": -1, "conversations": -1, "messages": -1,
+                      "documents": -1, "active_users_24h": -1})
+
+    try:
+        from agents.base.agent_registry import AgentRegistry
+        stats["agents_registered"] = AgentRegistry.count()
+    except Exception:
+        stats["agents_registered"] = -1
+
+    stats["generated_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+    return stats
