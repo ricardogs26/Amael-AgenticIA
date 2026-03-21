@@ -67,6 +67,9 @@ def _track_llm_tokens(response, model: str, input_text: str) -> None:
         pass
 
 
+_LLM_REASONING_TIMEOUT = 90  # segundos — evita thread starvation si Ollama está lento
+
+
 def _get_llm_reasoning() -> ChatOllama:
     global _llm_reasoning
     if _llm_reasoning is None:
@@ -74,6 +77,7 @@ def _get_llm_reasoning() -> ChatOllama:
         _llm_reasoning = ChatOllama(
             model=settings.llm_model,
             base_url=settings.ollama_base_url,
+            request_timeout=_LLM_REASONING_TIMEOUT,
         )
     return _llm_reasoning
 

@@ -7,11 +7,34 @@ Migrado desde backend-ia/agents/executor.py, separado por responsabilidad.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from observability.metrics import EXECUTOR_ERRORS_TOTAL
 
 logger = logging.getLogger("agents.executor.handlers")
+
+
+def _retry(fn, *args, max_retries: int = 2, base_delay: float = 1.0, **kwargs):
+    """
+    Reintenta fn con backoff exponencial (1s, 2s) ante errores de red/timeout.
+    No reintenta en errores de negocio (respuestas con código de estado).
+    """
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            last_exc = exc
+            msg = str(exc).lower()
+            # Solo reintentar en errores de red/timeout, no en errores de negocio
+            is_retriable = any(k in msg for k in ("timeout", "connect", "connection", "network", "reset", "refused"))
+            if not is_retriable or attempt == max_retries:
+                raise
+            delay = base_delay * (2 ** attempt)
+            logger.warning(f"[retry] attempt {attempt + 1}/{max_retries} failed ({exc}), retrying in {delay}s")
+            time.sleep(delay)
+    raise last_exc
 
 
 def _user_can_use_k8s(user_id: str) -> bool:
@@ -54,7 +77,7 @@ def handle_k8s_tool(query: str, state: dict[str, Any], tools_map: dict[str, Any]
         EXECUTOR_ERRORS_TOTAL.labels(step_type="K8S_TOOL").inc()
         return "Error: Herramienta K8s no disponible."
 
-    return k8s_func(query)
+    return _retry(k8s_func, query)
 
 
 def handle_rag_retrieval(query: str, state: dict[str, Any], tools_map: dict[str, Any]) -> str:
@@ -74,7 +97,7 @@ def handle_productivity_tool(
     if not prod_func:
         EXECUTOR_ERRORS_TOTAL.labels(step_type="PRODUCTIVITY_TOOL").inc()
         return "Error: Herramienta de productividad no disponible."
-    return prod_func(query)
+    return _retry(prod_func, query)
 
 
 def handle_web_search(query: str, state: dict[str, Any], tools_map: dict[str, Any]) -> str:
