@@ -331,18 +331,37 @@ def _update_health_metrics(components: dict[str, Any]) -> None:
         pass
 
 
+# ── Individual component check (granular) ─────────────────────────────────────
+
+_COMPONENT_CHECKS = {
+    "postgres": _check_postgres,
+    "redis":    _check_redis,
+    "qdrant":   _check_qdrant,
+    "ollama":   _check_ollama,
+    "k8s_agent": _check_k8s_agent,
+}
+
+
+async def check_component(name: str) -> ComponentHealth:
+    """Ejecuta el health check de un único componente por nombre."""
+    fn = _COMPONENT_CHECKS.get(name)
+    if fn is None:
+        return ComponentHealth(name=name, healthy=False, detail=f"unknown component: {name}")
+    return await fn()
+
+
 # ── FastAPI router helper ─────────────────────────────────────────────────────
 
 def build_health_router():
     """
-    Construye un APIRouter con /health y /ready.
+    Construye un APIRouter con /health, /ready y /health/{component}.
     Importa FastAPI sólo si está disponible (evita dependencia en tests).
 
     Uso:
         app.include_router(build_health_router())
     """
     try:
-        from fastapi import APIRouter
+        from fastapi import APIRouter, Path
         from fastapi.responses import JSONResponse
 
         router = APIRouter(tags=["health"])
@@ -355,6 +374,15 @@ def build_health_router():
         async def ready_endpoint():
             result = await readiness()
             status_code = 200 if result.status in ("ok", "degraded") else 503
+            return JSONResponse(content=result.model_dump(), status_code=status_code)
+
+        @router.get("/health/{component}")
+        async def component_health_endpoint(
+            component: str = Path(..., description="postgres | redis | qdrant | ollama | k8s_agent"),
+        ):
+            """Granular health check for a single infrastructure component."""
+            result = await check_component(component)
+            status_code = 200 if result.healthy else 503
             return JSONResponse(content=result.model_dump(), status_code=status_code)
 
         return router
