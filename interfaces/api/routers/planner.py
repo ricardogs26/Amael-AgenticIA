@@ -83,11 +83,12 @@ def _send_brief_whatsapp(user_email: str, summary: str) -> None:
     Busca el número de teléfono del usuario en user_identities.
     """
     import httpx
+
     from config.settings import settings
+    from storage.postgres.client import get_connection
 
     try:
         # Buscar número de teléfono en user_identities
-        from storage.postgres.client import get_connection
         phone: str | None = None
         with get_connection() as conn:
             with conn.cursor() as cur:
