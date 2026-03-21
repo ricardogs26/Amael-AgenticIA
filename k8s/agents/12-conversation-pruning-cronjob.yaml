@@ -21,7 +21,7 @@ spec:
           restartPolicy: OnFailure
           containers:
           - name: pruning
-            image: registry.richardx.dev/amael-agentic-backend:1.10.9
+            image: registry.richardx.dev/amael-agentic-backend:1.10.10
             command:
               - python3
               - -c
