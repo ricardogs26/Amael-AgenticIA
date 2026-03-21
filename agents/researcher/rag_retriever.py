@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 
 logger = logging.getLogger("agents.researcher.rag")
 
@@ -21,23 +22,30 @@ _EMBED_MODEL  = "nomic-embed-text"
 _VECTOR_SIZE  = 768  # nomic-embed-text output dimension
 
 # Module-level singletons (P5-3 optimization — avoid per-request reconnections)
+# Los locks garantizan inicialización thread-safe bajo cargas concurrentes
 _qdrant_client  = None
 _embeddings     = None
+_qdrant_lock    = threading.Lock()
+_embeddings_lock = threading.Lock()
 
 
 def _get_qdrant_client():
     global _qdrant_client
     if _qdrant_client is None:
-        from qdrant_client import QdrantClient
-        _qdrant_client = QdrantClient(url=_QDRANT_URL)
+        with _qdrant_lock:
+            if _qdrant_client is None:  # double-checked locking
+                from qdrant_client import QdrantClient
+                _qdrant_client = QdrantClient(url=_QDRANT_URL)
     return _qdrant_client
 
 
 def _get_embeddings():
     global _embeddings
     if _embeddings is None:
-        from langchain_ollama import OllamaEmbeddings
-        _embeddings = OllamaEmbeddings(model=_EMBED_MODEL, base_url=_OLLAMA_URL)
+        with _embeddings_lock:
+            if _embeddings is None:  # double-checked locking
+                from langchain_ollama import OllamaEmbeddings
+                _embeddings = OllamaEmbeddings(model=_EMBED_MODEL, base_url=_OLLAMA_URL)
     return _embeddings
 
 

@@ -165,7 +165,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield  # ←── app corriendo
 
     # ── SHUTDOWN ──────────────────────────────────────────────────────────────
-    logger.info("=== Amael-AgenticIA apagando ===")
+    logger.info("=== Amael-AgenticIA apagando — drenando requests in-flight ===")
+
+    # Drain period: dar tiempo a requests en vuelo para completarse
+    # Kubernetes envía SIGTERM y espera terminationGracePeriodSeconds antes de SIGKILL
+    import asyncio
+    await asyncio.sleep(5)
 
     try:
         from agents.sre import stop_sre_loop
