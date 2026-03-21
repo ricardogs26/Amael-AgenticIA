@@ -25,6 +25,7 @@ from observability.metrics import (
     EXECUTOR_PARALLEL_BATCHES_TOTAL,
     EXECUTOR_STEP_LATENCY_SECONDS,
     EXECUTOR_STEPS_TOTAL,
+    LLM_TOKENS_TOTAL,
 )
 from observability.tracing import tracer
 
@@ -46,6 +47,24 @@ _MAX_QUEUE_DEPTH = 12
 _step_semaphore = threading.Semaphore(_MAX_CONCURRENT_STEPS)
 _pending_steps = 0
 _pending_lock = threading.Lock()
+
+
+def _track_llm_tokens(response, model: str, input_text: str) -> None:
+    """Registra tokens de entrada y salida en LLM_TOKENS_TOTAL."""
+    try:
+        usage = getattr(response, "usage_metadata", None)
+        if usage:
+            input_tokens = usage.get("input_tokens", 0)
+            output_tokens = usage.get("output_tokens", 0)
+        else:
+            # Estimación: chars / 4
+            input_tokens = len(input_text) // 4
+            output_content = getattr(response, "content", "") or ""
+            output_tokens = len(output_content) // 4
+        LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
+        LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+    except Exception:
+        pass
 
 
 def _get_llm_reasoning() -> ChatOllama:
@@ -196,20 +215,26 @@ def run_reasoning_step(
     estimated_tokens = (len(system_prompt) + len(human_prompt)) // 4
     EXECUTOR_ESTIMATED_PROMPT_TOKENS.labels(step_type="REASONING").observe(estimated_tokens)
 
-    response = _get_llm_reasoning().invoke([
+    llm = _get_llm_reasoning()
+    from config.settings import settings as _settings
+    _model = _settings.llm_model
+    response = llm.invoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=human_prompt),
     ])
+    _track_llm_tokens(response, _model, system_prompt + human_prompt)
     new_answer = response.content if hasattr(response, "content") else str(response)
 
     # Post-traducción: si el usuario preguntó en español pero la respuesta salió en inglés,
     # forzar traducción con un prompt dedicado (más confiable que instrucciones en el mismo prompt)
     if user_question and _detect_language(user_question) == "es" and _detect_language(new_answer) == "en":
         logger.info("[executor] Respuesta en inglés detectada para pregunta en español — traduciendo")
-        trans_response = _get_llm_reasoning().invoke([
+        trans_input = new_answer
+        trans_response = llm.invoke([
             SystemMessage(content="Eres un traductor experto de inglés a español. Traduce el siguiente texto al español de forma natural y fluida, conservando el formato (bloques de código, listas, etc.) exactamente igual."),
             HumanMessage(content=new_answer),
         ])
+        _track_llm_tokens(trans_response, _model, trans_input)
         new_answer = trans_response.content if hasattr(trans_response, "content") else str(trans_response)
 
     if all_media:
