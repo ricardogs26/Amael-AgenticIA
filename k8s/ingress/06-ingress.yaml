@@ -64,6 +64,22 @@ spec:
             port:
               number: 8000
 
+      # ── Health/Ready del backend (antes de /) ────────────────────────
+      - path: /ready
+        pathType: Exact
+        backend:
+          service:
+            name: amael-agentic-service
+            port:
+              number: 8000
+      - path: /health
+        pathType: Exact
+        backend:
+          service:
+            name: amael-agentic-service
+            port:
+              number: 8000
+
       # ── Frontend Next.js (sin cambios) ───────────────────────────────
       - path: /
         pathType: Prefix
