@@ -158,8 +158,11 @@ def run_reasoning_step(
         "5. Si generas scripts bash o manifiestos YAML nuevos, envuélvelos en ```bash o ```yaml.\n"
         "6. SI EL CONTEXTO TIENE [SYSTEM_MEDIA_MARKER], menciona que has analizado la imagen adjunta "
         "pero NO incluyas el marcador en tu respuesta final.\n"
-        "7. REGLA ANTI-ALUCINACIONES: Si el contexto NO contiene información técnica específica, "
-        "responde claramente que no se encontró información en lugar de inventar pasos genéricos."
+        "7. REGLA ANTI-ALUCINACIONES: Si el contexto NO contiene información técnica específica "
+        "sobre el sistema (pods, métricas, estado del cluster), di claramente que no se encontró "
+        "información. PERO si la pregunta es de conocimiento general (comparación de modelos, "
+        "conceptos técnicos, recomendaciones de arquitectura), usa tu conocimiento de entrenamiento "
+        "para responder directamente — NO digas 'no se proporcionó contexto'."
     )
 
     human_prompt = (
