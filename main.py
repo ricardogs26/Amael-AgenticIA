@@ -148,7 +148,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning(f"[startup] LangGraph warm-up falló: {exc}")
 
-    # 8. OTel instrumentation
+    # 8. Ollama model warm-up — P7-005
+    try:
+        await _run_in_thread(_warmup_ollama_models)
+    except Exception as exc:
+        logger.warning(f"[startup] Ollama warm-up falló (no crítico): {exc}")
+
+    # 9. OTel instrumentation
     try:
         from observability.tracing import instrument_app, instrument_requests
         instrument_app(app)
@@ -282,24 +288,33 @@ app = create_app()
 
 def _ensure_schema() -> None:
     """
-    Crea las tablas base si no existen.
+    Crea las tablas base si no existen y aplica migraciones incrementales.
     Idempotente — seguro de llamar en cada arranque.
     """
     from storage.postgres.client import get_connection
     with get_connection() as conn:
         with conn.cursor() as cur:
+            # ── P7-001: pg_trgm para búsqueda full-text eficiente ──────────
+            cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+
             # ── Conversaciones y mensajes ──────────────────────────────────
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS conversations (
-                    id          TEXT PRIMARY KEY,
-                    user_id     TEXT NOT NULL,
-                    title       TEXT,
-                    created_at  TIMESTAMPTZ DEFAULT NOW()
+                    id              TEXT PRIMARY KEY,
+                    user_id         TEXT NOT NULL,
+                    title           TEXT,
+                    created_at      TIMESTAMPTZ DEFAULT NOW(),
+                    last_active_at  TIMESTAMPTZ DEFAULT NOW()
                 )
+            """)
+            # P7-001: migración — añadir last_active_at a tablas existentes
+            cur.execute("""
+                ALTER TABLE conversations
+                ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ DEFAULT NOW()
             """)
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_conversations_user
-                ON conversations (user_id, created_at DESC)
+                ON conversations (user_id, last_active_at DESC)
             """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
@@ -315,6 +330,11 @@ def _ensure_schema() -> None:
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_messages_conversation
                 ON messages (conversation_id, created_at ASC)
+            """)
+            # P7-001: GIN index para búsqueda full-text en content (pg_trgm)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_messages_content_trgm
+                ON messages USING GIN (content gin_trgm_ops)
             """)
 
             # ── Usuarios — fuente de verdad para control de acceso ─────────
@@ -369,6 +389,36 @@ def _ensure_schema() -> None:
                 CREATE INDEX IF NOT EXISTS idx_security_audit_event_time
                 ON security_audit_log (event_type, created_at DESC)
             """)
+
+
+def _warmup_ollama_models() -> None:
+    """
+    Envía un prompt vacío a Ollama para forzar la carga del modelo en VRAM.
+    Evita cold-start en el primer request real del usuario.
+    P7-005.
+    """
+    import os
+    import urllib.request
+
+    ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
+    llm_model  = os.environ.get("LLM_MODEL",       "qwen2.5:14b")
+    embed_model = os.environ.get("LLM_EMBED_MODEL", "nomic-embed-text")
+
+    for model, endpoint, payload in [
+        (llm_model,   "/api/generate",   f'{{"model":"{llm_model}","prompt":"","stream":false}}'),
+        (embed_model, "/api/embeddings",  f'{{"model":"{embed_model}","prompt":"warmup"}}'),
+    ]:
+        try:
+            req = urllib.request.Request(
+                f"{ollama_url}{endpoint}",
+                data=payload.encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=30)
+            logger.info(f"[startup] Ollama warm-up OK: {model}")
+        except Exception as exc:
+            logger.warning(f"[startup] Ollama warm-up {model}: {exc}")
 
 
 async def _run_in_thread(fn) -> None:
