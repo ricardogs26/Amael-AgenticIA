@@ -42,6 +42,7 @@ def _get_llm() -> ChatOllama:
             model=settings.llm_model,
             base_url=settings.ollama_base_url,
             temperature=0,
+            request_timeout=60,
         )
     return _chat_llm
 
