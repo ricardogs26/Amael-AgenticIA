@@ -1,8 +1,9 @@
 """
-Router /api/slo — endpoints de observabilidad y SLO status.
+Router /api — endpoints de observabilidad.
 
 Endpoints:
   GET /api/slo/status — estado actual de todos los SLOs con datos de Prometheus
+  GET /api/agents     — lista de agentes registrados en AgentRegistry
 """
 from __future__ import annotations
 
@@ -31,3 +32,18 @@ async def get_slo_status(
     """
     from observability.slo import get_slo_status
     return {"slos": get_slo_status()}
+
+
+@router.get("/agents")
+async def list_agents(
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    """
+    Lista todos los agentes registrados en AgentRegistry con su metadata.
+
+    Returns:
+        { count: int, agents: [{ name, role, version, capabilities, ... }] }
+    """
+    from agents.base.agent_registry import AgentRegistry
+    agents = AgentRegistry.list_agents()
+    return {"count": len(agents), "agents": agents}
