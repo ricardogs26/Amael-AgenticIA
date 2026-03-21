@@ -1,0 +1,118 @@
+---
+# NetworkPolicy — amael-agentic-backend
+# Permite solo el tráfico necesario. Principio: deny-all por defecto,
+# whitelist explícita de fuentes y destinos.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: amael-agentic-backend-netpol
+  namespace: amael-ia
+spec:
+  podSelector:
+    matchLabels:
+      app: amael-agentic-backend
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Tráfico desde Kong (API gateway) — puerto 8000
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kong
+      ports:
+        - port: 8000
+          protocol: TCP
+    # Tráfico interno entre pods amael-ia (whatsapp-bridge, k8s-agent, etc.)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: amael-ia
+      ports:
+        - port: 8000
+          protocol: TCP
+    # Prometheus scrape desde observability
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - port: 8000
+          protocol: TCP
+
+  egress:
+    # PostgreSQL
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+    # Redis
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - port: 6379
+          protocol: TCP
+    # Qdrant
+    - to:
+        - podSelector:
+            matchLabels:
+              app: qdrant
+      ports:
+        - port: 6333
+          protocol: TCP
+    # Ollama
+    - to:
+        - podSelector:
+            matchLabels:
+              app: ollama
+      ports:
+        - port: 11434
+          protocol: TCP
+    # MinIO
+    - to:
+        - podSelector:
+            matchLabels:
+              app: minio
+      ports:
+        - port: 9000
+          protocol: TCP
+    # k8s-agent y productivity-service (herramientas internas)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: amael-ia
+      ports:
+        - port: 8001
+          protocol: TCP
+        - port: 8002
+          protocol: TCP
+    # OTel Collector (tracing)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - port: 4317
+          protocol: TCP
+    # DNS (siempre necesario)
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Vault (secrets)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vault
+      ports:
+        - port: 8200
+          protocol: TCP
