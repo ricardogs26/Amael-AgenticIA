@@ -250,6 +250,7 @@ def create_app() -> FastAPI:
     from interfaces.api.routers.identity import router as identity_router
     from interfaces.api.routers.ingest import router as ingest_router
     from interfaces.api.routers.memory import router as memory_router
+    from interfaces.api.routers.observability import router as observability_router
     from interfaces.api.routers.planner import router as planner_router
     from interfaces.api.routers.profile import router as profile_router
     from interfaces.api.routers.sre import router as sre_router
@@ -269,6 +270,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks_router)        # POST /api/agent/task — Phase 1
     app.include_router(memory_router)       # GET/DELETE /api/memory — Phase 8
     app.include_router(devops_router)       # POST /api/devops/ci-hook — webhook CI
+    app.include_router(observability_router)  # GET /api/slo/status — P2-006
 
     return app
 

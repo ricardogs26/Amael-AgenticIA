@@ -16,6 +16,7 @@ from pydantic import BaseModel, ValidationError, field_validator
 
 from agents.supervisor.prompts import SUPERVISOR_SYSTEM_PROMPT
 from observability.metrics import (
+    LLM_TOKENS_TOTAL,
     SUPERVISOR_DECISIONS_TOTAL,
     SUPERVISOR_LATENCY_SECONDS,
     SUPERVISOR_QUALITY_SCORE,
@@ -151,8 +152,21 @@ def evaluate(state: dict, redis_client=None) -> dict:
 
         t0 = time.time()
         try:
-            raw = _get_llm().invoke(messages).content.strip()
+            _sv_resp = _get_llm().invoke(messages)
             SUPERVISOR_LATENCY_SECONDS.observe(time.time() - t0)
+            raw = (_sv_resp.content if hasattr(_sv_resp, "content") else str(_sv_resp)).strip()
+            try:
+                from config.settings import settings as _s
+                _model = _s.llm_model
+                _usage = getattr(_sv_resp, "usage_metadata", None)
+                if _usage:
+                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="input").inc(_usage.get("input_tokens", 0))
+                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="output").inc(_usage.get("output_tokens", 0))
+                else:
+                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="input").inc(len(evaluation_prompt) // 4)
+                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="output").inc(len(raw) // 4)
+            except Exception:
+                pass
             sv_decision = _parse_decision(raw)
         except Exception as exc:
             logger.error(f"[supervisor] Error invocando LLM: {exc}")

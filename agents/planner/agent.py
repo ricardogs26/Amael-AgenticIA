@@ -26,6 +26,7 @@ from agents.planner.prompts import PLANNER_SYSTEM_PROMPT
 from core.agent_base import AgentResult, BaseAgent
 from core.constants import MAX_PLAN_STEPS
 from observability.metrics import (
+    LLM_TOKENS_TOTAL,
     PLANNER_INVALID_STEPS_TOTAL,
     PLANNER_LATENCY_SECONDS,
     PLANNER_PARSE_ERRORS_TOTAL,
@@ -125,8 +126,21 @@ def planner_node(state: dict[str, Any], llm=None) -> dict[str, Any]:
         ]
 
         t0 = time.time()
-        response = _get_llm().invoke(messages).content.strip()
+        _raw_response = _get_llm().invoke(messages)
         PLANNER_LATENCY_SECONDS.observe(time.time() - t0)
+        response = (_raw_response.content if hasattr(_raw_response, "content") else str(_raw_response)).strip()
+        try:
+            from config.settings import settings as _s
+            _model = _s.llm_model
+            _usage = getattr(_raw_response, "usage_metadata", None)
+            if _usage:
+                LLM_TOKENS_TOTAL.labels(model=_model, token_type="input").inc(_usage.get("input_tokens", 0))
+                LLM_TOKENS_TOTAL.labels(model=_model, token_type="output").inc(_usage.get("output_tokens", 0))
+            else:
+                LLM_TOKENS_TOTAL.labels(model=_model, token_type="input").inc(len(PLANNER_SYSTEM_PROMPT + question) // 4)
+                LLM_TOKENS_TOTAL.labels(model=_model, token_type="output").inc(len(response) // 4)
+        except Exception:
+            pass
 
         plan: list[str] = []
         try:
