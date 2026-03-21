@@ -2,8 +2,10 @@
 Router /api — endpoints de observabilidad.
 
 Endpoints:
-  GET /api/slo/status — estado actual de todos los SLOs con datos de Prometheus
-  GET /api/agents     — lista de agentes registrados en AgentRegistry
+  GET /api/slo/status          — estado actual de todos los SLOs con datos de Prometheus
+  GET /api/agents              — lista de agentes registrados en AgentRegistry
+  GET /api/health              — estado completo de todos los componentes (API-friendly)
+  GET /api/health/{component}  — granular: postgres | redis | qdrant | ollama | k8s_agent
 """
 from __future__ import annotations
 
@@ -32,6 +34,36 @@ async def get_slo_status(
     """
     from observability.slo import get_slo_status
     return {"slos": get_slo_status()}
+
+
+@router.get("/health")
+async def get_health(
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    """
+    Estado completo de todos los componentes de infraestructura.
+
+    Equivalente a /ready pero accesible como API (siempre HTTP 200,
+    el campo `status` indica ok | degraded | unavailable).
+    """
+    from observability.health import readiness
+    result = await readiness()
+    return result.model_dump()
+
+
+@router.get("/health/{component}")
+async def get_component_health(
+    component: str,
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    """
+    Health check granular de un único componente.
+
+    Componentes disponibles: postgres, redis, qdrant, ollama, k8s_agent
+    """
+    from observability.health import check_component
+    result = await check_component(component)
+    return result.model_dump()
 
 
 @router.get("/agents")
