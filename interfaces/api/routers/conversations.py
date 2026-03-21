@@ -70,39 +70,76 @@ class MessagesResponse(BaseModel):
 @router.get("", response_model=ConversationListResponse)
 def list_conversations(
     user_id: Annotated[str, Depends(get_current_user)],
-    limit: int = 20,
-    offset: int = 0,
+    limit:   int = 20,
+    offset:  int = 0,
+    search:  str | None = Query(default=None, max_length=200),
 ) -> ConversationListResponse:
-    """Lista las conversaciones del usuario ordenadas por actividad reciente."""
+    """
+    Lista las conversaciones del usuario ordenadas por actividad reciente.
+
+    Query params:
+        search: texto a buscar en títulos y contenido de mensajes (case-insensitive).
+    """
     try:
         from storage.postgres.client import get_connection
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        c.id,
-                        COALESCE(c.title, 'Conversación ' || LEFT(c.id, 8)) AS title,
-                        COUNT(m.id)                 AS message_count,
-                        c.created_at::text          AS created_at,
-                        COALESCE(
-                            (SELECT created_at::text FROM messages
+                if search:
+                    # Búsqueda full-text: título de conversación O contenido de mensajes
+                    cur.execute(
+                        """
+                        SELECT DISTINCT
+                            c.id,
+                            COALESCE(c.title, 'Conversación ' || LEFT(c.id, 8)) AS title,
+                            (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) AS message_count,
+                            c.created_at::text AS created_at,
+                            COALESCE(
+                                (SELECT created_at::text FROM messages
+                                 WHERE conversation_id = c.id
+                                 ORDER BY created_at DESC LIMIT 1),
+                                c.created_at::text
+                            ) AS last_active_at,
+                            (SELECT content FROM messages
                              WHERE conversation_id = c.id
-                             ORDER BY created_at DESC LIMIT 1),
-                            c.created_at::text
-                        )                           AS last_active_at,
-                        (SELECT content FROM messages
-                         WHERE conversation_id = c.id
-                         ORDER BY created_at DESC LIMIT 1) AS last_message
-                    FROM conversations c
-                    LEFT JOIN messages m ON m.conversation_id = c.id
-                    WHERE c.user_id = %s
-                    GROUP BY c.id, c.title, c.created_at
-                    ORDER BY last_active_at DESC
-                    LIMIT %s OFFSET %s
-                    """,
-                    (user_id, limit, offset),
-                )
+                             ORDER BY created_at DESC LIMIT 1) AS last_message
+                        FROM conversations c
+                        LEFT JOIN messages m ON m.conversation_id = c.id
+                        WHERE c.user_id = %s
+                          AND (
+                              c.title ILIKE %s
+                              OR m.content ILIKE %s
+                          )
+                        ORDER BY last_active_at DESC
+                        LIMIT %s OFFSET %s
+                        """,
+                        (user_id, f"%{search}%", f"%{search}%", limit, offset),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT
+                            c.id,
+                            COALESCE(c.title, 'Conversación ' || LEFT(c.id, 8)) AS title,
+                            COUNT(m.id)                 AS message_count,
+                            c.created_at::text          AS created_at,
+                            COALESCE(
+                                (SELECT created_at::text FROM messages
+                                 WHERE conversation_id = c.id
+                                 ORDER BY created_at DESC LIMIT 1),
+                                c.created_at::text
+                            )                           AS last_active_at,
+                            (SELECT content FROM messages
+                             WHERE conversation_id = c.id
+                             ORDER BY created_at DESC LIMIT 1) AS last_message
+                        FROM conversations c
+                        LEFT JOIN messages m ON m.conversation_id = c.id
+                        WHERE c.user_id = %s
+                        GROUP BY c.id, c.title, c.created_at
+                        ORDER BY last_active_at DESC
+                        LIMIT %s OFFSET %s
+                        """,
+                        (user_id, limit, offset),
+                    )
                 rows = cur.fetchall()
         convs = [
             ConversationSummary(

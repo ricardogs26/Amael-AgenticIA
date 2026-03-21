@@ -214,6 +214,61 @@ def _set_job_status(job_id: str, status: str, **extra) -> None:
         logger.warning(f"[ingest] No se pudo actualizar job {job_id}: {exc}")
 
 
+def _notify_ingest_done(
+    user: str,
+    filename: str,
+    chunks: int,
+    success: bool,
+    error: str = "",
+) -> None:
+    """
+    Notifica al usuario por WhatsApp cuando su ingestión asíncrona termina.
+    Busca el número WhatsApp del usuario en la tabla de identidades.
+    No-op si el usuario no tiene WhatsApp registrado o el bridge no está configurado.
+    """
+    _wa_url = os.environ.get("WHATSAPP_BRIDGE_URL", "http://whatsapp-bridge-service:3000")
+    if not _wa_url:
+        return
+    try:
+        # Buscar número WhatsApp del usuario en identidades
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT identifier FROM user_identities "
+                    "WHERE user_id = %s AND identity_type = 'whatsapp' LIMIT 1",
+                    (user,),
+                )
+                row = cur.fetchone()
+        if not row:
+            return
+        phone = row[0]
+
+        if success:
+            msg = (
+                f"✅ *Documento procesado correctamente*\n"
+                f"📄 Archivo: `{filename}`\n"
+                f"🔢 Fragmentos indexados: {chunks}\n"
+                f"Ya puedes hacer preguntas sobre este documento."
+            )
+        else:
+            msg = (
+                f"❌ *Error procesando documento*\n"
+                f"📄 Archivo: `{filename}`\n"
+                f"⚠️ {error}"
+            )
+
+        import requests as _req
+        _req.post(
+            f"{_wa_url}/send",
+            json={"phone": phone, "message": msg},
+            timeout=8,
+        )
+        logger.info(f"[ingest] Notificación WhatsApp enviada a {phone!r}")
+    except Exception as exc:
+        logger.debug(f"[ingest] WhatsApp notify failed (non-critical): {exc}")
+
+
 def _run_ingest_job(
     job_id: str,
     user: str,
@@ -317,10 +372,12 @@ def _run_ingest_job(
             summary=summary,
             chunks=n_chunks,
         )
+        _notify_ingest_done(user, filename, n_chunks, success=True)
 
     except Exception as exc:
         logger.error(f"[ingest] Async job {job_id} failed: {exc}", exc_info=True)
         _set_job_status(job_id, "failed", filename=filename, error=str(exc)[:300])
+        _notify_ingest_done(user, filename, 0, success=False, error=str(exc)[:200])
 
 
 # ── Async endpoints ───────────────────────────────────────────────────────────
