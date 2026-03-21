@@ -376,11 +376,15 @@ def _build_tools_map(user_id: str) -> dict:
         import httpx
 
         from config.settings import settings
+        from observability.tracing import get_trace_headers
         try:
             resp = httpx.post(
                 f"{settings.k8s_agent_url}/api/k8s-agent",
                 json={"query": query, "user_email": user_id},
-                headers={"Authorization": f"Bearer {settings.internal_api_secret}"},
+                headers={
+                    "Authorization": f"Bearer {settings.internal_api_secret}",
+                    **get_trace_headers(),
+                },
                 timeout=60.0,
             )
             if resp.status_code == 200:
@@ -404,11 +408,15 @@ def _build_tools_map(user_id: str) -> dict:
         import httpx
 
         from config.settings import settings
+        from observability.tracing import get_trace_headers
         try:
             resp = httpx.post(
                 f"{settings.productivity_service_url}/api/productivity",
                 json={"question": query, "user_id": user_id},
-                headers={"Authorization": f"Bearer {settings.internal_api_secret}"},
+                headers={
+                    "Authorization": f"Bearer {settings.internal_api_secret}",
+                    **get_trace_headers(),
+                },
                 timeout=30.0,
             )
             if resp.status_code == 200:

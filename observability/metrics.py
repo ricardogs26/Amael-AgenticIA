@@ -79,6 +79,23 @@ ORCHESTRATOR_MAX_STEPS_HIT_TOTAL = Counter(
     "Veces que se alcanzó MAX_GRAPH_ITERATIONS antes de completar el plan",
 )
 
+# ── Pipeline latencia desagregada (P2-003) ────────────────────────────────────
+GROUPER_LATENCY_SECONDS = Histogram(
+    "amael_grouper_latency_seconds",
+    "Latencia del Grouper al convertir plan plano en batches",
+    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.5),
+)
+PIPELINE_E2E_LATENCY_SECONDS = Histogram(
+    "amael_pipeline_e2e_latency_seconds",
+    "Latencia end-to-end del pipeline LangGraph completo (planner→supervisor)",
+    ["intent"],
+    buckets=(0.5, 1, 2, 5, 10, 20, 30, 60, 120),
+)
+EXECUTOR_BACKPRESSURE_QUEUE_DEPTH = Gauge(
+    "amael_executor_backpressure_queue_depth",
+    "Número de pasos pendientes en el executor (backpressure gauge)",
+)
+
 # ── Supervisor ────────────────────────────────────────────────────────────────
 SUPERVISOR_DECISIONS_TOTAL = Counter(
     "amael_supervisor_decisions_total",
@@ -145,6 +162,21 @@ RAG_LATENCY_SECONDS = Histogram(
     "Latencia de búsquedas en Qdrant",
     buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2),
 )
+RAG_FILTER_APPLIED_TOTAL = Counter(
+    "amael_rag_filter_applied_total",
+    "Búsquedas RAG por estrategia de filtrado",
+    ["filter_type"],   # filename | global
+)
+RAG_DOCS_RETURNED = Histogram(
+    "amael_rag_docs_returned",
+    "Número de chunks devueltos por búsqueda RAG",
+    buckets=(0, 1, 2, 3, 4, 5, 6, 8, 10),
+)
+RAG_RERANK_LATENCY_SECONDS = Histogram(
+    "amael_rag_rerank_latency_seconds",
+    "Latencia del reranking semántico en memoria (cosine similarity)",
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2),
+)
 
 # ── Seguridad ─────────────────────────────────────────────────────────────────
 SECURITY_RATE_LIMITED_TOTAL = Counter(
@@ -155,6 +187,23 @@ SECURITY_INPUT_BLOCKED_TOTAL = Counter(
     "amael_security_input_blocked_total",
     "Inputs bloqueados por validación de seguridad",
     ["reason"],   # too_long | injection_detected
+)
+SECURITY_AUTH_EVENTS_TOTAL = Counter(
+    "amael_security_auth_events_total",
+    "Eventos de seguridad de autenticación/autorización",
+    ["event_type"],
+    # event_type values:
+    #   jwt_invalid       — token JWT malformado o expirado
+    #   jwt_missing       — request sin header Authorization
+    #   internal_secret_invalid — INTERNAL_API_SECRET no coincide
+    #   rate_limit_user   — rate limit de usuario (15/60s)
+    #   rate_limit_internal — rate limit de API interna (60/min)
+    #   planner_rate_limit  — /planner/daily bloqueado por TTL 20h
+    #   sre_command_rate_limit — /sre/command bloqueado por 30/min
+)
+SECURITY_INTERNAL_RATE_LIMITED_TOTAL = Counter(
+    "amael_security_internal_rate_limited_total",
+    "Requests a endpoints internos bloqueados por rate limiting global",
 )
 
 # ── SRE Agent ─────────────────────────────────────────────────────────────────
