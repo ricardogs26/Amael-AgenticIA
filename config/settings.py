@@ -68,10 +68,7 @@ class Settings(BaseSettings):
     internal_api_secret: str = Field(alias="INTERNAL_API_SECRET")
     jwt_secret_key: str = Field(alias="JWT_SECRET_KEY")
     jwt_algorithm: str = "HS256"
-    session_secret_key: str = Field(
-        default="dev-session-secret",
-        alias="SESSION_SECRET_KEY",
-    )
+    session_secret_key: str = Field(alias="SESSION_SECRET_KEY")
 
     # ── OAuth (Google) ────────────────────────────────────────────────────────
     google_client_id: str | None = Field(default=None, alias="GOOGLE_CLIENT_ID")
@@ -90,7 +87,7 @@ class Settings(BaseSettings):
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
     postgres_db: str = Field(default="amael", alias="POSTGRES_DB")
     postgres_user: str = Field(default="amael", alias="POSTGRES_USER")
-    postgres_password: str = Field(default="amael", alias="POSTGRES_PASSWORD")
+    postgres_password: str = Field(alias="POSTGRES_PASSWORD")
     postgres_pool_min: int = Field(default=2, alias="POSTGRES_POOL_MIN")
     postgres_pool_max: int = Field(default=10, alias="POSTGRES_POOL_MAX")
 
@@ -105,8 +102,8 @@ class Settings(BaseSettings):
 
     # ── MinIO ─────────────────────────────────────────────────────────────────
     minio_endpoint: str = Field(default="minio-service:9000", alias="MINIO_ENDPOINT")
-    minio_access_key: str = Field(default="minioadmin", alias="MINIO_ACCESS_KEY")
-    minio_secret_key: str = Field(default="minioadmin", alias="MINIO_SECRET_KEY")
+    minio_access_key: str = Field(alias="MINIO_ACCESS_KEY")
+    minio_secret_key: str = Field(alias="MINIO_SECRET_KEY")
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
     minio_bucket: str = Field(default="amael-uploads", alias="MINIO_BUCKET")
 
@@ -157,6 +154,26 @@ class Settings(BaseSettings):
         "extra": "ignore",
         "populate_by_name": True,
     }
+
+    # ── Validadores de seguridad ──────────────────────────────────────────────
+
+    @field_validator("jwt_secret_key", "internal_api_secret", "session_secret_key")
+    @classmethod
+    def validate_secret_length(cls, v: str, info) -> str:
+        if len(v) < 32:
+            raise ValueError(
+                f"{info.field_name} debe tener al menos 32 caracteres "
+                f"(actual: {len(v)}). Genera uno con: openssl rand -hex 32"
+            )
+        return v
+
+    @field_validator("jwt_secret_key")
+    @classmethod
+    def validate_jwt_not_default(cls, v: str) -> str:
+        insecure = {"dev-secret", "secret", "changeme", "password", "jwt-secret"}
+        if v.lower() in insecure:
+            raise ValueError("JWT_SECRET_KEY usa un valor inseguro conocido")
+        return v
 
     # ── Propiedades derivadas ─────────────────────────────────────────────────
 

@@ -38,6 +38,8 @@ vault.root
 secrets.yaml
 *-secret.yaml
 *secrets*.yaml
+# Excepción: la plantilla SÍ debe estar en git
+!k8s/config/02-secrets-template.yaml
 
 # Logs
 *.log

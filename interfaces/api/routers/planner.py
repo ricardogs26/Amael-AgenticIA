@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from interfaces.api.auth import require_internal_secret
@@ -26,6 +26,29 @@ router = APIRouter(prefix="/api/planner", tags=["planner"])
 class PlannerResult(BaseModel):
     processed: int
     results:   list[dict[str, Any]]
+
+
+def _check_planner_rate_limit() -> None:
+    """
+    Protección extra para /daily: máximo 1 ejecución cada 20 horas.
+    Previene abuso si INTERNAL_API_SECRET se compromete.
+    """
+    try:
+        from storage.redis.client import get_client
+        redis = get_client()
+        key = "rate_limit:planner_daily"
+        if redis.exists(key):
+            ttl = redis.ttl(key)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Day planner ya ejecutado. Próximo disponible en {ttl}s",
+                headers={"Retry-After": str(ttl)},
+            )
+        redis.setex(key, 72000, "1")  # TTL 20 horas
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning(f"[planner] Rate limit check falló (Redis): {exc}")
 
 
 @router.post(
@@ -42,6 +65,7 @@ async def run_daily_planner() -> PlannerResult:
 
     Requiere: Authorization: Bearer {INTERNAL_API_SECRET}
     """
+    _check_planner_rate_limit()
     from storage.postgres.client import get_connection
 
     user_emails: list[str] = []

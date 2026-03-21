@@ -153,6 +153,27 @@ def deactivate_maintenance_window() -> dict[str, Any]:
 
 # ── WhatsApp /sre command dispatcher ─────────────────────────────────────────
 
+def _check_sre_command_rate_limit(phone: str | None) -> None:
+    """Rate limit para /sre command: 30 req/min por número de teléfono."""
+    try:
+        from storage.redis.client import get_client
+        redis = get_client()
+        key = f"rate_limit:sre_command:{phone or 'unknown'}"
+        count = redis.incr(key)
+        if count == 1:
+            redis.expire(key, 60)
+        if count > 30:
+            raise HTTPException(
+                status_code=429,
+                detail="Demasiados comandos SRE. Espera 1 minuto.",
+                headers={"Retry-After": "60"},
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+
 @router.post("/command", dependencies=[Depends(require_internal_secret)])
 async def handle_sre_command(body: SRECommandRequest) -> dict[str, Any]:
     """
@@ -162,6 +183,7 @@ async def handle_sre_command(body: SRECommandRequest) -> dict[str, Any]:
         status, incidents, postmortems, slo, maintenance on <min>,
         maintenance off, ayuda
     """
+    _check_sre_command_rate_limit(body.phone)
     from observability.metrics import SRE_WA_COMMANDS_TOTAL
     cmd = body.command.strip().lower()
 

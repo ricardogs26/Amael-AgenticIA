@@ -142,6 +142,7 @@ def require_internal_secret(
     Dependencia para endpoints internos (CronJobs, WhatsApp bridge).
     Verifica el header Authorization: Bearer {INTERNAL_API_SECRET}.
     Lanza HTTP 403 si el secret no coincide.
+    Aplica rate limiting global: 60 req/min para evitar abuso si el secret se compromete.
     """
     from config.settings import settings
 
@@ -150,10 +151,31 @@ def require_internal_secret(
         token = authorization[7:].strip()
 
     if not token or token != settings.internal_api_secret:
+        logger.warning("[auth] Intento con internal secret inválido")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acceso denegado: secret interno inválido",
         )
+
+    # Rate limiting global para endpoints internos: 60 req/min
+    try:
+        from storage.redis.client import get_client
+        redis = get_client()
+        key = "rate_limit:internal_api"
+        count = redis.incr(key)
+        if count == 1:
+            redis.expire(key, 60)
+        if count > 60:
+            logger.warning("[auth] Rate limit interno excedido")
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit interno excedido (60/min)",
+                headers={"Retry-After": "60"},
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # Si Redis falla, no bloquear el endpoint
 
 
 # ── Rate limiting ─────────────────────────────────────────────────────────────
