@@ -390,6 +390,22 @@ def _ensure_schema() -> None:
                 ON security_audit_log (event_type, created_at DESC)
             """)
 
+            # ── Documentos indexados por usuario (RAG) ─────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_documents (
+                    id           BIGSERIAL PRIMARY KEY,
+                    user_id      TEXT NOT NULL,
+                    doc_type     TEXT,
+                    summary      TEXT,
+                    raw_analysis TEXT,
+                    created_at   TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_user_documents_user
+                ON user_documents (user_id, created_at DESC)
+            """)
+
 
 def _warmup_ollama_models() -> None:
     """
