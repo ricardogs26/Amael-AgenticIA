@@ -24,6 +24,15 @@ _bearer = HTTPBearer(auto_error=False)
 
 # ── JWT ───────────────────────────────────────────────────────────────────────
 
+def _emit_security_event(event_type: str) -> None:
+    """Registra un evento de seguridad en métricas Prometheus."""
+    try:
+        from observability.metrics import SECURITY_AUTH_EVENTS_TOTAL
+        SECURITY_AUTH_EVENTS_TOTAL.labels(event_type=event_type).inc()
+    except Exception:
+        pass
+
+
 def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> str:
@@ -35,6 +44,7 @@ def get_current_user(
         Email del usuario (sub del JWT).
     """
     if credentials is None:
+        _emit_security_event("jwt_missing")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token de autenticación requerido",
@@ -53,13 +63,17 @@ def get_current_user(
         )
         user_id: str | None = payload.get("sub") or payload.get("email")
         if not user_id:
+            _emit_security_event("jwt_invalid")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token inválido: falta 'sub'",
             )
         return user_id
 
+    except HTTPException:
+        raise
     except Exception as exc:
+        _emit_security_event("jwt_invalid")
         logger.warning(f"[auth] JWT inválido: {exc}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -151,6 +165,7 @@ def require_internal_secret(
         token = authorization[7:].strip()
 
     if not token or token != settings.internal_api_secret:
+        _emit_security_event("internal_secret_invalid")
         logger.warning("[auth] Intento con internal secret inválido")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -159,6 +174,7 @@ def require_internal_secret(
 
     # Rate limiting global para endpoints internos: 60 req/min
     try:
+        from observability.metrics import SECURITY_INTERNAL_RATE_LIMITED_TOTAL
         from storage.redis.client import get_client
         redis = get_client()
         key = "rate_limit:internal_api"
@@ -166,6 +182,8 @@ def require_internal_secret(
         if count == 1:
             redis.expire(key, 60)
         if count > 60:
+            _emit_security_event("rate_limit_internal")
+            SECURITY_INTERNAL_RATE_LIMITED_TOTAL.inc()
             logger.warning("[auth] Rate limit interno excedido")
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -199,6 +217,7 @@ def check_rate_limit(user_id: str) -> None:
 
         if count > settings.rate_limit_max:
             SECURITY_RATE_LIMITED_TOTAL.inc()
+            _emit_security_event("rate_limit_user")
             logger.warning(f"[auth] Rate limit excedido para usuario: {user_id}")
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,

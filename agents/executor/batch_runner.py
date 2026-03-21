@@ -17,6 +17,7 @@ from langchain_ollama import ChatOllama
 
 from agents.executor.step_handlers import STEP_HANDLERS
 from observability.metrics import (
+    EXECUTOR_BACKPRESSURE_QUEUE_DEPTH,
     EXECUTOR_CONTEXT_TRUNCATIONS_TOTAL,
     EXECUTOR_ERRORS_TOTAL,
     EXECUTOR_ESTIMATED_PROMPT_TOKENS,
@@ -80,6 +81,7 @@ def _run_tool_step_guarded(
     global _pending_steps
     with _pending_lock:
         _pending_steps -= 1
+        EXECUTOR_BACKPRESSURE_QUEUE_DEPTH.set(_pending_steps)
     with _step_semaphore:
         return run_tool_step(step, state, tools_map)
 
@@ -240,6 +242,7 @@ def run_parallel_batch(
                 state.get("context", "") or "",
             )
         _pending_steps += len(batch)
+        EXECUTOR_BACKPRESSURE_QUEUE_DEPTH.set(_pending_steps)
 
     results: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=min(len(batch), _MAX_CONCURRENT_STEPS)) as pool:
