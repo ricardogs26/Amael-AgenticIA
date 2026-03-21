@@ -154,7 +154,7 @@ All three registries use a singleton + decorator pattern and populate during lif
 3. Rerank via numpy cosine similarity
 4. If no filter: `vectorstore.similarity_search(k=5)`
 
-Post-REASONING language detection: if question=ES and answer=EN, a second LLM call translates. (qwen2.5:14b defaults to English when RAG context is English.)
+Post-REASONING language detection (v1.10.13): translation fires when target language is ES (explicit preference OR detected from question) AND response is NOT Spanish (covers "und"/mixed — not just "en"). `PATCH /api/memory/profile/language` sets preference, invalidates Redis cache immediately.
 
 ---
 
