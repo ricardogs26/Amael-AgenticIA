@@ -1,0 +1,76 @@
+---
+# CronJob de pruning de conversaciones
+# Elimina conversaciones inactivas de más de 90 días para evitar bloat en PostgreSQL.
+# Ejecuta cada domingo a las 03:00am hora de México.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: amael-conversation-pruning
+  namespace: amael-ia
+spec:
+  schedule: "0 3 * * 0"
+  timeZone: "America/Mexico_City"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: pruning
+            image: registry.richardx.dev/amael-agentic-backend:1.10.8
+            command:
+              - python3
+              - -c
+              - |
+                import os, psycopg2, logging
+                logging.basicConfig(level=logging.INFO, format='%(message)s')
+                log = logging.getLogger("pruning")
+
+                conn = psycopg2.connect(
+                    host=os.environ["POSTGRES_HOST"],
+                    dbname=os.environ["POSTGRES_DB"],
+                    user=os.environ["POSTGRES_USER"],
+                    password=os.environ["POSTGRES_PASSWORD"],
+                )
+                with conn:
+                    with conn.cursor() as cur:
+                        # Eliminar mensajes de conversaciones antiguas primero (FK)
+                        cur.execute("""
+                            DELETE FROM messages
+                            WHERE conversation_id IN (
+                                SELECT id FROM conversations
+                                WHERE last_active_at < NOW() - INTERVAL '90 days'
+                            )
+                        """)
+                        msgs_deleted = cur.rowcount
+                        # Eliminar conversaciones antiguas
+                        cur.execute("""
+                            DELETE FROM conversations
+                            WHERE last_active_at < NOW() - INTERVAL '90 days'
+                        """)
+                        convs_deleted = cur.rowcount
+                log.info(f"Pruning completado: {convs_deleted} conversaciones, {msgs_deleted} mensajes eliminados")
+                conn.close()
+            envFrom:
+              - secretRef:
+                  name: amael-secrets
+            env:
+              - name: POSTGRES_HOST
+                valueFrom:
+                  configMapKeyRef:
+                    name: amael-agentic-config
+                    key: POSTGRES_HOST
+              - name: POSTGRES_DB
+                valueFrom:
+                  configMapKeyRef:
+                    name: amael-agentic-config
+                    key: POSTGRES_DB
+              - name: POSTGRES_USER
+                valueFrom:
+                  configMapKeyRef:
+                    name: amael-agentic-config
+                    key: POSTGRES_USER
