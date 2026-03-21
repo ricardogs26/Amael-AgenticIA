@@ -420,20 +420,13 @@ def _build_tools_map(user_id: str) -> dict:
 
     tools["productivity"] = _productivity
 
-    # ── web_search: DuckDuckGo via WebSkill ───────────────────────────────────
+    # ── web_search: búsqueda web (síncrona, compatible con asyncio loop) ────────
     def _web_search(query: str) -> str:
         try:
-            from skills.registry import SkillRegistry
-            skill = SkillRegistry.get("web")
-            import asyncio
-
-            from core.skill_base import SkillInput
-            result = asyncio.get_event_loop().run_until_complete(
-                skill.execute(SkillInput(query=query))
-            )
-            return result.data if result.success else result.error or "Sin resultados web."
+            from agents.researcher.web_searcher import web_search
+            return web_search(query)
         except Exception as exc:
-            return f"[web_search] No disponible: {exc}"
+            return f"[web_search] Error: {exc}"
 
     tools["web_search"] = _web_search
 
