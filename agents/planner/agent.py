@@ -135,11 +135,11 @@ def planner_node(state: dict[str, Any], llm=None) -> dict[str, Any]:
             _model = _s.llm_model
             _usage = getattr(_raw_response, "usage_metadata", None)
             if _usage:
-                LLM_TOKENS_TOTAL.labels(model=_model, token_type="input").inc(_usage.get("input_tokens", 0))
-                LLM_TOKENS_TOTAL.labels(model=_model, token_type="output").inc(_usage.get("output_tokens", 0))
+                LLM_TOKENS_TOTAL.labels(model=_model, token_type="input", agent="planner").inc(_usage.get("input_tokens", 0))
+                LLM_TOKENS_TOTAL.labels(model=_model, token_type="output", agent="planner").inc(_usage.get("output_tokens", 0))
             else:
-                LLM_TOKENS_TOTAL.labels(model=_model, token_type="input").inc(len(PLANNER_SYSTEM_PROMPT + question) // 4)
-                LLM_TOKENS_TOTAL.labels(model=_model, token_type="output").inc(len(response) // 4)
+                LLM_TOKENS_TOTAL.labels(model=_model, token_type="input", agent="planner").inc(len(PLANNER_SYSTEM_PROMPT + question) // 4)
+                LLM_TOKENS_TOTAL.labels(model=_model, token_type="output", agent="planner").inc(len(response) // 4)
         except Exception:
             pass
 

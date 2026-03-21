@@ -49,7 +49,7 @@ _pending_steps = 0
 _pending_lock = threading.Lock()
 
 
-def _track_llm_tokens(response, model: str, input_text: str) -> None:
+def _track_llm_tokens(response, model: str, input_text: str, agent: str = "reasoning") -> None:
     """Registra tokens de entrada y salida en LLM_TOKENS_TOTAL."""
     try:
         usage = getattr(response, "usage_metadata", None)
@@ -61,8 +61,8 @@ def _track_llm_tokens(response, model: str, input_text: str) -> None:
             input_tokens = len(input_text) // 4
             output_content = getattr(response, "content", "") or ""
             output_tokens = len(output_content) // 4
-        LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
-        LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+        LLM_TOKENS_TOTAL.labels(model=model, token_type="input", agent=agent).inc(input_tokens)
+        LLM_TOKENS_TOTAL.labels(model=model, token_type="output", agent=agent).inc(output_tokens)
     except Exception:
         pass
 
@@ -299,7 +299,7 @@ def run_reasoning_step(
             SystemMessage(content="Eres un traductor experto de inglés a español. Traduce el siguiente texto al español de forma natural y fluida, conservando el formato (bloques de código, listas, etc.) exactamente igual."),
             HumanMessage(content=new_answer),
         ])
-        _track_llm_tokens(trans_response, _model, trans_input)
+        _track_llm_tokens(trans_response, _model, trans_input, agent="translation")
         new_answer = trans_response.content if hasattr(trans_response, "content") else str(trans_response)
 
     if all_media:

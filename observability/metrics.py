@@ -134,7 +134,9 @@ HTTP_REQUEST_LATENCY_SECONDS = Histogram(
 LLM_TOKENS_TOTAL = Counter(
     "amael_llm_tokens_total",
     "Total de tokens procesados por el LLM",
-    ["model", "token_type"],   # token_type: input | output
+    ["model", "token_type", "agent"],
+    # token_type: input | output
+    # agent: planner | supervisor | reasoning | translation | llm_utils | sre | other
 )
 LLM_LATENCY_SECONDS = Histogram(
     "amael_llm_latency_seconds",

@@ -161,11 +161,11 @@ def evaluate(state: dict, redis_client=None) -> dict:
                 _model = _s.llm_model
                 _usage = getattr(_sv_resp, "usage_metadata", None)
                 if _usage:
-                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="input").inc(_usage.get("input_tokens", 0))
-                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="output").inc(_usage.get("output_tokens", 0))
+                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="input", agent="supervisor").inc(_usage.get("input_tokens", 0))
+                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="output", agent="supervisor").inc(_usage.get("output_tokens", 0))
                 else:
-                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="input").inc(len(evaluation_prompt) // 4)
-                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="output").inc(len(raw) // 4)
+                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="input", agent="supervisor").inc(len(evaluation_prompt) // 4)
+                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="output", agent="supervisor").inc(len(raw) // 4)
             except Exception:
                 pass
             sv_decision = _parse_decision(raw)
