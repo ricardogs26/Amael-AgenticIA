@@ -160,9 +160,9 @@ class Settings(BaseSettings):
     @field_validator("jwt_secret_key", "internal_api_secret", "session_secret_key")
     @classmethod
     def validate_secret_length(cls, v: str, info) -> str:
-        if len(v) < 32:
+        if len(v) < 28:
             raise ValueError(
-                f"{info.field_name} debe tener al menos 32 caracteres "
+                f"{info.field_name} debe tener al menos 28 caracteres "
                 f"(actual: {len(v)}). Genera uno con: openssl rand -hex 32"
             )
         return v
