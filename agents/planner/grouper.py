@@ -8,6 +8,7 @@ Regla:
 Migrado desde backend-ia/agents/grouper.py sin cambios de comportamiento.
 """
 import logging
+import time
 
 logger = logging.getLogger("agents.planner.grouper")
 
@@ -23,6 +24,7 @@ def group_plan_into_batches(plan: list[str]) -> list[list[str]]:
       ["K8S_TOOL: A", "REASONING: B", "K8S_TOOL: C", "REASONING: D"]
       → [["K8S_TOOL: A"], ["REASONING: B"], ["K8S_TOOL: C"], ["REASONING: D"]]
     """
+    _t0 = time.monotonic()
     batches: list[list[str]] = []
     tool_batch: list[str] = []
 
@@ -46,5 +48,11 @@ def group_plan_into_batches(plan: list[str]) -> list[list[str]]:
         )
     else:
         logger.info(f"[GROUPER] {len(batches)} grupos (todos secuenciales)")
+
+    try:
+        from observability.metrics import GROUPER_LATENCY_SECONDS
+        GROUPER_LATENCY_SECONDS.observe(time.monotonic() - _t0)
+    except Exception:
+        pass
 
     return batches

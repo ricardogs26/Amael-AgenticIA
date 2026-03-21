@@ -88,3 +88,27 @@ def instrument_requests() -> None:
         logger.info("[TRACING] requests instrumentado con OpenTelemetry.")
     except Exception as e:
         logger.warning(f"[TRACING] Error al instrumentar requests: {e}")
+
+
+def get_trace_headers() -> dict[str, str]:
+    """
+    Retorna los headers W3C TraceContext del span activo para propagación manual.
+
+    Uso en llamadas httpx efímeras (clientes no instrumentados):
+        headers = get_trace_headers()
+        httpx.post(url, headers={**base_headers, **headers})
+
+    Retorna dict vacío si OTel no está disponible o no hay span activo.
+    """
+    if not _otel_available:
+        return {}
+    try:
+        from opentelemetry import propagate, trace
+        span = trace.get_current_span()
+        if not span.get_span_context().is_valid:
+            return {}
+        carrier: dict[str, str] = {}
+        propagate.inject(carrier)
+        return carrier
+    except Exception:
+        return {}
