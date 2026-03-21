@@ -151,6 +151,17 @@ async def chat(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
     question = result
 
+    # P7-004: Response cache — Redis TTL 60s para queries idénticos del mismo usuario
+    _cache_key = None
+    _cached_answer = _get_cached_response(effective_user, question)
+    if _cached_answer is not None:
+        logger.debug(f"[chat] cache hit user={effective_user!r}")
+        _persist_message(conversation_id, effective_user, question, _cached_answer, request_id, "cached")
+        asyncio.ensure_future(_store_memory_episode(effective_user, conversation_id, question, _cached_answer))
+        return ChatResponse(answer=_cached_answer, response=_cached_answer,
+                            conversation_id=conversation_id, request_id=request_id,
+                            dispatch_mode="cache")
+
     # Routing + dispatch
     try:
         from orchestration import AgentRouter, dispatch
@@ -185,6 +196,10 @@ async def chat(
     # Output sanitization
     from security.sanitizer import sanitize_output
     answer = sanitize_output(result_dict.get("final_answer", ""))
+
+    # P7-004: Guardar en cache (solo respuestas sin media embebida)
+    if answer and "[MEDIA:" not in answer:
+        _set_cached_response(effective_user, question, answer)
 
     # Persistir en historial
     _persist_message(
@@ -489,16 +504,23 @@ def _persist_message(
     """Guarda el par pregunta/respuesta en PostgreSQL. Best-effort."""
     try:
         from storage.postgres.client import get_connection
+        # Auto-título: primeras 60 chars de la pregunta, limpiando espacios
+        auto_title = " ".join(question.split())[:60]
+        if len(question.strip()) > 60:
+            auto_title += "…"
+
         with get_connection() as conn:
             with conn.cursor() as cur:
-                # Asegura que existe la conversación
+                # Asegura que existe la conversación; pone título si aún no tiene
                 cur.execute(
                     """
-                    INSERT INTO conversations (id, user_id, created_at)
-                    VALUES (%s, %s, NOW())
-                    ON CONFLICT (id) DO NOTHING
+                    INSERT INTO conversations (id, user_id, title, created_at, last_active_at)
+                    VALUES (%s, %s, %s, NOW(), NOW())
+                    ON CONFLICT (id) DO UPDATE
+                        SET last_active_at = NOW(),
+                            title = COALESCE(conversations.title, EXCLUDED.title)
                     """,
-                    (conversation_id, user_id),
+                    (conversation_id, user_id, auto_title),
                 )
                 # Guarda los mensajes
                 cur.execute(
@@ -621,3 +643,37 @@ async def _send_voice_note(phone: str, text: str) -> None:
             logger.warning(f"[chat] CosyVoice también falló: {result.error}")
     except Exception as exc:
         logger.debug(f"[chat] _send_voice_note fallback CosyVoice: {exc}")
+
+
+# ── P7-004: Response cache helpers ────────────────────────────────────────────
+
+_CHAT_CACHE_TTL = 60  # segundos
+
+
+def _chat_cache_key(user_id: str, question: str) -> str:
+    import hashlib
+    h = hashlib.sha256(f"{user_id}:{question}".encode()).hexdigest()[:32]
+    return f"chat_cache:{h}"
+
+
+def _get_cached_response(user_id: str, question: str) -> str | None:
+    """Retorna respuesta cacheada o None si no hay cache hit."""
+    try:
+        from storage.redis.client import get_redis_client
+        rc = get_redis_client()
+        raw = rc.get(_chat_cache_key(user_id, question))
+        if raw:
+            return raw.decode() if isinstance(raw, bytes) else raw
+    except Exception:
+        pass
+    return None
+
+
+def _set_cached_response(user_id: str, question: str, answer: str) -> None:
+    """Guarda la respuesta en Redis con TTL de 60s."""
+    try:
+        from storage.redis.client import get_redis_client
+        rc = get_redis_client()
+        rc.setex(_chat_cache_key(user_id, question), _CHAT_CACHE_TTL, answer)
+    except Exception:
+        pass
