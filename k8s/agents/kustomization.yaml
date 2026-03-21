@@ -4,9 +4,8 @@ resources:
 - 05-backend-deployment.yaml
 - 07-day-planner-cronjob.yaml
 - 08-cosyvoice-deployment.yaml
-- 08-morning-audio-cronjob.yaml
 - 09-piper-deployment.yaml
 - 10-github-runner.yaml
 images:
 - name: registry.richardx.dev/amael-agentic-backend
-  newTag: 1.9.4
+  newTag: 1.10.2
