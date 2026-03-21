@@ -36,6 +36,27 @@ setup_logging()
 logger = logging.getLogger("main")
 
 
+# ── Validación de credenciales externas ───────────────────────────────────────
+
+def _check_external_credentials_security() -> None:
+    """
+    Emite warnings en startup para credenciales que requieren rotación manual.
+    No bloquea el arranque — solo alerta al operador en los logs.
+    """
+    import os
+    github_token = os.environ.get("GITHUB_TOKEN", "")
+    # Los tokens clásicos de GitHub tienen el prefijo ghp_ y 36 chars fijos.
+    # Si el token no ha sido rotado, alertar al operador.
+    if github_token.startswith("ghp_") and len(github_token) == 40:
+        logger.warning(
+            "[security] GITHUB_TOKEN usa formato PAT clásico (ghp_). "
+            "Considera migrar a Fine-grained tokens con scope mínimo "
+            "(repo:read, workflow:read) y rotar cada 90 días."
+        )
+    if not github_token:
+        logger.info("[security] GITHUB_TOKEN no configurado — GitHubTool en modo limitado")
+
+
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -136,12 +157,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning(f"[startup] OTel instrumentation falló: {exc}")
 
+    # 9. Validación de seguridad de credenciales externas
+    _check_external_credentials_security()
+
     logger.info("=== Amael-AgenticIA listo para recibir requests ===")
 
     yield  # ←── app corriendo
 
     # ── SHUTDOWN ──────────────────────────────────────────────────────────────
-    logger.info("=== Amael-AgenticIA apagando ===")
+    logger.info("=== Amael-AgenticIA apagando — drenando requests in-flight ===")
+
+    # Drain period: dar tiempo a requests en vuelo para completarse
+    # Kubernetes envía SIGTERM y espera terminationGracePeriodSeconds antes de SIGKILL
+    import asyncio
+    await asyncio.sleep(5)
 
     try:
         from agents.sre import stop_sre_loop

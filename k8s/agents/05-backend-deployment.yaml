@@ -27,6 +27,9 @@ spec:
         prometheus.io/path:   "/metrics"
     spec:
       serviceAccountName: amael-agentic-sa
+      # Tiempo para drenar requests in-flight antes de SIGKILL
+      # El lifespan shutdown hace asyncio.sleep(5) + cierra SRE loop + PG pool
+      terminationGracePeriodSeconds: 60
 
       # Esperar a que PostgreSQL y Redis estén listos antes de arrancar
       initContainers:

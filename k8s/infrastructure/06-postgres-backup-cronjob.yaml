@@ -1,0 +1,129 @@
+# ── PostgreSQL Backup CronJob ──────────────────────────────────────────────────
+# Ejecuta pg_dump diariamente a las 3am y sube el archivo a MinIO.
+# Retención: 7 días (mc rm con fecha).
+#
+# Requisitos previos:
+#   - Secret amael-secrets con POSTGRES_PASSWORD y MINIO_ACCESS_KEY / MINIO_ROOT_PASSWORD
+#   - amael-agentic-configmap con MINIO_ENDPOINT
+#   - MinIO bucket "amael-backups" creado (se crea automáticamente si no existe)
+#
+# Verificar último backup:
+#   kubectl logs -n amael-ia job/<nombre-del-job> --tail=30
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: amael-ia
+  labels:
+    app: postgres-backup
+    app.kubernetes.io/part-of: amael-ia
+spec:
+  schedule: "0 3 * * *"          # Diariamente a las 3:00am UTC
+  timeZone: "America/Mexico_City" # 3am hora México
+  concurrencyPolicy: Forbid       # No ejecutar si el anterior aún corre
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 1800  # Máximo 30 minutos
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: postgres-backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: pg-backup
+            image: postgres:16-alpine
+            command:
+            - sh
+            - -c
+            - |
+              set -e
+              TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+              BACKUP_FILE="/tmp/amael_backup_${TIMESTAMP}.sql.gz"
+              BUCKET="amael-backups"
+              MINIO_URL="http://${MINIO_ENDPOINT}"
+
+              echo "[backup] Iniciando pg_dump de ${POSTGRES_DB} @ ${POSTGRES_HOST}..."
+              PGPASSWORD="${POSTGRES_PASSWORD}" pg_dump \
+                -h "${POSTGRES_HOST}" \
+                -U "${POSTGRES_USER}" \
+                -d "${POSTGRES_DB}" \
+                --no-password \
+                --format=plain \
+                --no-owner \
+                --no-acl \
+              | gzip > "${BACKUP_FILE}"
+
+              echo "[backup] Dump completado: $(du -sh ${BACKUP_FILE} | cut -f1)"
+
+              # Instalar mc (MinIO client) desde MinIO CDN
+              wget -qO /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc
+              chmod +x /usr/local/bin/mc
+
+              # Configurar mc con credenciales MinIO
+              mc alias set minio "${MINIO_URL}" "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" --api S3v4
+
+              # Crear bucket si no existe
+              mc mb --ignore-existing "minio/${BUCKET}"
+
+              # Subir backup
+              mc cp "${BACKUP_FILE}" "minio/${BUCKET}/postgres/${TIMESTAMP}.sql.gz"
+              echo "[backup] Backup subido a minio/${BUCKET}/postgres/${TIMESTAMP}.sql.gz"
+
+              # Eliminar backups con más de 7 días
+              mc rm --recursive --force --older-than 7d "minio/${BUCKET}/postgres/" 2>/dev/null || true
+              echo "[backup] Limpieza de backups > 7 días completada"
+
+              echo "[backup] OK — backup diario finalizado"
+            env:
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: amael-agentic-configmap
+                  key: POSTGRES_HOST
+                  optional: true
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: amael-agentic-configmap
+                  key: POSTGRES_DB
+                  optional: true
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: amael-agentic-configmap
+                  key: POSTGRES_USER
+                  optional: true
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: amael-secrets
+                  key: POSTGRES_PASSWORD
+            - name: MINIO_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: amael-agentic-configmap
+                  key: MINIO_ENDPOINT
+                  optional: true
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: amael-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: amael-secrets
+                  key: MINIO_ROOT_PASSWORD
+            resources:
+              requests:
+                cpu: "100m"
+                memory: "128Mi"
+              limits:
+                cpu: "500m"
+                memory: "256Mi"

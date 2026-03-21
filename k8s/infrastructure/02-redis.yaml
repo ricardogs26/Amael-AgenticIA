@@ -7,6 +7,22 @@
 #   - Circuit breaker SRE (sre:cb:failures, sre:cb:open)
 # ─────────────────────────────────────────────────────────────────────────────
 
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: amael-ia
+  labels:
+    app: redis
+    app.kubernetes.io/part-of: amael-ia
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -32,7 +48,20 @@ spec:
         image: redis:7-alpine
         ports:
         - containerPort: 6379
-        command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+        # AOF persistence + maxmemory policy
+        # appendfsync everysec: flush AOF cada segundo (balance rendimiento/durabilidad)
+        command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        - --appendfsync
+        - everysec
+        - --maxmemory
+        - 256mb
+        - --maxmemory-policy
+        - allkeys-lru
+        - --dir
+        - /data
         resources:
           requests:
             cpu: "100m"
@@ -40,6 +69,9 @@ spec:
           limits:
             cpu: "500m"
             memory: "512Mi"
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
         livenessProbe:
           exec:
             command: ["redis-cli", "ping"]
@@ -52,6 +84,15 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 5
           timeoutSeconds: 2
+        lifecycle:
+          preStop:
+            exec:
+              # Forzar BGSAVE antes del shutdown para no perder el estado final
+              command: ["redis-cli", "BGSAVE"]
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-pvc
 
 ---
 apiVersion: v1
