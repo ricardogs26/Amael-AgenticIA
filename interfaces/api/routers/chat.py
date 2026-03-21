@@ -420,7 +420,7 @@ def _build_tools_map(user_id: str) -> dict:
 
     tools["productivity"] = _productivity
 
-    # ── web_search: DuckDuckGo / tipo de cambio (síncrono) ────────────────────
+    # ── web_search: búsqueda web (síncrona, compatible con asyncio loop) ────────
     def _web_search(query: str) -> str:
         try:
             from agents.researcher.web_searcher import web_search
