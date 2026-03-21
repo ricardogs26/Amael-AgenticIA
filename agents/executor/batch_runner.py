@@ -287,9 +287,12 @@ def run_reasoning_step(
     _track_llm_tokens(response, _model, system_prompt + human_prompt)
     new_answer = response.content if hasattr(response, "content") else str(response)
 
-    # Post-traducción: si el usuario preguntó en español pero la respuesta salió en inglés,
-    # forzar traducción con un prompt dedicado (más confiable que instrucciones en el mismo prompt)
-    if user_question and _detect_language(user_question) == "es" and _detect_language(new_answer) == "en":
+    # Post-traducción: si el idioma de destino es español pero la respuesta no lo es,
+    # forzar traducción con prompt dedicado (más confiable que instrucciones en el mismo system prompt).
+    # Dispara si:  preferencia explícita "es"  → respuesta no es español
+    #              pregunta detectada como ES   → respuesta es inglés o indeterminada ("und")
+    _target_es = (pref_lang == "es") or (_detect_language(user_question) == "es" if user_question else False)
+    if _target_es and _detect_language(new_answer) != "es":
         logger.info("[executor] Respuesta en inglés detectada para pregunta en español — traduciendo")
         trans_input = new_answer
         trans_response = llm.invoke([
