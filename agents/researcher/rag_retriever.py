@@ -169,6 +169,15 @@ def _detect_filename_filter(query: str, user_email: str) -> str | None:
         return None
 
 
+_RAG_CACHE_TTL = 300  # 5 minutos
+
+
+def _rag_cache_key(user_email: str, query: str, filename_filter: str | None) -> str:
+    import hashlib
+    raw = f"{user_email}:{query}:{filename_filter or ''}"
+    return "rag_cache:" + hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
 def retrieve_documents(
     user_email: str,
     query: str,
@@ -184,6 +193,19 @@ def retrieve_documents(
     Retorna texto con cabeceras de fuente para que el LLM cite correctamente.
     """
     import time
+
+    # Cache en Redis — evita re-embeddear el mismo query en la misma sesión
+    try:
+        from storage.redis.client import get_redis_client
+        _rc = get_redis_client()
+        _cache_key = _rag_cache_key(user_email, query, filename_filter)
+        _cached = _rc.get(_cache_key)
+        if _cached:
+            logger.debug(f"[rag] cache hit: {_cache_key[:20]}...")
+            return _cached.decode() if isinstance(_cached, bytes) else _cached
+    except Exception:
+        _rc = None
+        _cache_key = None
 
     from observability.metrics import (
         RAG_DOCS_RETURNED,
@@ -270,7 +292,13 @@ def retrieve_documents(
             header = f"[Fuente: {src}, pág. {page}]" if page != "" else f"[Fuente: {src}]"
             parts.append(f"{header}\n{doc.page_content}")
         RAG_LATENCY_SECONDS.observe(time.monotonic() - _t0)
-        return "\n\n".join(parts)
+        result_text = "\n\n".join(parts)
+        try:
+            if _rc and _cache_key:
+                _rc.setex(_cache_key, _RAG_CACHE_TTL, result_text)
+        except Exception:
+            pass
+        return result_text
 
     except Exception as exc:
         logger.error(f"[rag] retrieve_documents error: {exc}")

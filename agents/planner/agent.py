@@ -48,6 +48,7 @@ def _get_llm() -> ChatOllama:
         _llm = ChatOllama(
             model=settings.llm_model,
             base_url=settings.ollama_base_url,
+            request_timeout=60,
         )
         logger.info(
             f"[planner] ChatOllama inicializado: "

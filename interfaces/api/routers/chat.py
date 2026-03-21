@@ -376,7 +376,13 @@ def _build_tools_map(user_id: str) -> dict:
         import httpx
 
         from config.settings import settings
+        from core.circuit_breaker import CircuitBreaker
         from observability.tracing import get_trace_headers
+        from storage.redis.client import get_redis_client
+
+        _cb = CircuitBreaker("k8s_agent", get_redis_client())
+        if _cb.is_open():
+            return "[k8s-agent] Servicio temporalmente no disponible (circuit breaker abierto). Reintenta en unos segundos."
         try:
             resp = httpx.post(
                 f"{settings.k8s_agent_url}/api/k8s-agent",
@@ -389,9 +395,12 @@ def _build_tools_map(user_id: str) -> dict:
             )
             if resp.status_code == 200:
                 data = resp.json()
+                _cb.record_success()
                 return data.get("response") or data.get("answer") or str(data)
+            _cb.record_failure()
             return f"[k8s-agent] Error {resp.status_code}: {resp.text[:200]}"
         except Exception as exc:
+            _cb.record_failure()
             return f"[k8s-agent] No disponible: {exc}"
 
     tools["k8s"] = _k8s
@@ -408,7 +417,13 @@ def _build_tools_map(user_id: str) -> dict:
         import httpx
 
         from config.settings import settings
+        from core.circuit_breaker import CircuitBreaker
         from observability.tracing import get_trace_headers
+        from storage.redis.client import get_redis_client
+
+        _cb = CircuitBreaker("productivity_service", get_redis_client())
+        if _cb.is_open():
+            return "[productivity] Servicio temporalmente no disponible (circuit breaker abierto). Reintenta en unos segundos."
         try:
             resp = httpx.post(
                 f"{settings.productivity_service_url}/api/productivity",
@@ -421,9 +436,12 @@ def _build_tools_map(user_id: str) -> dict:
             )
             if resp.status_code == 200:
                 data = resp.json()
+                _cb.record_success()
                 return data.get("response") or data.get("answer") or str(data)
+            _cb.record_failure()
             return f"[productivity] Error {resp.status_code}: {resp.text[:200]}"
         except Exception as exc:
+            _cb.record_failure()
             return f"[productivity] No disponible: {exc}"
 
     tools["productivity"] = _productivity
