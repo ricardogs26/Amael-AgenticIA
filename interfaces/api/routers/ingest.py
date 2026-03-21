@@ -118,7 +118,43 @@ async def ingest_document(
     try:
         from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-        from agents.researcher.rag_retriever import get_user_vectorstore
+        from agents.researcher.rag_retriever import (
+            _get_qdrant_client,
+            get_user_vectorstore,
+            sanitize_email,
+        )
+
+        # P7-003: Document versioning — eliminar chunks previos del mismo filename
+        try:
+            qdrant_client = _get_qdrant_client()
+            collection_name = sanitize_email(user)
+            if qdrant_client.collection_exists(collection_name):
+                # Scroll + delete por substring en Python (sin FTS index requerido)
+                fname_lower = (file.filename or "").lower()
+                scroll_result, _ = qdrant_client.scroll(
+                    collection_name=collection_name,
+                    limit=1000,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                ids_to_delete = [
+                    p.id for p in scroll_result
+                    if fname_lower in (
+                        (p.payload or {}).get("metadata", {}).get("filename") or ""
+                    ).lower()
+                    or fname_lower in (
+                        (p.payload or {}).get("metadata", {}).get("source") or ""
+                    ).lower()
+                ]
+                if ids_to_delete:
+                    qdrant_client.delete(
+                        collection_name=collection_name,
+                        points_selector=ids_to_delete,
+                    )
+                    logger.info(f"[ingest] Versioning: eliminados {len(ids_to_delete)} chunks previos de '{file.filename}'")
+        except Exception as ve:
+            logger.warning(f"[ingest] Versioning delete falló (no crítico): {ve}")
+
         splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         chunks = splitter.split_documents(documents)
         # Asegurar que cada chunk lleva el filename limpio en metadata
