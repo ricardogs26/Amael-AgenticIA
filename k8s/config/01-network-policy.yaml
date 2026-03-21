@@ -16,6 +16,14 @@ spec:
     - Egress
 
   ingress:
+    # Kubelet health probes — desde el nodo (192.168.0.141)
+    # Calico en MicroK8s aplica NetworkPolicy también al tráfico kubelet→pod
+    - from:
+        - ipBlock:
+            cidr: 192.168.0.141/32
+      ports:
+        - port: 8000
+          protocol: TCP
     # Tráfico desde Kong (API gateway) — puerto 8000
     - from:
         - namespaceSelector:
@@ -92,7 +100,7 @@ spec:
           protocol: TCP
         - port: 8002
           protocol: TCP
-    # OTel Collector (tracing)
+    # OTel Collector (tracing) y Prometheus/Grafana (PrometheusTool + GrafanaTool health checks)
     - to:
         - namespaceSelector:
             matchLabels:
@@ -100,6 +108,10 @@ spec:
       ports:
         - port: 4317
           protocol: TCP
+        - port: 9090
+          protocol: TCP
+        - port: 80
+          protocol: TCP    # Grafana ClusterIP service
     # DNS (siempre necesario)
     - to:
         - namespaceSelector: {}
@@ -115,4 +127,19 @@ spec:
               kubernetes.io/metadata.name: vault
       ports:
         - port: 8200
+          protocol: TCP
+    # Kubernetes API server (SRE agent + kubernetes Python client)
+    # MicroK8s expone el apiserver en 192.168.0.141:16443.
+    # Calico evalúa ipBlock sobre el IP pre-DNAT (10.152.183.1) Y post-DNAT.
+    - to:
+        - ipBlock:
+            cidr: 10.152.183.1/32   # ClusterIP del servicio kubernetes (pre-DNAT)
+      ports:
+        - port: 443
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 192.168.0.141/32  # Node IP — apiserver real (post-DNAT)
+      ports:
+        - port: 16443
           protocol: TCP
