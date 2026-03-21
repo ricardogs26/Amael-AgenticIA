@@ -15,6 +15,23 @@ from typing import Any
 logger = logging.getLogger("agents.base.llm_utils")
 
 
+def _track_tokens(response, input_text: str, agent: str) -> None:
+    try:
+        from config.settings import settings as _s
+        from observability.metrics import LLM_TOKENS_TOTAL
+        model = _s.llm_model
+        usage = getattr(response, "usage_metadata", None)
+        if usage:
+            LLM_TOKENS_TOTAL.labels(model=model, token_type="input", agent=agent).inc(usage.get("input_tokens", 0))
+            LLM_TOKENS_TOTAL.labels(model=model, token_type="output", agent=agent).inc(usage.get("output_tokens", 0))
+        else:
+            content = getattr(response, "content", "") or str(response)
+            LLM_TOKENS_TOTAL.labels(model=model, token_type="input", agent=agent).inc(len(input_text) // 4)
+            LLM_TOKENS_TOTAL.labels(model=model, token_type="output", agent=agent).inc(len(content) // 4)
+    except Exception:
+        pass
+
+
 async def invoke_llm(prompt: str, context: Any, agent_name: str = "agent") -> str:
     """
     Invoca el LLM con separación de system message y pregunta.
@@ -50,6 +67,7 @@ async def invoke_llm(prompt: str, context: Any, agent_name: str = "agent") -> st
         chat_llm = _get_chat_ollama()
         messages = [SystemMessage(content=system_text), HumanMessage(content=question_text)]
         result   = await asyncio.to_thread(chat_llm.invoke, messages)
+        _track_tokens(result, prompt, agent_name)
         return result.content if hasattr(result, "content") else str(result)
 
     except Exception as exc:
