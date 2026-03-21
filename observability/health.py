@@ -75,19 +75,20 @@ async def readiness() -> HealthResponse:
         _check_redis(),
         _check_qdrant(),
         _check_ollama(),
+        _check_k8s_agent(),
         _check_skills(),
         _check_tools(),
         return_exceptions=True,
     )
 
-    postgres_result, redis_result, qdrant_result, ollama_result, skills_results, tools_results = checks
+    postgres_result, redis_result, qdrant_result, ollama_result, k8s_agent_result, skills_results, tools_results = checks
 
     components: dict[str, Any] = {}
     all_storage_ok = True
     any_skill_fail = False
     any_tool_fail  = False
 
-    # Storage
+    # Storage (crítico — si falla, status = unavailable)
     for label, result in [
         ("postgres", postgres_result),
         ("redis",    redis_result),
@@ -101,6 +102,15 @@ async def readiness() -> HealthResponse:
             components[label] = result
             if not result.healthy:
                 all_storage_ok = False
+
+    # Servicios auxiliares (degraded si fallan, no unavailable)
+    if isinstance(k8s_agent_result, Exception):
+        components["k8s_agent"] = ComponentHealth(name="k8s_agent", healthy=False, detail=str(k8s_agent_result))
+        any_tool_fail = True
+    else:
+        components["k8s_agent"] = k8s_agent_result
+        if not k8s_agent_result.healthy:
+            any_tool_fail = True
 
     # Skills
     if isinstance(skills_results, Exception):
@@ -222,6 +232,28 @@ async def _check_ollama() -> ComponentHealth:
         logger.warning(f"[health] ollama check failed: {exc}")
         return ComponentHealth(
             name="ollama",
+            healthy=False,
+            latency_ms=round((time.monotonic() - t0) * 1000, 1),
+            detail=str(exc),
+        )
+
+
+async def _check_k8s_agent() -> ComponentHealth:
+    t0 = time.monotonic()
+    url = os.environ.get("K8S_AGENT_URL", "http://k8s-agent-service:8002")
+    try:
+        def _ping():
+            urllib.request.urlopen(f"{url}/health", timeout=3)
+        await asyncio.to_thread(_ping)
+        return ComponentHealth(
+            name="k8s_agent",
+            healthy=True,
+            latency_ms=round((time.monotonic() - t0) * 1000, 1),
+        )
+    except Exception as exc:
+        logger.warning(f"[health] k8s_agent check failed: {exc}")
+        return ComponentHealth(
+            name="k8s_agent",
             healthy=False,
             latency_ms=round((time.monotonic() - t0) * 1000, 1),
             detail=str(exc),
