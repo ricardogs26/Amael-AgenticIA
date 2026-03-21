@@ -170,6 +170,7 @@ spec:
             path: /health
             port: 8000
           initialDelaySeconds: 60    # tiempo para que el lifespan complete
+          timeoutSeconds:      10    # /health es sync — necesita thread del pool
           periodSeconds:       30
           failureThreshold:    3
 
@@ -178,14 +179,15 @@ spec:
             path: /ready
             port: 8000
           initialDelaySeconds: 30
-          periodSeconds:       15
-          timeoutSeconds:      10    # /ready verifica Qdrant (3s) + Ollama (5s) en paralelo
+          periodSeconds:       30    # más margen entre checks
+          timeoutSeconds:      35    # _check_tools() secuencial: tarda ~25s por skills+tools con timeouts
           failureThreshold:    3
 
         startupProbe:
           httpGet:
             path: /health
             port: 8000
+          timeoutSeconds:      10    # igual que liveness
           failureThreshold: 20    # 20 * 10s = 3m20s max startup time
           periodSeconds:    10
 
