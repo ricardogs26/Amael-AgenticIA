@@ -185,7 +185,14 @@ def retrieve_documents(
     """
     import time
 
-    from observability.metrics import RAG_HITS_TOTAL, RAG_LATENCY_SECONDS, RAG_MISS_TOTAL
+    from observability.metrics import (
+        RAG_DOCS_RETURNED,
+        RAG_FILTER_APPLIED_TOTAL,
+        RAG_HITS_TOTAL,
+        RAG_LATENCY_SECONDS,
+        RAG_MISS_TOTAL,
+        RAG_RERANK_LATENCY_SECONDS,
+    )
 
     _t0 = time.monotonic()
     try:
@@ -195,6 +202,7 @@ def retrieve_documents(
         if effective_filter:
             # Estrategia: scroll SIN filtro Qdrant + substring filter en Python.
             # MatchText requiere índice FTS y es case-sensitive sin él.
+            RAG_FILTER_APPLIED_TOTAL.labels(filter_type="filename").inc()
             keyword = effective_filter.lower()
             collection_name = sanitize_email(user_email)
             client = _get_qdrant_client()
@@ -219,6 +227,7 @@ def retrieve_documents(
 
             if matched:
                 # Reranking semántico en memoria — comparar embeddings
+                _tr0 = time.monotonic()
                 embeddings = _get_embeddings()
                 query_vec = embeddings.embed_query(query)
                 import numpy as np
@@ -235,12 +244,16 @@ def retrieve_documents(
                     reverse=True,
                 )
                 docs = [d for d, _ in scored[:k]]
+                RAG_RERANK_LATENCY_SECONDS.observe(time.monotonic() - _tr0)
             else:
                 logger.warning(f"[rag] filtro '{keyword}' sin resultados — búsqueda global")
                 docs = vectorstore.similarity_search(query, k=k)
         else:
+            RAG_FILTER_APPLIED_TOTAL.labels(filter_type="global").inc()
             docs = vectorstore.similarity_search(query, k=k)
             logger.debug(f"[rag] global: {len(docs)} chunks user={user_email!r}")
+
+        RAG_DOCS_RETURNED.observe(len(docs))
 
         if not docs:
             RAG_MISS_TOTAL.inc()

@@ -351,6 +351,23 @@ def _ensure_schema() -> None:
                 )
             """)
 
+            # ── Auditoría de seguridad (P2-001) ────────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS security_audit_log (
+                    id          BIGSERIAL PRIMARY KEY,
+                    event_type  TEXT NOT NULL,
+                    user_id     TEXT,
+                    remote_ip   TEXT,
+                    endpoint    TEXT,
+                    detail      TEXT,
+                    created_at  TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_security_audit_event_time
+                ON security_audit_log (event_type, created_at DESC)
+            """)
+
 
 async def _run_in_thread(fn) -> None:
     """Ejecuta una función síncrona en un thread para no bloquear el event loop."""

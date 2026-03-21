@@ -105,25 +105,9 @@ class GabrielAgent(BaseAgent):
         "create_pull_request",
     ]
 
-    # Palabras clave que indican acción real en GitHub (no solo consulta)
-    _AUTONOMOUS_TRIGGERS = (
-        "crea la rama", "crea una rama", "create branch", "crea el branch",
-        "haz commit", "make commit", "sube el cambio", "push",
-        "abre un pr", "abre el pr", "open pr", "pull request", "crea el pr",
-        "crea un pull request", "abre un pull request",
-        "modifica el archivo", "corrige el archivo", "aplica el fix",
-        "fix y crea", "fix y abre", "rama y pr",
-    )
-
-    def _should_be_autonomous(self, task: dict[str, Any]) -> bool:
-        """Devuelve True si la query implica ejecutar cambios en GitHub."""
-        if task.get("mode", "").lower() == "autonomous":
-            return True
-        query_lower = task.get("query", "").lower()
-        return any(kw in query_lower for kw in self._AUTONOMOUS_TRIGGERS)
-
     async def execute(self, task: dict[str, Any]) -> AgentResult:
-        if self._should_be_autonomous(task):
+        mode = task.get("mode", "conversational").lower()
+        if mode == "autonomous":
             return await self._autonomous_pipeline(task)
         return await self._conversational(task)
 
@@ -169,40 +153,10 @@ class GabrielAgent(BaseAgent):
 
         query        = task.get("query", "").strip()
         user_email   = task.get("user_email", "")  # noqa: F841 — usado por _notify vía closure
-
-        # Extraer owner/repo del query si el usuario los menciona explícitamente
-        # Soporta: "ricardogs26/amael-ia", "Repositorio: owner/repo", "repo owner/repo"
-        _repo_match = re.search(
-            r'(?:repositorio|repo(?:sitory)?)[:\s]+([a-zA-Z0-9_-]+)/([a-zA-Z0-9_.\-]+)',
-            query, re.IGNORECASE,
-        ) or re.search(r'\b([a-zA-Z0-9_-]+)/([a-zA-Z0-9_.\-]+)\b', query)
-
-        owner = task.get("github_owner", "")
-        repo  = task.get("github_repo", "")
-        if _repo_match and not owner and not repo:
-            owner = _repo_match.group(1)
-            repo  = _repo_match.group(2).rstrip(".,;")
-        owner = owner or settings.github_default_owner
-        repo  = repo  or settings.github_default_repo
-
-        # Extraer rama base del query si se menciona explícitamente
-        _branch_match = re.search(
-            r'(?:rama\s+base|base\s+branch|desde)[:\s]+([a-zA-Z0-9_/.\-]+)',
-            query, re.IGNORECASE,
-        )
-        base_branch = task.get("base_branch", "")
-        if _branch_match and not base_branch:
-            base_branch = _branch_match.group(1).strip().rstrip(".,;")
-        base_branch = base_branch or settings.github_default_branch or "main"
-
-        # Extraer archivo objetivo del query si se menciona explícitamente
-        _file_match = re.search(
-            r'(?:archivo(?:\s+a\s+modificar)?(?:\s+es)?(?:\s+exactamente)?)[:\s]+([^\s,\n]+)',
-            query, re.IGNORECASE,
-        )
-        hint_file = task.get("target_file", "").strip()
-        if _file_match and not hint_file:
-            hint_file = _file_match.group(1).strip().rstrip(".,;")
+        owner        = task.get("github_owner", "") or settings.github_default_owner
+        repo         = task.get("github_repo", "")  or settings.github_default_repo
+        base_branch  = task.get("base_branch", settings.github_default_branch) or "main"
+        hint_file    = task.get("target_file", "").strip()
 
         if not query:
             return AgentResult(success=False, output=None, agent_name=self.name, error="query vacía")
@@ -228,7 +182,7 @@ class GabrielAgent(BaseAgent):
         branch_name    = analysis["branch_name"]
         commit_message = analysis["commit_message"]
         pr_title       = analysis["pr_title"]
-        pr_body        = analysis["pr_body"].replace("\\n", "\n")
+        pr_body        = analysis["pr_body"]
 
         logger.info(f"[gabriel] Análisis: file={target_file} branch={branch_name}")
         await self._notify(
@@ -384,9 +338,6 @@ class GabrielAgent(BaseAgent):
                 if key not in data:
                     logger.error(f"[gabriel] _analyze_task: falta campo '{key}'")
                     return None
-            # Normalizar saltos de línea en pr_body (LLM puede generar \n literal)
-            if "pr_body" in data:
-                data["pr_body"] = data["pr_body"].replace("\\n", "\n")
             # Usar hint_file si el LLM devolvió algo diferente y se proporcionó pista
             if hint_file:
                 data["target_file"] = hint_file

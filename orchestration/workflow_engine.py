@@ -130,6 +130,7 @@ async def run_workflow(
     redis_client=None,
     request_id: str = "",
     conversation_id: str = "",
+    intent: str = "general",
 ) -> dict[str, Any]:
     """
     Ejecuta el workflow completo para un request.
@@ -141,12 +142,16 @@ async def run_workflow(
         redis_client:    Cliente Redis para feedback del supervisor.
         request_id:      UUID del request (tracing).
         conversation_id: ID de la conversación activa.
+        intent:          Intent detectado (para métricas E2E).
 
     Returns:
         AgentState final con final_answer, supervisor_score, etc.
     """
+    import time
+
     from orchestration.state import initial_state
 
+    _t0 = time.monotonic()
     graph = get_workflow(redis_client)
     state = initial_state(
         question=question,
@@ -156,4 +161,11 @@ async def run_workflow(
         conversation_id=conversation_id,
     )
     result = graph.invoke(state)
+
+    try:
+        from observability.metrics import PIPELINE_E2E_LATENCY_SECONDS
+        PIPELINE_E2E_LATENCY_SECONDS.labels(intent=intent).observe(time.monotonic() - _t0)
+    except Exception:
+        pass
+
     return result
