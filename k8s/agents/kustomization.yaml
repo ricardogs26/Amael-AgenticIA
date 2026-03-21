@@ -7,6 +7,7 @@ resources:
 - 09-piper-deployment.yaml
 - 10-github-runner.yaml
 - 11-hpa-pdb.yaml
+- 12-conversation-pruning-cronjob.yaml
 images:
 - name: registry.richardx.dev/amael-agentic-backend
-  newTag: 1.10.7
+  newTag: 1.10.8
