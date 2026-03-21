@@ -17,8 +17,8 @@ logger = logging.getLogger("agents.researcher.web")
 
 # Palabras clave que activan el fast-path de tipo de cambio
 _CURRENCY_KEYWORDS = {
-    "dolar", "dollar", "usd", "euro", "eur", "tipo de cambio",
-    "precio dolar", "cotizacion", "cotización", "divisas", "forex",
+    "dolar", "dólar", "dollar", "usd", "euro", "eur", "tipo de cambio",
+    "precio dolar", "precio dólar", "cotizacion", "cotización", "divisas", "forex",
 }
 
 # Resultados de búsqueda que causan alucinaciones (Google help pages, etc.)
