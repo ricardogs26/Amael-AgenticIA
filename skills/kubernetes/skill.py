@@ -282,16 +282,21 @@ class KubernetesSkill(BaseSkill):
             return SkillOutput.fail(str(exc))
 
     async def health_check(self) -> bool:
-        """Verifica que la API de Kubernetes responde."""
-        try:
-            from kubernetes import client
-            from kubernetes import config as k8s_config
+        """Verifica que la API de Kubernetes responde (non-blocking)."""
+        import asyncio
+
+        def _check() -> bool:
             try:
-                k8s_config.load_incluster_config()
-            except Exception:
-                k8s_config.load_kube_config()
-            client.CoreV1Api().list_namespace(limit=1)
-            return True
-        except Exception as exc:
-            logger.warning(f"[k8s_skill] health_check falló: {exc}")
-            return False
+                from kubernetes import client
+                from kubernetes import config as k8s_config
+                try:
+                    k8s_config.load_incluster_config()
+                except Exception:
+                    k8s_config.load_kube_config()
+                client.CoreV1Api().list_namespace(limit=1)
+                return True
+            except Exception as exc:
+                logger.warning(f"[k8s_skill] health_check falló: {exc}")
+                return False
+
+        return await asyncio.to_thread(_check)

@@ -239,13 +239,18 @@ class GrafanaTool(BaseTool):
             return ToolOutput.fail(str(exc), source=self.name)
 
     async def health_check(self) -> bool:
-        """Verifica que Grafana responde en /api/health."""
-        try:
-            resp = _req.get(
-                f"{_GRAFANA_URL}/api/health",
-                timeout=5,
-            )
-            return resp.status_code == 200
-        except Exception as exc:
-            logger.warning(f"[grafana_tool] health_check falló: {exc}")
-            return False
+        """Verifica que Grafana responde en /api/health (non-blocking)."""
+        import asyncio
+
+        def _check() -> bool:
+            try:
+                resp = _req.get(
+                    f"{_GRAFANA_URL}/api/health",
+                    timeout=5,
+                )
+                return resp.status_code == 200
+            except Exception as exc:
+                logger.warning(f"[grafana_tool] health_check falló: {exc}")
+                return False
+
+        return await asyncio.to_thread(_check)
