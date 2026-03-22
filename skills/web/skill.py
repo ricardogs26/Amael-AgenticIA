@@ -107,10 +107,15 @@ class WebSkill(BaseSkill):
             return SkillOutput.fail(str(exc), url=input.url)
 
     async def health_check(self) -> bool:
-        """Verifica conectividad básica a internet."""
-        try:
-            resp = _get_http().get("https://duckduckgo.com", timeout=5.0)
-            return resp.status_code < 500
-        except Exception as exc:
-            logger.warning(f"[web_skill] health_check falló: {exc}")
-            return False
+        """Verifica conectividad básica a internet (non-blocking)."""
+        import asyncio
+
+        def _check() -> bool:
+            try:
+                resp = _get_http().get("https://duckduckgo.com", timeout=5.0)
+                return resp.status_code < 500
+            except Exception as exc:
+                logger.warning(f"[web_skill] health_check falló: {exc}")
+                return False
+
+        return await asyncio.to_thread(_check)

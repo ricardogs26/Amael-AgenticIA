@@ -260,58 +260,84 @@ async def _check_k8s_agent() -> ComponentHealth:
         )
 
 
+async def _check_one_skill(name: str, skill) -> ComponentHealth:
+    """Verifica una skill individual con timeout de 8s."""
+    t0 = time.monotonic()
+    try:
+        healthy = await asyncio.wait_for(skill.health_check(), timeout=8.0)
+        return ComponentHealth(
+            name=name,
+            healthy=healthy,
+            latency_ms=round((time.monotonic() - t0) * 1000, 1),
+        )
+    except asyncio.TimeoutError:
+        return ComponentHealth(
+            name=name, healthy=False,
+            latency_ms=round((time.monotonic() - t0) * 1000, 1),
+            detail="health_check timeout (8s)",
+        )
+    except Exception as exc:
+        return ComponentHealth(
+            name=name, healthy=False,
+            latency_ms=round((time.monotonic() - t0) * 1000, 1),
+            detail=str(exc),
+        )
+
+
 async def _check_skills() -> dict[str, ComponentHealth]:
-    """Ejecuta health_check() en todas las skills registradas."""
-    results: dict[str, ComponentHealth] = {}
+    """Ejecuta health_check() en todas las skills registradas (en paralelo, 8s max cada una)."""
     try:
         from skills.registry import SkillRegistry
-        for name in SkillRegistry.names():
-            t0 = time.monotonic()
-            try:
-                skill   = SkillRegistry.get(name)
-                healthy = await skill.health_check()
-                results[name] = ComponentHealth(
-                    name=name,
-                    healthy=healthy,
-                    latency_ms=round((time.monotonic() - t0) * 1000, 1),
-                )
-            except Exception as exc:
-                results[name] = ComponentHealth(
-                    name=name,
-                    healthy=False,
-                    latency_ms=round((time.monotonic() - t0) * 1000, 1),
-                    detail=str(exc),
-                )
+        names = SkillRegistry.names()
+        tasks = [_check_one_skill(n, SkillRegistry.get(n)) for n in names]
+        results_list = await asyncio.gather(*tasks, return_exceptions=True)
+        return {
+            comp.name: comp
+            for comp in results_list
+            if isinstance(comp, ComponentHealth)
+        }
     except ImportError:
-        pass
-    return results
+        return {}
+
+
+async def _check_one_tool(name: str, tool) -> ComponentHealth:
+    """Verifica una tool individual con timeout de 8s."""
+    t0 = time.monotonic()
+    try:
+        healthy = await asyncio.wait_for(tool.health_check(), timeout=8.0)
+        return ComponentHealth(
+            name=name,
+            healthy=healthy,
+            latency_ms=round((time.monotonic() - t0) * 1000, 1),
+        )
+    except asyncio.TimeoutError:
+        return ComponentHealth(
+            name=name, healthy=False,
+            latency_ms=round((time.monotonic() - t0) * 1000, 1),
+            detail="health_check timeout (8s)",
+        )
+    except Exception as exc:
+        return ComponentHealth(
+            name=name, healthy=False,
+            latency_ms=round((time.monotonic() - t0) * 1000, 1),
+            detail=str(exc),
+        )
 
 
 async def _check_tools() -> dict[str, ComponentHealth]:
-    """Ejecuta health_check() en todas las tools registradas."""
-    results: dict[str, ComponentHealth] = {}
+    """Ejecuta health_check() en todas las tools registradas (en paralelo, 8s max cada una)."""
     try:
         from tools.registry import ToolRegistry
-        for name in ToolRegistry.names():
-            t0 = time.monotonic()
-            try:
-                tool    = ToolRegistry.get(name)
-                healthy = await tool.health_check()
-                results[name] = ComponentHealth(
-                    name=name,
-                    healthy=healthy,
-                    latency_ms=round((time.monotonic() - t0) * 1000, 1),
-                )
-            except Exception as exc:
-                results[name] = ComponentHealth(
-                    name=name,
-                    healthy=False,
-                    latency_ms=round((time.monotonic() - t0) * 1000, 1),
-                    detail=str(exc),
-                )
+        names = ToolRegistry.names()
+        tasks = [_check_one_tool(n, ToolRegistry.get(n)) for n in names]
+        results_list = await asyncio.gather(*tasks, return_exceptions=True)
+        return {
+            comp.name: comp
+            for comp in results_list
+            if isinstance(comp, ComponentHealth)
+        }
     except ImportError:
-        pass
-    return results
+        return {}
 
 
 def _update_health_metrics(components: dict[str, Any]) -> None:
