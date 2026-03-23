@@ -4,11 +4,23 @@ metadata:
   name: amael-agentic-configmap
   namespace: amael-ia
 data:
-  # ── LLM (Ollama) ──────────────────────────────────────────────────────────
-  OLLAMA_BASE_URL:     "http://ollama-service:11434"
-  LLM_MODEL:           "qwen2.5:14b"
-  LLM_EMBED_MODEL:     "nomic-embed-text"
-  LLM_VISION_MODEL:    "qwen2.5-vl:7b"
+  # ── LLM Provider ──────────────────────────────────────────────────────────
+  # Valores válidos: ollama | openai | groq | gemini | anthropic
+  LLM_PROVIDER:    "ollama"
+  LLM_MODEL:       "qwen2.5:14b"
+  # LLM_BASE_URL:  ""   # URL base opcional (OpenAI-compatible / llm-adapter)
+  # LLM_API_KEY se configura en Secret, no aquí
+
+  # ── Embeddings ─────────────────────────────────────────────────────────────
+  # Valores válidos: ollama | openai | google
+  # google text-embedding-004 produce 768 dims — compatible con Qdrant actual
+  EMBED_PROVIDER:  "ollama"
+  LLM_EMBED_MODEL: "nomic-embed-text"
+  # EMBED_API_KEY se configura en Secret si es distinto de LLM_API_KEY
+
+  # ── LLM (Ollama — usado cuando LLM_PROVIDER=ollama) ───────────────────────
+  OLLAMA_BASE_URL:  "http://ollama-service:11434"
+  LLM_VISION_MODEL: "qwen2.5vl:3b"
 
   # ── Servicios internos ────────────────────────────────────────────────────
   K8S_AGENT_URL:              "http://k8s-agent-service:8002"

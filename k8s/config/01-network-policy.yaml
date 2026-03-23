@@ -16,11 +16,19 @@ spec:
     - Egress
 
   ingress:
-    # Kubelet health probes — desde el nodo (192.168.0.141)
+    # Kubelet health probes — desde el nodo (192.168.1.88)
     # Calico en MicroK8s aplica NetworkPolicy también al tráfico kubelet→pod
     - from:
         - ipBlock:
-            cidr: 192.168.0.141/32
+            cidr: 192.168.1.88/32
+      ports:
+        - port: 8000
+          protocol: TCP
+    # Tráfico desde NGINX ingress controller (namespace ingress)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
       ports:
         - port: 8000
           protocol: TCP
@@ -90,7 +98,7 @@ spec:
       ports:
         - port: 9000
           protocol: TCP
-    # k8s-agent y productivity-service (herramientas internas)
+    # Servicios internos amael-ia: k8s-agent, productivity, whatsapp-bridge, piper, cosyvoice
     - to:
         - namespaceSelector:
             matchLabels:
@@ -100,6 +108,12 @@ spec:
           protocol: TCP
         - port: 8002
           protocol: TCP
+        - port: 3000
+          protocol: TCP   # whatsapp-bridge
+        - port: 3001
+          protocol: TCP   # whatsapp-personal
+        - port: 8010
+          protocol: TCP   # piper + cosyvoice
     # OTel Collector (tracing) y Prometheus/Grafana (PrometheusTool + GrafanaTool health checks)
     - to:
         - namespaceSelector:
@@ -111,7 +125,9 @@ spec:
         - port: 9090
           protocol: TCP
         - port: 80
-          protocol: TCP    # Grafana ClusterIP service
+          protocol: TCP    # Grafana service port (pre-DNAT)
+        - port: 3000
+          protocol: TCP    # Grafana container port (post-DNAT — Calico evalúa post-DNAT)
     # DNS (siempre necesario)
     - to:
         - namespaceSelector: {}
@@ -128,8 +144,21 @@ spec:
       ports:
         - port: 8200
           protocol: TCP
+    # Internet (web search DuckDuckGo, GitHub API, etc.) — excluye IPs privadas
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 80
+          protocol: TCP
     # Kubernetes API server (SRE agent + kubernetes Python client)
-    # MicroK8s expone el apiserver en 192.168.0.141:16443.
+    # MicroK8s expone el apiserver en 192.168.1.88:16443.
     # Calico evalúa ipBlock sobre el IP pre-DNAT (10.152.183.1) Y post-DNAT.
     - to:
         - ipBlock:
@@ -139,7 +168,7 @@ spec:
           protocol: TCP
     - to:
         - ipBlock:
-            cidr: 192.168.0.141/32  # Node IP — apiserver real (post-DNAT)
+            cidr: 192.168.1.88/32  # Node IP — apiserver real (post-DNAT)
       ports:
         - port: 16443
           protocol: TCP

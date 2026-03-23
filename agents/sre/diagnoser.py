@@ -17,8 +17,6 @@ logger = logging.getLogger("agents.sre.diagnoser")
 
 _QDRANT_URL              = os.environ.get("QDRANT_URL", "http://qdrant-service:6333")
 _SRE_RUNBOOKS_COLLECTION = "sre_runbooks"
-_OLLAMA_BASE_URL         = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
-_EMBED_MODEL             = "nomic-embed-text"
 
 # ── Singleton LLM para diagnóstico ────────────────────────────────────────────
 _diag_llm = None
@@ -27,27 +25,16 @@ _diag_llm = None
 def _get_diag_llm():
     global _diag_llm
     if _diag_llm is None:
-        from langchain_ollama import OllamaLLM
-
-        from config.settings import settings
-        _diag_llm = OllamaLLM(
-            model=settings.llm_model,
-            base_url=settings.ollama_base_url,
-        )
+        from agents.base.llm_factory import get_chat_llm
+        _diag_llm = get_chat_llm()
     return _diag_llm
 
 
 def _get_embedding(text: str) -> list[float] | None:
-    """Genera embedding via Ollama nomic-embed-text."""
+    """Genera embedding via el provider configurado."""
     try:
-        import requests as _req
-        resp = _req.post(
-            f"{_OLLAMA_BASE_URL}/api/embeddings",
-            json={"model": _EMBED_MODEL, "prompt": text},
-            timeout=15,
-        )
-        data = resp.json()
-        return data.get("embedding")
+        from agents.base.llm_factory import get_embeddings
+        return get_embeddings().embed_query(text)
     except Exception as exc:
         logger.warning(f"[diagnoser] Embedding falló: {exc}")
         return None
@@ -129,6 +116,9 @@ def diagnose_with_llm(anomaly, vault_knowledge: str = "", metrics_knowledge: str
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
             future = ex.submit(_get_diag_llm().invoke, prompt)
             raw = future.result(timeout=30)
+            # ChatOllama retorna AIMessage — extraer el contenido string
+            if hasattr(raw, "content"):
+                raw = raw.content
 
         import re
         match = re.search(r"\{.*?\}", raw, re.DOTALL)
@@ -155,12 +145,21 @@ def diagnose_with_llm(anomaly, vault_knowledge: str = "", metrics_knowledge: str
 
     # Fallback determinístico por tipo
     fallbacks = {
-        "CRASH_LOOP":     ("Fallo en inicio del contenedor. Verificar logs y configuración.", 0.6),
-        "OOM_KILLED":     ("Consumo de memoria superó el límite del contenedor.", 0.8),
-        "IMAGE_PULL_ERROR": ("No se puede descargar la imagen. Verificar registry y credenciales.", 0.9),
-        "POD_PENDING_STUCK": ("Recursos insuficientes o nodo sin capacidad de scheduling.", 0.7),
-        "HIGH_CPU":       ("Carga de CPU elevada. Posible pico de tráfico o loop.", 0.6),
-        "HIGH_MEMORY":    ("Consumo de memoria elevado. Posible memory leak.", 0.7),
+        "CRASH_LOOP":          ("Fallo en inicio del contenedor. Verificar logs y configuración.", 0.6),
+        "OOM_KILLED":          ("Consumo de memoria superó el límite del contenedor.", 0.8),
+        "IMAGE_PULL_ERROR":    ("No se puede descargar la imagen. Verificar registry y credenciales.", 0.9),
+        "POD_PENDING_STUCK":   ("Recursos insuficientes o nodo sin capacidad de scheduling.", 0.7),
+        "HIGH_CPU":            ("Carga de CPU elevada. Posible pico de tráfico o loop.", 0.6),
+        "HIGH_MEMORY":         ("Consumo de memoria elevado. Posible memory leak.", 0.7),
+        # Infraestructura
+        "VAULT_SEALED":        ("Vault sellado tras reinicio del pod. Requiere unseal manual con claves Shamir.", 0.95),
+        "LOADBALANCER_NO_IP":  ("MetalLB no pudo asignar IP. Verificar IPAddressPool y subred del nodo.", 0.85),
+        "PVC_PENDING":         ("PVC sin volumen disponible. Verificar StorageClass y capacidad del nodo.", 0.80),
+        "PVC_MOUNT_ERROR":     ("Fallo al montar volumen. Posible problema de permisos o volumen en uso.", 0.80),
+        "DEPLOYMENT_DEGRADED": ("Deployment con réplicas insuficientes. Pod en fallo o nodo sin recursos.", 0.75),
+        "SERVICE_NO_ENDPOINTS":("Service sin pods saludables. Verificar readiness probe y selector.", 0.75),
+        "NODE_PRESSURE":       ("Nodo bajo presión de recursos. Disco, memoria o PIDs agotados.", 0.85),
+        "K8S_EVENT_WARNING":   ("Evento de advertencia en infraestructura K8s. Ver detalles del evento.", 0.60),
     }
     cause, conf = fallbacks.get(anomaly.issue_type, (anomaly.details, 0.5))
     SRE_DIAGNOSIS_CONFIDENCE.observe(conf)
