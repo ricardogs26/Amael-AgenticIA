@@ -22,9 +22,6 @@ from core.agent_base import AgentResult, BaseAgent
 logger = logging.getLogger("agents.sre.agent")
 
 # ── Configuración ─────────────────────────────────────────────────────────────
-
-_OLLAMA_BASE_URL    = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
-_MODEL_NAME         = os.environ.get("MODEL_NAME", "qwen2.5:14b")
 _PROMETHEUS_URL     = os.environ.get(
     "PROMETHEUS_URL",
     "http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090",
@@ -35,6 +32,7 @@ _RUNBOOKS_DIR      = os.path.join(os.path.dirname(__file__), "..", "..", "runboo
 _QDRANT_URL        = os.environ.get("QDRANT_URL", "http://qdrant-service:6333")
 _QDRANT_COLLECTION = "sre_runbooks"
 _EMBED_MODEL       = "nomic-embed-text"
+_OLLAMA_BASE_URL   = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
 
 # ── Singleton LLM ─────────────────────────────────────────────────────────────
 
@@ -43,20 +41,20 @@ _classic_llm = None
 
 
 def _get_chat_llm():
-    """ChatOllama para LangGraph ReAct (bind_tools compatible)."""
+    """Chat LLM para LangGraph ReAct (bind_tools compatible)."""
     global _chat_llm
     if _chat_llm is None:
-        from langchain_ollama import ChatOllama
-        _chat_llm = ChatOllama(model=_MODEL_NAME, base_url=_OLLAMA_BASE_URL)
+        from agents.base.llm_factory import get_chat_llm
+        _chat_llm = get_chat_llm()
     return _chat_llm
 
 
 def _get_classic_llm():
-    """OllamaLLM para agente LangChain clásico (fallback)."""
+    """Chat LLM para agente LangChain clásico (fallback)."""
     global _classic_llm
     if _classic_llm is None:
-        from langchain_ollama import OllamaLLM
-        _classic_llm = OllamaLLM(model=_MODEL_NAME, base_url=_OLLAMA_BASE_URL)
+        from agents.base.llm_factory import get_chat_llm
+        _classic_llm = get_chat_llm()
     return _classic_llm
 
 

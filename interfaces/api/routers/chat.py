@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import urllib.request
 import uuid
 from typing import Annotated
 
@@ -701,9 +702,6 @@ def _set_cached_response(user_id: str, question: str, answer: str) -> None:
 
 async def _analyze_image(image_base64: str, question: str) -> str:
     """Analiza una imagen usando el modelo de visión vía API nativa de Ollama."""
-    import asyncio
-    import json
-    import urllib.request
     from config.settings import settings
 
     def _call() -> str:
