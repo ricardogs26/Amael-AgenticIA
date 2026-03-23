@@ -270,7 +270,7 @@ async def _check_one_skill(name: str, skill) -> ComponentHealth:
             healthy=healthy,
             latency_ms=round((time.monotonic() - t0) * 1000, 1),
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return ComponentHealth(
             name=name, healthy=False,
             latency_ms=round((time.monotonic() - t0) * 1000, 1),
@@ -310,7 +310,7 @@ async def _check_one_tool(name: str, tool) -> ComponentHealth:
             healthy=healthy,
             latency_ms=round((time.monotonic() - t0) * 1000, 1),
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return ComponentHealth(
             name=name, healthy=False,
             latency_ms=round((time.monotonic() - t0) * 1000, 1),

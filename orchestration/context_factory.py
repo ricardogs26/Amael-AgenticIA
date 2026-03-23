@@ -16,7 +16,6 @@ Uso:
 from __future__ import annotations
 
 import logging
-import os
 import uuid
 from typing import Any
 
@@ -31,7 +30,7 @@ class ContextFactory:
 
     Inyecta automáticamente:
       - skills disponibles en SkillRegistry
-      - LLM del proceso (OllamaLLM singleton vía LLMSkill)
+      - LLM del proceso (singleton vía LLMFactory)
       - metadatos del request (user_id, conversation_id, request_id)
 
     Uso normal (todas las skills):
@@ -247,26 +246,12 @@ class ContextFactory:
     @classmethod
     def _get_llm(cls) -> Any:
         """
-        Retorna el LLM singleton del proceso (OllamaLLM).
+        Retorna el LLM singleton del proceso.
         Compartido entre todos los contextos — evita reconexiones.
         """
         try:
-            from skills.registry import SkillRegistry
-            llm_skill = SkillRegistry.get_or_none("llm")
-            if llm_skill is not None:
-                # Exponer el singleton del OllamaLLM directamente
-                from skills.llm.skill import _get_ollama_llm
-                return _get_ollama_llm()
-        except Exception as exc:
-            logger.debug(f"[context_factory] LLM via skill no disponible: {exc}")
-
-        # Fallback: instanciar directamente
-        try:
-            from langchain_ollama import OllamaLLM
-            return OllamaLLM(
-                model=os.environ.get("MODEL_NAME", "qwen2.5:14b"),
-                base_url=os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434"),
-            )
+            from agents.base.llm_factory import get_chat_llm
+            return get_chat_llm()
         except Exception as exc:
             logger.warning(f"[context_factory] No se pudo crear LLM: {exc}")
             return None
