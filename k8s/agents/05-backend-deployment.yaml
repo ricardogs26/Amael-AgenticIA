@@ -5,7 +5,7 @@ metadata:
   namespace: amael-ia
   labels:
     app: amael-agentic-backend
-    version: "1.10.17"
+    version: "1.10.22"
 spec:
   replicas: 1
   selector:
@@ -20,13 +20,15 @@ spec:
     metadata:
       labels:
         app: amael-agentic-backend
-        version: "1.10.17"
+        version: "1.10.22"
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port:   "8000"
         prometheus.io/path:   "/metrics"
     spec:
       serviceAccountName: amael-agentic-sa
+      securityContext:
+        fsGroup: 1000   # amael user (UID 1000) puede escribir en el PVC whisper-cache
       # Tiempo para drenar requests in-flight antes de SIGKILL
       # El lifespan shutdown hace asyncio.sleep(5) + cierra SRE loop + PG pool
       terminationGracePeriodSeconds: 60
@@ -53,10 +55,16 @@ spec:
             echo "Esperando Redis..."; sleep 3
           done
           echo "Redis listo."
+      - name: fix-whisper-perms
+        image: busybox:1.36
+        command: ['sh', '-c', 'chown -R 1000:1000 /app/whisper-cache && chmod 755 /app/whisper-cache']
+        volumeMounts:
+        - name: whisper-cache
+          mountPath: /app/whisper-cache
 
       containers:
       - name: amael-agentic-backend
-        image: registry.richardx.dev/amael-agentic-backend:1.10.17
+        image: registry.richardx.dev/amael-agentic-backend:1.10.22
         imagePullPolicy: Always
         ports:
         - name: http
@@ -190,6 +198,15 @@ spec:
           timeoutSeconds:      10    # igual que liveness
           failureThreshold: 20    # 20 * 10s = 3m20s max startup time
           periodSeconds:    10
+
+        volumeMounts:
+        - name: whisper-cache
+          mountPath: /app/whisper-cache
+
+      volumes:
+      - name: whisper-cache
+        persistentVolumeClaim:
+          claimName: whisper-cache-pvc
 
 ---
 apiVersion: v1

@@ -35,6 +35,7 @@ _SEVERITY_RANK           = {
 _AUTO_HEALABLE_ISSUES = {
     "CRASH_LOOP", "OOM_KILLED", "POD_FAILED",
     "HIGH_RESTARTS", "HIGH_MEMORY", "MEMORY_LEAK_PREDICTED",
+    "DEPLOYMENT_DEGRADED",   # réplicas < deseadas → rollout restart del deployment
 }
 
 
