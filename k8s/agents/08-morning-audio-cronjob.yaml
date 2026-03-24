@@ -34,7 +34,7 @@ spec:
                 -H "Authorization: Bearer ${BOT_JWT_TOKEN}" \
                 -H "Content-Type: application/json" \
                 -d "{
-                  \"prompt\": \"Buenos días. Dame un resumen del estado del ambiente Kubernetes: pods en problemas, servicios caídos, alertas activas en Prometheus, y estado general del cluster amael-ia. Si todo está bien dímelo también. mándame un audio\",
+                  \"prompt\": \"Buenos días. Dame un resumen del estado del ambiente Kubernetes: pods en problemas, servicios caídos, alertas activas en Prometheus, y estado general del cluster amael-ia. Si todo está bien dímelo también. Envíame el resumen por WhatsApp como texto.\",
                   \"user_id\": \"${ADMIN_PHONE}\",
                   \"phone\":   \"${ADMIN_PHONE}\"
                 }" \
