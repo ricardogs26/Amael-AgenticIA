@@ -5,7 +5,7 @@ metadata:
   namespace: amael-ia
   labels:
     app: amael-agentic-backend
-    version: "1.10.22"
+    version: "1.10.53"
 spec:
   replicas: 1
   selector:
@@ -20,7 +20,7 @@ spec:
     metadata:
       labels:
         app: amael-agentic-backend
-        version: "1.10.22"
+        version: "1.10.53"
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port:   "8000"
@@ -64,7 +64,7 @@ spec:
 
       containers:
       - name: amael-agentic-backend
-        image: registry.richardx.dev/amael-agentic-backend:1.10.22
+        image: registry.richardx.dev/amael-agentic-backend:1.10.53
         imagePullPolicy: Always
         ports:
         - name: http
@@ -145,13 +145,42 @@ spec:
               key: GRAFANA_PASSWORD
               optional: true
 
-        # Webhook GitHub CI (Option B — Camael notificación proactiva)
-        - name: GITHUB_WEBHOOK_SECRET
+        # ── Camael — Bitbucket / GitOps ──────────────────────────────────────
+        - name: BITBUCKET_TOKEN
           valueFrom:
             secretKeyRef:
-              name: amael-secrets
-              key: GITHUB_WEBHOOK_SECRET
-              optional: true    # si no está configurado, acepta sin validar firma
+              name: bitbucket-credentials
+              key: token
+        - name: BITBUCKET_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: bitbucket-credentials
+              key: username
+              optional: true    # si no está, se usa Bearer puro
+        - name: BITBUCKET_WORKSPACE
+          valueFrom:
+            secretKeyRef:
+              name: bitbucket-credentials
+              key: workspace
+        - name: BITBUCKET_DEFAULT_REPO
+          value: "amael-agentic-backend"
+
+        # ── ServiceNow — Change Management ITIL v4 ───────────────────────────
+        - name: SERVICENOW_BASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: servicenow-credentials
+              key: base_url
+        - name: SERVICENOW_USER
+          valueFrom:
+            secretKeyRef:
+              name: servicenow-credentials
+              key: username
+        - name: SERVICENOW_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: servicenow-credentials
+              key: password
 
         # Identidad del pod para Lease leader election (SRE)
         - name: POD_NAME
