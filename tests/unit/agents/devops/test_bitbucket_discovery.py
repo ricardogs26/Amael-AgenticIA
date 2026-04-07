@@ -105,3 +105,27 @@ class TestSearchFileInRepo:
             result = await search_file_in_repo("ws", "repo", "any-resource")
 
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_handles_malformed_file_key(self):
+        """API result without 'file' key should be skipped, not raise."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "values": [
+                {"type": "code_search_result"},  # no 'file' key
+            ]
+        }
+
+        with patch("agents.devops.bitbucket_client._auth", return_value=("user", "token")), \
+             patch("agents.devops.bitbucket_client.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_cls.return_value = mock_client
+
+            from agents.devops.bitbucket_client import search_file_in_repo
+            result = await search_file_in_repo("ws", "repo", "some-deployment")
+
+        assert result is None

@@ -439,7 +439,11 @@ class CamaelAgent(BaseAgent):
             yaml_content = await bb.read_file(workspace, repo, fix.file_path, "main")
 
             # 2. Aplicar patch
-            patched_content = fix.patch_fn(yaml_content)
+            if fix.patch_fn is not None:
+                patched_content = fix.patch_fn(yaml_content)
+            else:
+                logger.info("[camael] LLM-only path: sin patch_fn determinista, usando patch LLM")
+                patched_content = yaml_content
             if patched_content == yaml_content:
                 logger.warning("[camael] El patch no modificó el archivo — revisar regex")
 

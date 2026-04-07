@@ -322,6 +322,12 @@ async def search_file_in_repo(
     Ejemplo: search_file_in_repo("amael_agenticia", "amael-agentic-backend", "amael-demo-oom")
              → "k8s/demo/amael-demo-oom.yaml"
     """
+    import re as _re
+    # Kubernetes pod names are RFC 1123 DNS labels: [a-z0-9-]
+    if not _re.fullmatch(r"[a-z0-9][a-z0-9\-]{0,252}", resource_name):
+        logger.warning(f"[bb] resource_name rejected (invalid format): '{resource_name}'")
+        return None
+
     url = f"{_BB_BASE}/repositories/{workspace}/{repo}/search/code"
     query = f"name: {resource_name}"
 
@@ -330,7 +336,7 @@ async def search_file_in_repo(
             resp = await client.get(
                 url,
                 headers=_headers(),
-                params={"search_query": query, "pagelen": "10"},
+                params={"search_query": query, "pagelen": 10},
             )
             if resp.status_code == 404:
                 logger.warning(f"[bb] Code search no disponible para {workspace}/{repo}")
