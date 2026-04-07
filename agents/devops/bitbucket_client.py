@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
 import httpx
@@ -322,9 +323,8 @@ async def search_file_in_repo(
     Ejemplo: search_file_in_repo("amael_agenticia", "amael-agentic-backend", "amael-demo-oom")
              → "k8s/demo/amael-demo-oom.yaml"
     """
-    import re as _re
     # Kubernetes pod names are RFC 1123 DNS labels: [a-z0-9-]
-    if not _re.fullmatch(r"[a-z0-9][a-z0-9\-]{0,252}", resource_name):
+    if not re.fullmatch(r"[a-z0-9][a-z0-9\-]{0,252}", resource_name):
         logger.warning(f"[bb] resource_name rejected (invalid format): '{resource_name}'")
         return None
 
