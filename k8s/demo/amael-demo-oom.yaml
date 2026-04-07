@@ -1,0 +1,40 @@
+# Demo pod para el Acto 3 del POC — genera OOMKilled real para activar Raphael→Camael
+# Recrear justo antes del demo: kubectl apply -f k8s/demo/amael-demo-oom.yaml -n amael-ia
+# Eliminar después:            kubectl delete -f k8s/demo/amael-demo-oom.yaml -n amael-ia
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amael-demo-oom
+  namespace: amael-ia
+  labels:
+    app: amael-demo-oom
+    demo: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: amael-demo-oom
+  template:
+    metadata:
+      labels:
+        app: amael-demo-oom
+        demo: "true"
+    spec:
+      containers:
+      - name: stress
+        image: polinux/stress
+        args:
+        - "--vm"
+        - "1"
+        - "--vm-bytes"
+        - "256M"     # intenta alocar 256MB pero el límite es 64Mi → OOMKilled
+        - "--vm-hang"
+        - "0"
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "10m"
+          limits:
+            memory: "64Mi"   # límite bajo a propósito — Raphael lo detectará y Camael aumentará a 192Mi
+            cpu: "100m"

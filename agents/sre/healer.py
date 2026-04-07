@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import UTC
+from datetime import UTC, datetime, timezone
 
 from agents.sre.models import Anomaly
 from core.constants import ActionType, Severity
@@ -46,6 +46,70 @@ def _get_k8s_apps():
     except Exception:
         config.load_kube_config()
     return client.AppsV1Api()
+
+
+def _get_pod_logs(resource_name: str, namespace: str, lines: int = 50) -> str:
+    """
+    Obtiene las últimas N líneas de logs del pod más reciente del deployment.
+    Busca por label app={resource_name}, luego por nombre de pod.
+    Retorna string vacío si falla (no bloquea el handoff).
+    Limita a 2000 caracteres para no inflar el prompt LLM.
+    """
+    try:
+        from kubernetes import client, config
+        try:
+            config.load_incluster_config()
+        except Exception:
+            config.load_kube_config()
+
+        v1 = client.CoreV1Api()
+
+        # Intentar por label selector primero
+        pods = v1.list_namespaced_pod(
+            namespace=namespace,
+            label_selector=f"app={resource_name}",
+        )
+        # Fallback: buscar por nombre de pod
+        if not pods.items:
+            all_pods = v1.list_namespaced_pod(namespace=namespace)
+            pods_items = [
+                p for p in all_pods.items
+                if resource_name in (p.metadata.name or "")
+            ]
+        else:
+            pods_items = pods.items
+
+        if not pods_items:
+            return ""
+
+        # Tomar el pod más reciente
+        _epoch = datetime.min.replace(tzinfo=timezone.utc)
+        pod = sorted(
+            pods_items,
+            key=lambda p: p.metadata.creation_timestamp or _epoch,
+            reverse=True,
+        )[0]
+        pod_name = pod.metadata.name
+
+        # Intentar logs del contenedor anterior (el que crasheó), luego el actual
+        for previous in (True, False):
+            try:
+                log = v1.read_namespaced_pod_log(
+                    name=pod_name,
+                    namespace=namespace,
+                    tail_lines=lines,
+                    previous=previous,
+                    _request_timeout=5,
+                )
+                if log:
+                    return log[:2000]
+            except Exception:
+                continue
+
+        return ""
+    except Exception as exc:
+        logger.debug(f"[healer] _get_pod_logs({resource_name}): {exc}")
+        return ""
 
 
 def decide_action(anomaly: Anomaly, confidence: float) -> str:
@@ -229,9 +293,15 @@ def _run_verification_job(
     )
     healthy = _is_deployment_healthy(deployment_name, namespace)
 
+    # Intentar leer RFC de ServiceNow desde Redis (creado por Camael en gitops_fix)
+    rfc_info = _get_rfc_from_redis(incident_key)
+
     if healthy:
         logger.info(f"[healer] ✅ {deployment_name} verificado como saludable.")
         update_incident_fn(incident_key, "verify:ok")
+        # Cerrar RFC en ServiceNow → Closed
+        if rfc_info:
+            _close_rfc_async(rfc_info, deployment_name, namespace, success=True)
         if generate_postmortem_fn:
             threading.Thread(
                 target=generate_postmortem_fn,
@@ -250,6 +320,10 @@ def _run_verification_job(
         else:
             SRE_ROLLBACK_TOTAL.labels(result="error").inc()
             update_incident_fn(incident_key, "verify:rollback:error")
+        # Marcar RFC como fallido → Review
+        if rfc_info:
+            _close_rfc_async(rfc_info, deployment_name, namespace,
+                             success=False, reason=f"Auto-rollback: {rollback_result}")
         if notify_fn:
             notify_fn(
                 f"⚠️ AUTO-ROLLBACK en {namespace}/{deployment_name}: {rollback_result}",
@@ -258,6 +332,9 @@ def _run_verification_job(
     else:
         logger.warning(f"[healer] {deployment_name} sigue unhealthy pero sin deploy reciente.")
         update_incident_fn(incident_key, "verify:unresolved")
+        if rfc_info:
+            _close_rfc_async(rfc_info, deployment_name, namespace,
+                             success=False, reason="Deployment sigue unhealthy. Intervención manual requerida.")
         if notify_fn:
             notify_fn(
                 f"🚨 {namespace}/{deployment_name} SIGUE UNHEALTHY tras ROLLOUT_RESTART. "
@@ -387,3 +464,200 @@ def record_restart(resource_name: str, namespace: str) -> None:
         pipe.execute()
     except Exception as exc:
         logger.warning(f"[healer] record_restart error: {exc}")
+
+
+# ── GitOps Handoff — Raphael → Camael ────────────────────────────────────────
+
+#: Tipos de anomalía que tienen fix automático via GitOps (debe coincidir con BUG_LIBRARY).
+_GITOPS_FIXABLE = {
+    "OOM_KILLED", "CRASH_LOOP", "DEPLOYMENT_DEGRADED",
+    "HIGH_MEMORY", "HIGH_CPU", "HIGH_RESTARTS", "MEMORY_LEAK_PREDICTED",
+    "POD_FAILED",   # Fix via LLM — requiere análisis de logs para decidir estrategia
+    # Note: all _GITOPS_FIXABLE types should also be in _AUTO_HEALABLE_ISSUES (see top of file)
+}
+
+
+def handoff_to_camael(
+    anomaly: Anomaly,
+    incident_key: str,
+    notify_fn,
+) -> None:
+    """
+    Inicia un GitOps fix asíncrono via Camael después de aplicar el fix temporal.
+
+    Solo se activa si el issue_type tiene una entrada en BUG_LIBRARY.
+    Se ejecuta en un daemon thread para no bloquear el SRE loop.
+
+    Flujo:
+      1. Camael lee el YAML de Bitbucket
+      2. Aplica el patch (memoria, CPU, probe delay...)
+      3. Crea branch + commit + PR
+      4. Notifica por WhatsApp para aprobación humana
+      5. Tras APROBAR: merge → ArgoCD despliega
+
+    Args:
+        anomaly:      La anomalía detectada por Raphael.
+        incident_key: Clave única del incidente (para Redis y PR description).
+        notify_fn:    Función de notificación WhatsApp del SRE loop.
+    """
+    if anomaly.issue_type not in _GITOPS_FIXABLE:
+        return
+
+    from agents.sre.bug_library import get_fix
+    resource_name = anomaly.owner_name or anomaly.resource_name or ""
+    fix = get_fix(anomaly.issue_type, resource_name)
+    if not fix:
+        return
+
+    from observability.metrics import GITOPS_HANDOFF_TOTAL
+    GITOPS_HANDOFF_TOTAL.labels(issue_type=anomaly.issue_type).inc()
+    logger.info(
+        f"[healer] Iniciando GitOps handoff → Camael "
+        f"(issue={anomaly.issue_type}, resource={resource_name}, "
+        f"repo={fix.repo}, file={fix.file_path}, incident={incident_key})"
+    )
+    threading.Thread(
+        target=_run_gitops_fix_in_thread,
+        args=(anomaly, incident_key, fix.repo),
+        daemon=True,
+        name=f"gitops-fix-{incident_key[:8]}",
+    ).start()
+
+
+def _run_gitops_fix_in_thread(anomaly: Anomaly, incident_key: str, repo: str) -> None:
+    """
+    Ejecuta el gitops_fix de Camael en un thread separado con su propio event loop.
+    Necesario porque el SRE loop corre en un thread de APScheduler (no asyncio).
+    """
+    import asyncio
+    import uuid
+
+    from agents.base.agent_registry import AgentRegistry
+    from agents.base.llm_factory import get_chat_llm
+    from core.agent_base import AgentContext
+
+    resource_name = anomaly.owner_name or anomaly.resource_name or ""
+    _namespace    = anomaly.namespace or _DEFAULT_NAMESPACE
+
+    # Recopilar contexto rico para el LLM — fallos silenciosos para no bloquear
+    pod_logs = _get_pod_logs(resource_name, _namespace, lines=50)
+
+    task = {
+        "task":                    "gitops_fix",
+        "incident_key":            incident_key,
+        "issue_type":              anomaly.issue_type,
+        "resource_name":           resource_name,
+        "namespace":               _namespace,
+        "details":                 anomaly.details[:400] if anomaly.details else "",
+        "repo":                    repo,
+        "user_id":                 "raphael-sre",
+        # Contexto rico para razonamiento LLM
+        "pod_logs":                pod_logs,
+        "restart_count":           getattr(anomaly, "restart_count", 0),
+        "current_memory_usage_mi": getattr(anomaly, "memory_usage_mi", None),
+        "current_cpu_usage_m":     getattr(anomaly, "cpu_usage_m", None),
+        "confidence":              getattr(anomaly, "confidence", 0.0),
+        "detected_at":             getattr(anomaly, "detected_at", ""),
+    }
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        llm = get_chat_llm()
+        ctx = AgentContext(
+            user_id="raphael-sre",
+            conversation_id=incident_key,
+            request_id=str(uuid.uuid4()),
+            llm=llm,
+        )
+        camael = AgentRegistry.get("camael", ctx)
+        result = loop.run_until_complete(camael.execute(task))
+        if result.success:
+            logger.info(
+                f"[healer] GitOps fix iniciado por Camael — "
+                f"incident={incident_key} PR={result.output.get('pr_id', '?')}"
+            )
+        else:
+            logger.error(
+                f"[healer] GitOps fix falló — incident={incident_key} "
+                f"error={result.error}"
+            )
+    except Exception as exc:
+        logger.error(f"[healer] _run_gitops_fix_in_thread error: {exc}")
+    finally:
+        loop.close()
+
+
+# ── ServiceNow RFC helpers ────────────────────────────────────────────────────
+
+def _get_rfc_from_redis(incident_key: str) -> dict | None:
+    """Lee el RFC info guardado por Camael en Redis (sn:rfc:{incident_key})."""
+    try:
+        import json as _json
+        from storage.redis.client import get_client
+        raw = get_client().get(f"sn:rfc:{incident_key}")
+        return _json.loads(raw) if raw else None
+    except Exception as exc:
+        logger.debug(f"[healer] No se pudo leer RFC de Redis: {exc}")
+        return None
+
+
+def _close_rfc_async(
+    rfc_info: dict,
+    deployment_name: str,
+    namespace: str,
+    success: bool,
+    reason: str = "",
+) -> None:
+    """Cierra o falla el RFC en ServiceNow en un thread separado (no bloquea el verificador)."""
+    def _do_close() -> None:
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(
+                _update_rfc_state(rfc_info, deployment_name, namespace, success, reason)
+            )
+        except Exception as exc:
+            logger.warning(f"[healer] _close_rfc_async error: {exc}")
+        finally:
+            loop.close()
+
+    threading.Thread(target=_do_close, daemon=True).start()
+
+
+async def _update_rfc_state(
+    rfc_info: dict,
+    deployment_name: str,
+    namespace: str,
+    success: bool,
+    reason: str,
+) -> None:
+    """Actualiza el RFC en ServiceNow según el resultado de la verificación."""
+    try:
+        from agents.devops import servicenow_client as sn
+        if not sn.is_configured():
+            return
+
+        sys_id = rfc_info.get("sys_id", "")
+        number = rfc_info.get("number", "N/A")
+        if not sys_id:
+            return
+
+        if success:
+            await sn.close_rfc(
+                sys_id,
+                f"Despliegue verificado como exitoso por Raphael (SRE).\n"
+                f"Deployment {namespace}/{deployment_name} saludable 5 min post-deploy.\n"
+                f"RFC {number} cerrado automáticamente.",
+            )
+            logger.info(f"[healer] RFC {number} → Closed (verificación exitosa)")
+        else:
+            await sn.fail_rfc(
+                sys_id,
+                f"Verificación post-deploy fallida para {namespace}/{deployment_name}.\n"
+                f"Razón: {reason}\n"
+                f"RFC {number} requiere revisión manual.",
+            )
+            logger.warning(f"[healer] RFC {number} → Review (verificación fallida)")
+    except Exception as exc:
+        logger.warning(f"[healer] _update_rfc_state error: {exc}")
