@@ -393,8 +393,14 @@ class CamaelAgent(BaseAgent):
                         patch_fn=None,
                         branch_prefix=f"fix/{issue_type.lower().replace('_', '-')}",
                         pr_title=f"fix: resolve {issue_type.lower()} in {resource_name}",
-                        # pr_body_tpl="" is intentional: LLM-only path has no standard template; PR body built from incident context
-                        pr_body_tpl="",
+                        pr_body_tpl=(
+                            "## Fix generado por Camael (LLM-only)\n\n"
+                            "**Namespace:** {namespace}\n"
+                            "**Recurso:** {resource}\n"
+                            "**Incidente:** {incident_key}\n\n"
+                            "**Detalles:**\n{details}\n\n"
+                            "_Revisión manual requerida — patch generado sin receta conocida_"
+                        ),
                     )
             else:
                 logger.warning(f"[camael] YAML no encontrado en Bitbucket para '{resource_name}'")
@@ -593,7 +599,7 @@ class CamaelAgent(BaseAgent):
                 f"{rfc_line}"
                 f"\nResponde *APROBAR* para mergear a main y que ArgoCD despliegue.\n"
                 f"Responde *RECHAZAR* para cancelar.\n"
-                f"_(Expira en 10 minutos)_"
+                f"_(Expira en 2 horas)_"
             )
             _notify_whatsapp(wa_msg)
 
