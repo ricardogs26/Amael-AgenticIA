@@ -22,6 +22,9 @@ import yaml
 
 EXPERIMENTS_DIR = Path(__file__).parents[3] / "GitOps-Infra" / "chaos-mesh" / "experiments"
 
+if not EXPERIMENTS_DIR.exists():
+    pytest.skip("GitOps-Infra not available in this environment", allow_module_level=True)
+
 # Archivos de la suite SRE (11-17 = experimentos individuales, 31 = schedules)
 SRE_EXPERIMENT_FILES = sorted(EXPERIMENTS_DIR.glob("1[1-7]-*.yaml"))
 SCHEDULE_FILE = EXPERIMENTS_DIR / "31-sre-training-schedule.yaml"
