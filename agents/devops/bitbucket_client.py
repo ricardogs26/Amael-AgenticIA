@@ -303,3 +303,52 @@ async def list_pipelines(
             "created_on": p.get("created_on", ""),
         })
     return pipelines
+
+
+# ── Code Search ───────────────────────────────────────────────────────────────
+
+async def search_file_in_repo(
+    workspace: str,
+    repo: str,
+    resource_name: str,
+) -> str | None:
+    """
+    Busca el archivo YAML que define el deployment 'resource_name' en el repo.
+
+    Usa Bitbucket Code Search API v2.0.
+    Filtra solo archivos .yaml / .yml.
+    Retorna la ruta del primer match o None si no encuentra.
+
+    Ejemplo: search_file_in_repo("amael_agenticia", "amael-agentic-backend", "amael-demo-oom")
+             → "k8s/demo/amael-demo-oom.yaml"
+    """
+    url = f"{_BB_BASE}/repositories/{workspace}/{repo}/search/code"
+    query = f"name: {resource_name}"
+
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, auth=_auth()) as client:
+            resp = await client.get(
+                url,
+                headers=_headers(),
+                params={"search_query": query, "pagelen": "10"},
+            )
+            if resp.status_code == 404:
+                logger.warning(f"[bb] Code search no disponible para {workspace}/{repo}")
+                return None
+            _raise(resp)
+            data = resp.json()
+
+        for result in data.get("values", []):
+            path = result.get("file", {}).get("path", "")
+            if path.endswith(".yaml") or path.endswith(".yml"):
+                logger.info(f"[bb] Discovery: '{resource_name}' → {path}")
+                return path
+
+        logger.info(f"[bb] Discovery: no se encontró YAML para '{resource_name}'")
+        return None
+
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        logger.warning(f"[bb] search_file_in_repo error (no crítico): {exc}")
+        return None
