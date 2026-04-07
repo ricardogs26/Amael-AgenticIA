@@ -95,6 +95,19 @@ APP_MANIFEST_MAP: dict[str, AppManifest] = {
 _DEFAULT_APP = AppManifest("amael-agentic-backend", "k8s/agents/05-backend-deployment.yaml")
 
 
+def is_known_resource(resource_name: str) -> bool:
+    """
+    Retorna True si resource_name está en APP_MANIFEST_MAP (exacto o por prefijo).
+    Usado por Camael para decidir si necesita discovery dinámico en Bitbucket.
+    """
+    if not resource_name:
+        return False
+    if resource_name in APP_MANIFEST_MAP:
+        return True
+    # Fuzzy: pod name con sufijo hash (e.g. "k8s-agent-7d9fab12-xk2vp")
+    return any(resource_name.startswith(k) for k in APP_MANIFEST_MAP)
+
+
 # ── Funciones de parchado YAML ────────────────────────────────────────────────
 
 def _parse_memory_mi(value: str) -> int:

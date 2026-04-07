@@ -350,7 +350,7 @@ class CamaelAgent(BaseAgent):
         El merge lo ejecuta gitops_approve cuando el humano responde APROBAR.
         """
         from agents.devops import bitbucket_client as bb
-        from agents.sre.bug_library import get_fix
+        from agents.sre.bug_library import get_fix, is_known_resource
 
         incident_key  = task.get("incident_key", "unknown")
         issue_type    = task.get("issue_type", "")
@@ -361,7 +361,45 @@ class CamaelAgent(BaseAgent):
         repo          = task.get("repo", _BB_DEFAULT_REPO)
 
         fix = get_fix(issue_type, resource_name)
-        if not fix:
+
+        # Si el resource no está en APP_MANIFEST_MAP → discovery dinámico en Bitbucket
+        if not is_known_resource(resource_name):
+            logger.info(f"[camael] '{resource_name}' no está en APP_MANIFEST_MAP — iniciando discovery en Bitbucket")
+            discovered_path = await bb.search_file_in_repo(workspace, repo, resource_name)
+            if discovered_path:
+                logger.info(f"[camael] YAML descubierto: {discovered_path}")
+                if fix:
+                    # Sustituir file_path por el descubierto manteniendo el template de fix
+                    from agents.sre.bug_library import BugFix
+                    fix = BugFix(
+                        issue_type=fix.issue_type,
+                        description=fix.description,
+                        repo=repo,
+                        file_path=discovered_path,
+                        patch_fn=fix.patch_fn,
+                        branch_prefix=fix.branch_prefix,
+                        pr_title=fix.pr_title,
+                        pr_body_tpl=fix.pr_body_tpl,
+                    )
+                else:
+                    # issue_type sin template: LLM-only path con YAML descubierto
+                    from agents.sre.bug_library import BugFix
+                    fix = BugFix(
+                        issue_type=issue_type,
+                        description=f"Fix LLM para {issue_type} en {resource_name}",
+                        repo=repo,
+                        file_path=discovered_path,
+                        patch_fn=None,
+                        branch_prefix=f"fix/{issue_type.lower().replace('_', '-')}",
+                        pr_title=f"fix: resolve {issue_type.lower()} in {resource_name}",
+                        pr_body_tpl="",
+                    )
+            else:
+                logger.warning(f"[camael] YAML no encontrado en Bitbucket para '{resource_name}'")
+                return await self._rfc_manual_intervention(task, f"YAML para '{resource_name}' no encontrado en Bitbucket")
+
+        elif not fix:
+            logger.warning(f"[camael] No hay fix para issue_type='{issue_type}' y resource='{resource_name}'")
             return AgentResult(
                 success=False, output=None, agent_name=self.name,
                 error=f"No hay fix automático para issue_type='{issue_type}'",
@@ -541,6 +579,69 @@ class CamaelAgent(BaseAgent):
             logger.error(f"[camael] gitops_fix error: {exc}")
             return AgentResult(success=False, output=None, agent_name=self.name,
                                error=str(exc))
+
+    # ── RFC Manual Intervention ───────────────────────────────────────────────
+
+    async def _rfc_manual_intervention(self, task: dict[str, Any], reason: str) -> AgentResult:
+        """
+        Cuando Camael no puede generar un fix automático, crea un RFC en ServiceNow
+        con estado 'Assess' y notifica al operador por WhatsApp para intervención manual.
+        """
+        from agents.devops import servicenow_client as sn
+        from agents.devops.rfc_templates import build_emergency_rfc
+
+        incident_key  = task.get("incident_key", "unknown")
+        issue_type    = task.get("issue_type", "UNKNOWN")
+        resource_name = task.get("resource_name", "unknown")
+        namespace     = task.get("namespace", "amael-ia")
+        workspace     = task.get("workspace", _BB_WORKSPACE)
+        repo          = task.get("repo", _BB_DEFAULT_REPO)
+
+        logger.warning(f"[camael] Intervención manual requerida: {reason}")
+
+        rfc_info = {"sys_id": "", "number": "N/A", "url": ""}
+        if sn.is_configured():
+            try:
+                emergency_model = await sn.get_emergency_chg_model()
+                rfc_payload = build_emergency_rfc(
+                    issue_type=issue_type,
+                    pod_name=resource_name,
+                    namespace=namespace,
+                    incident_key=incident_key,
+                    fix_summary=f"INTERVENCIÓN MANUAL REQUERIDA: {reason}",
+                    branch_name="N/A",
+                    pr_url="",
+                    pr_id=0,
+                    confidence=task.get("confidence", 0.0),
+                    detected_at=task.get("detected_at", ""),
+                    chg_model=emergency_model,
+                )
+                rfc_info = await sn.create_rfc(rfc_payload)
+                if rfc_info["sys_id"]:
+                    await sn.add_work_note(
+                        rfc_info["sys_id"],
+                        f"Camael no pudo generar fix automático.\nRazón: {reason}\n"
+                        f"Acción requerida: revisión manual del operador.",
+                    )
+            except Exception as exc:
+                logger.warning(f"[camael] RFC manual falló (no crítico): {exc}")
+
+        wa_msg = (
+            f"⚠️ *Camael — Intervención manual requerida*\n\n"
+            f"🔴 Incidente: `{issue_type}` en `{namespace}/{resource_name}`\n"
+            f"❌ Razón: {reason}\n\n"
+            f"Camael no pudo generar un fix automático para este caso.\n"
+            f"Se requiere revisión manual.\n"
+            + (f"\n🎫 RFC creado: {rfc_info['number']}\n{rfc_info['url']}" if rfc_info["sys_id"] else "")
+        )
+        _notify_whatsapp(wa_msg)
+
+        return AgentResult(
+            success=False,
+            output={"response": f"Intervención manual requerida: {reason}", "task": "gitops_fix"},
+            agent_name=self.name,
+            error=reason,
+        )
 
     # ── GitOps Approve ────────────────────────────────────────────────────────
 
