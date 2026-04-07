@@ -36,6 +36,7 @@ from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
 from agents.base.llm_utils import build_prompt, invoke_llm, retrieve_rag_context
+from agents.sre.bug_library import _patch_memory_limit, _patch_cpu_limit
 from core.agent_base import AgentResult, BaseAgent
 
 logger = logging.getLogger("agents.camael")
@@ -392,6 +393,7 @@ class CamaelAgent(BaseAgent):
                         patch_fn=None,
                         branch_prefix=f"fix/{issue_type.lower().replace('_', '-')}",
                         pr_title=f"fix: resolve {issue_type.lower()} in {resource_name}",
+                        # pr_body_tpl="" is intentional: LLM-only path has no standard template; PR body built from incident context
                         pr_body_tpl="",
                     )
             else:
@@ -465,7 +467,6 @@ class CamaelAgent(BaseAgent):
             else:
                 # LLM-only path (POD_FAILED o issue_type sin template):
                 # Intentar patch de memoria primero con el multiplier del LLM, luego CPU
-                from agents.sre.bug_library import _patch_memory_limit, _patch_cpu_limit
                 logger.info(
                     f"[camael] LLM-only path: intentando patch con multiplier x{decision.multiplier:.1f}"
                 )
