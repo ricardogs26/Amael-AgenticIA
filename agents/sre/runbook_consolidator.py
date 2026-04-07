@@ -141,6 +141,7 @@ def _synthesize_runbooks(issue_type: str, runbooks: list[dict]) -> str:
 
     try:
         import concurrent.futures
+
         from agents.base.llm_factory import llm_agent_context
         llm = _get_llm()
         llm_agent_context.set("runbook_l3")

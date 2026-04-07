@@ -1,10 +1,9 @@
 """
 Tests para POD_FAILED en _GITOPS_FIXABLE y LLM-only patch path.
 """
-import pytest
-from agents.sre.healer import _GITOPS_FIXABLE
 from agents.devops.camael_analyzer import _ISSUE_DESCRIPTIONS
-from agents.sre.bug_library import _patch_memory_limit, _patch_cpu_limit
+from agents.sre.bug_library import _patch_cpu_limit, _patch_memory_limit
+from agents.sre.healer import _GITOPS_FIXABLE
 
 
 class TestPodFailedGitopsFixable:

@@ -11,16 +11,14 @@ Cubre:
   - APP_MANIFEST_MAP cubre todas las apps del cluster
   - patch_fn no modifica YAML estructuralmente inválido (devuelve mismo texto)
 """
-import pytest
 from agents.sre.bug_library import (
+    _DEFAULT_APP,
     APP_MANIFEST_MAP,
     BUG_LIBRARY,
     BugFix,
     BugFixTemplate,
-    _DEFAULT_APP,
     get_fix,
 )
-
 
 # ── get_fix — casos básicos ───────────────────────────────────────────────────
 
