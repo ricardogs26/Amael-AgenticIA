@@ -228,6 +228,7 @@ async def handle_devops_command(body: DevOpsCommandRequest) -> dict:
 async def _cmd_pr() -> str:
     """Lista todos los PRs pendientes de aprobación (desde Redis)."""
     import json as _json
+
     from storage.redis.client import get_client
     redis = get_client()
     keys  = redis.keys("bb:pending_pr:*")
@@ -268,13 +269,14 @@ async def _cmd_pr() -> str:
         msg += f"• PR *#{pr_id}* · `{repo}` · `{issue_type}`\n"
         if pr_url:
             msg += f"  {pr_url}\n"
-    msg += f"\nUsa */devops aprobar #PR_ID* para aprobar uno específico.\n"
+    msg += "\nUsa */devops aprobar #PR_ID* para aprobar uno específico.\n"
     msg += f"Ejemplo: */devops aprobar #{_json.loads(redis.get(sorted(decoded_keys)[0]) or '{}').get('pr_id', '?')}*"
     return msg
 
 
 async def _cmd_pipelines() -> str:
     import os
+
     from agents.devops.bitbucket_client import list_pipelines
     ws   = os.environ.get("BITBUCKET_WORKSPACE", "")
     repo = os.environ.get("BITBUCKET_DEFAULT_REPO", "amael-agentic-backend")
@@ -301,8 +303,9 @@ async def _cmd_aprobar(pr_id_arg: str | None = None) -> str:
     """
     import json as _json
     import os
-    from storage.redis.client import get_client
+
     from agents.devops.bitbucket_client import merge_pr
+    from storage.redis.client import get_client
 
     redis = get_client()
     keys  = redis.keys("bb:pending_pr:*")
@@ -373,9 +376,11 @@ async def _cmd_rechazar(pr_id_arg: str | None = None) -> str:
     """Declina un PR pendiente. Misma lógica de selección que _cmd_aprobar."""
     import json as _json
     import os
+
     import httpx
+
+    from agents.devops.bitbucket_client import _BB_BASE, _auth, _headers
     from storage.redis.client import get_client
-    from agents.devops.bitbucket_client import _auth, _headers, _BB_BASE
 
     redis = get_client()
     keys  = redis.keys("bb:pending_pr:*")
@@ -446,7 +451,7 @@ async def _cmd_sn(rfc_number: str | None = None) -> str:
     Con argumento (ej. CHG0030002): busca ese RFC directamente.
     """
     import json as _json
-    import os
+
     from agents.devops import servicenow_client as sn
 
     if not sn.is_configured():
@@ -549,7 +554,7 @@ async def bitbucket_webhook(request: Request):
                   Pull request: Fulfilled, Rejected
     """
     import os
-    raw_body = await request.body()
+    await request.body()
 
     # Validación opcional por token
     secret = os.environ.get("BITBUCKET_WEBHOOK_SECRET", "")

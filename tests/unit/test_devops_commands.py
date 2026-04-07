@@ -6,10 +6,8 @@ lazy dentro del cuerpo de la función. Se testean extrayendo la lógica pura
 de selección de PR (sin necesidad de Redis real ni Bitbucket real).
 """
 import json
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 import sys
-
+from unittest.mock import MagicMock
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -61,7 +59,6 @@ def _import_devops_fns():
         if "interfaces.api.routers.devops" in key:
             del sys.modules[key]
 
-    import importlib
     import interfaces.api.routers.devops as devops_mod
     return devops_mod
 

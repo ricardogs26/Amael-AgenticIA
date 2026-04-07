@@ -36,7 +36,7 @@ from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
 from agents.base.llm_utils import build_prompt, invoke_llm, retrieve_rag_context
-from agents.sre.bug_library import _patch_memory_limit, _patch_cpu_limit
+from agents.sre.bug_library import _patch_cpu_limit, _patch_memory_limit
 from core.agent_base import AgentResult, BaseAgent
 
 logger = logging.getLogger("agents.camael")
@@ -416,6 +416,7 @@ class CamaelAgent(BaseAgent):
         # Dedup guard: si ya existe un PR pendiente para este incident_key, no crear otro
         try:
             import json as _json
+
             from storage.redis.client import get_client as _get_redis
             _redis = _get_redis()
             _existing_raw = _redis.get(f"bb:pending_pr:{incident_key}")
@@ -562,6 +563,7 @@ class CamaelAgent(BaseAgent):
                     # Persistir en Redis para que el verificador SRE pueda cerrar el RFC
                     if rfc_info["sys_id"]:
                         import json as _json
+
                         from storage.redis.client import get_client as _redis
                         _redis().setex(
                             f"sn:rfc:{incident_key}",
@@ -645,8 +647,8 @@ class CamaelAgent(BaseAgent):
         issue_type    = task.get("issue_type", "UNKNOWN")
         resource_name = task.get("resource_name", "unknown")
         namespace     = task.get("namespace", "amael-ia")
-        workspace     = task.get("workspace", _BB_WORKSPACE)
-        repo          = task.get("repo", _BB_DEFAULT_REPO)
+        task.get("workspace", _BB_WORKSPACE)
+        task.get("repo", _BB_DEFAULT_REPO)
 
         logger.warning(f"[camael] Intervención manual requerida: {reason}")
 
@@ -729,7 +731,7 @@ class CamaelAgent(BaseAgent):
         workspace = pr_info["workspace"]
         repo      = pr_info["repo"]
         pr_id     = int(pr_info["pr_id"])
-        pr_url    = pr_info.get("pr_url", "")
+        pr_info.get("pr_url", "")
 
         if action == "RECHAZAR":
             _delete_pending_pr(incident_key)
@@ -768,7 +770,7 @@ class CamaelAgent(BaseAgent):
         # permite self-merge en repos sin branch restrictions configuradas)
         rfc_sys_id = pr_info.get("rfc_sys_id", "")
         rfc_number = pr_info.get("rfc_number", "N/A")
-        rfc_url    = pr_info.get("rfc_url", "")
+        pr_info.get("rfc_url", "")
         try:
             logger.info(f"[camael] Mergeando PR #{pr_id} en {workspace}/{repo}")
             merge_result = await bb.merge_pr(

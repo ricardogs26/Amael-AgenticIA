@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 from agents.sre.models import Anomaly
 from core.constants import ActionType, Severity
@@ -83,7 +83,7 @@ def _get_pod_logs(resource_name: str, namespace: str, lines: int = 50) -> str:
             return ""
 
         # Tomar el pod más reciente
-        _epoch = datetime.min.replace(tzinfo=timezone.utc)
+        _epoch = datetime.min.replace(tzinfo=UTC)
         pod = sorted(
             pods_items,
             key=lambda p: p.metadata.creation_timestamp or _epoch,
@@ -594,6 +594,7 @@ def _get_rfc_from_redis(incident_key: str) -> dict | None:
     """Lee el RFC info guardado por Camael en Redis (sn:rfc:{incident_key})."""
     try:
         import json as _json
+
         from storage.redis.client import get_client
         raw = get_client().get(f"sn:rfc:{incident_key}")
         return _json.loads(raw) if raw else None

@@ -1,8 +1,9 @@
 """
 Tests para discovery dinámico de YAML en Bitbucket.
 """
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agents.sre.bug_library import is_known_resource
 

@@ -15,7 +15,6 @@ from datetime import datetime
 
 from agents.devops.servicenow_client import RFCState
 
-
 # ── Mapeos ITIL v4 ────────────────────────────────────────────────────────────
 
 _RISK_MAP: dict[str, tuple[str, str, str]] = {
@@ -123,11 +122,11 @@ def build_emergency_rfc(
             f"3. Este RFC se actualiza con el resultado del rollback"
         ),
         "test_plan": (
-            f"Verificación automática por Raphael (5 min post-deploy):\n"
-            f"- Pod en estado Running sin reinicios\n"
-            f"- Error rate < 1% (Prometheus)\n"
-            f"- SLO de disponibilidad mantenido\n"
-            f"- Sin alertas nuevas en ventana de 5 min"
+            "Verificación automática por Raphael (5 min post-deploy):\n"
+            "- Pod en estado Running sin reinicios\n"
+            "- Error rate < 1% (Prometheus)\n"
+            "- SLO de disponibilidad mantenido\n"
+            "- Sin alertas nuevas en ventana de 5 min"
         ),
 
         # ── CI ─────────────────────────────────────────────────────────────
