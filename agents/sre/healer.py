@@ -471,7 +471,8 @@ def record_restart(resource_name: str, namespace: str) -> None:
 #: Tipos de anomalía que tienen fix automático via GitOps (debe coincidir con BUG_LIBRARY).
 _GITOPS_FIXABLE = {
     "OOM_KILLED", "CRASH_LOOP", "DEPLOYMENT_DEGRADED",
-    "HIGH_MEMORY", "HIGH_CPU", "HIGH_RESTARTS", "MEMORY_LEAK_PREDICTED"
+    "HIGH_MEMORY", "HIGH_CPU", "HIGH_RESTARTS", "MEMORY_LEAK_PREDICTED",
+    "POD_FAILED",   # Fix via LLM — requiere análisis de logs para decidir estrategia
 }
 
 

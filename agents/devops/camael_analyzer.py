@@ -192,6 +192,21 @@ def _summarize_manifest(yaml_content: str) -> str:
         return yaml_content[:1500]
 
 
+# ── Issue descriptions ────────────────────────────────────────────────────────
+
+#: Descripciones por tipo de anomalía para enriquecer el prompt del LLM.
+_ISSUE_DESCRIPTIONS: dict[str, str] = {
+    "OOM_KILLED":             "El pod fue terminado por el kernel por exceder el límite de memoria (OOMKilled). El límite actual es insuficiente para la carga de trabajo.",
+    "CRASH_LOOP":             "El contenedor entra en bucle de reinicios (CrashLoopBackOff). Puede deberse a recursos insuficientes, fallo de startup probe, o error de aplicación.",
+    "DEPLOYMENT_DEGRADED":    "El Deployment tiene menos réplicas disponibles que las deseadas durante un período prolongado.",
+    "HIGH_MEMORY":            "El uso de memoria del pod supera el umbral crítico de forma sostenida, riesgo de OOMKill inminente.",
+    "HIGH_CPU":               "El uso de CPU del pod supera el umbral crítico, causando throttling y degradación de latencia.",
+    "HIGH_RESTARTS":          "El pod acumula un número alto de reinicios recientes, indicando inestabilidad crónica.",
+    "MEMORY_LEAK_PREDICTED":  "La tendencia de crecimiento de memoria predice agotamiento del límite en el corto plazo (predict_linear).",
+    "POD_FAILED":             "El pod terminó con código de error. Analiza los logs para determinar la causa y el fix óptimo (recursos insuficientes, probe delay muy agresiva, o configuración incorrecta).",
+}
+
+
 # ── Main public API ───────────────────────────────────────────────────────────
 
 async def analyze_and_decide(
@@ -228,7 +243,11 @@ async def analyze_and_decide(
         FixDecision con multiplier, reasoning, operator_note, risk_level, etc.
         En caso de fallo LLM retorna FixDecision con valores por defecto conservadores.
     """
-    issue_desc = diagnosis or f"Anomalía detectada: {issue_type} en {resource_name}"
+    issue_desc = (
+        diagnosis
+        or _ISSUE_DESCRIPTIONS.get(issue_type)
+        or f"Anomalía detectada: {issue_type} en {resource_name}"
+    )
 
     # Contexto del manifest (sección relevante)
     manifest_summary = _summarize_manifest(yaml_content)
