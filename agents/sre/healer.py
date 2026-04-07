@@ -473,6 +473,7 @@ _GITOPS_FIXABLE = {
     "OOM_KILLED", "CRASH_LOOP", "DEPLOYMENT_DEGRADED",
     "HIGH_MEMORY", "HIGH_CPU", "HIGH_RESTARTS", "MEMORY_LEAK_PREDICTED",
     "POD_FAILED",   # Fix via LLM — requiere análisis de logs para decidir estrategia
+    # Note: all _GITOPS_FIXABLE types should also be in _AUTO_HEALABLE_ISSUES (see top of file)
 }
 
 
