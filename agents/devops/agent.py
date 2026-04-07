@@ -463,8 +463,26 @@ class CamaelAgent(BaseAgent):
             if fix.patch_fn is not None:
                 patched_content = fix.patch_fn(yaml_content)
             else:
-                logger.info("[camael] LLM-only path: sin patch_fn determinista, usando patch LLM")
-                patched_content = yaml_content
+                # LLM-only path (POD_FAILED o issue_type sin template):
+                # Intentar patch de memoria primero con el multiplier del LLM, luego CPU
+                from agents.sre.bug_library import _patch_memory_limit, _patch_cpu_limit
+                logger.info(
+                    f"[camael] LLM-only path: intentando patch con multiplier x{decision.multiplier:.1f}"
+                )
+                trial = _patch_memory_limit(yaml_content, multiplier=decision.multiplier)
+                if trial != yaml_content:
+                    patched_content = trial
+                    logger.info("[camael] LLM-only: patch de memoria aplicado")
+                else:
+                    trial = _patch_cpu_limit(yaml_content, multiplier=decision.multiplier)
+                    if trial != yaml_content:
+                        patched_content = trial
+                        logger.info("[camael] LLM-only: patch de CPU aplicado")
+                    else:
+                        logger.warning(
+                            "[camael] LLM-only: no se pudo parchear memoria ni CPU — "
+                            "el YAML puede no tener esos campos o ya están en el límite guardrail"
+                        )
             if patched_content == yaml_content:
                 logger.warning("[camael] El patch no modificó el archivo — revisar regex")
 
