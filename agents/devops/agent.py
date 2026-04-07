@@ -479,6 +479,7 @@ class CamaelAgent(BaseAgent):
                         patched_content = trial
                         logger.info("[camael] LLM-only: patch de CPU aplicado")
                     else:
+                        patched_content = yaml_content
                         logger.warning(
                             "[camael] LLM-only: no se pudo parchear memoria ni CPU — "
                             "el YAML puede no tener esos campos o ya están en el límite guardrail"
