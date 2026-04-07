@@ -438,6 +438,27 @@ class CamaelAgent(BaseAgent):
             logger.info(f"[camael] GitOps fix — leyendo {fix.file_path} de {repo}")
             yaml_content = await bb.read_file(workspace, repo, fix.file_path, "main")
 
+            # 1b. Análisis LLM para decidir la estrategia óptima de fix
+            from agents.devops.camael_analyzer import analyze_and_decide
+            decision = await analyze_and_decide(
+                issue_type               = issue_type,
+                resource_name            = resource_name,
+                namespace                = namespace,
+                yaml_content             = yaml_content,
+                diagnosis                = details,
+                confidence               = task.get("confidence", 0.0),
+                incident_key             = incident_key,
+                pod_logs                 = task.get("pod_logs", ""),
+                restart_count            = task.get("restart_count", 0),
+                current_memory_usage_mi  = task.get("current_memory_usage_mi"),
+                current_cpu_usage_m      = task.get("current_cpu_usage_m"),
+            )
+            if decision.llm_used:
+                logger.info(
+                    f"[camael] FixDecision: multiplier={decision.multiplier}x "
+                    f"risk={decision.risk_level} pr_title={decision.pr_title!r}"
+                )
+
             # 2. Aplicar patch
             if fix.patch_fn is not None:
                 patched_content = fix.patch_fn(yaml_content)
