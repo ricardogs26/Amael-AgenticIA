@@ -275,7 +275,7 @@ async def analyze_and_decide(
         if hasattr(raw, "content"):
             raw = raw.content
 
-        match = re.search(r"\{.*?\}", raw, re.DOTALL)
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
         if not match:
             logger.warning(
                 f"[camael_analyzer] LLM no retornó JSON válido para "
