@@ -48,6 +48,68 @@ def _get_k8s_apps():
     return client.AppsV1Api()
 
 
+def _get_pod_logs(resource_name: str, namespace: str, lines: int = 50) -> str:
+    """
+    Obtiene las últimas N líneas de logs del pod más reciente del deployment.
+    Busca por label app={resource_name}, luego por nombre de pod.
+    Retorna string vacío si falla (no bloquea el handoff).
+    Limita a 2000 caracteres para no inflar el prompt LLM.
+    """
+    try:
+        from kubernetes import client, config
+        try:
+            config.load_incluster_config()
+        except Exception:
+            config.load_kube_config()
+
+        v1 = client.CoreV1Api()
+
+        # Intentar por label selector primero
+        pods = v1.list_namespaced_pod(
+            namespace=namespace,
+            label_selector=f"app={resource_name}",
+        )
+        # Fallback: buscar por nombre de pod
+        if not pods.items:
+            all_pods = v1.list_namespaced_pod(namespace=namespace)
+            pods_items = [
+                p for p in all_pods.items
+                if resource_name in (p.metadata.name or "")
+            ]
+        else:
+            pods_items = pods.items
+
+        if not pods_items:
+            return ""
+
+        # Tomar el pod más reciente
+        pod = sorted(
+            pods_items,
+            key=lambda p: p.metadata.creation_timestamp or "",
+            reverse=True,
+        )[0]
+        pod_name = pod.metadata.name
+
+        # Intentar logs del contenedor anterior (el que crasheó), luego el actual
+        for previous in (True, False):
+            try:
+                log = v1.read_namespaced_pod_log(
+                    name=pod_name,
+                    namespace=namespace,
+                    tail_lines=lines,
+                    previous=previous,
+                )
+                if log:
+                    return log[:2000]
+            except Exception:
+                continue
+
+        return ""
+    except Exception as exc:
+        logger.debug(f"[healer] _get_pod_logs({resource_name}): {exc}")
+        return ""
+
+
 def decide_action(anomaly: Anomaly, confidence: float) -> str:
     """
     Aplica guardrails y decide la acción apropiada.
@@ -470,15 +532,28 @@ def _run_gitops_fix_in_thread(anomaly: Anomaly, incident_key: str, repo: str) ->
     from agents.base.llm_factory import get_chat_llm
     from core.agent_base import AgentContext
 
+    resource_name = anomaly.owner_name or anomaly.resource_name or ""
+    _namespace    = anomaly.namespace or _DEFAULT_NAMESPACE
+
+    # Recopilar contexto rico para el LLM — fallos silenciosos para no bloquear
+    pod_logs = _get_pod_logs(resource_name, _namespace, lines=50)
+
     task = {
-        "task":          "gitops_fix",
-        "incident_key":  incident_key,
-        "issue_type":    anomaly.issue_type,
-        "resource_name": anomaly.owner_name or anomaly.resource_name,
-        "namespace":     anomaly.namespace,
-        "details":       anomaly.details[:400],
-        "repo":          repo,
-        "user_id":       "raphael-sre",
+        "task":                    "gitops_fix",
+        "incident_key":            incident_key,
+        "issue_type":              anomaly.issue_type,
+        "resource_name":           resource_name,
+        "namespace":               _namespace,
+        "details":                 anomaly.details[:400] if anomaly.details else "",
+        "repo":                    repo,
+        "user_id":                 "raphael-sre",
+        # Contexto rico para razonamiento LLM
+        "pod_logs":                pod_logs,
+        "restart_count":           getattr(anomaly, "restart_count", 0),
+        "current_memory_usage_mi": getattr(anomaly, "memory_usage_mi", None),
+        "current_cpu_usage_m":     getattr(anomaly, "cpu_usage_m", None),
+        "confidence":              getattr(anomaly, "confidence", 0.0),
+        "detected_at":             getattr(anomaly, "detected_at", ""),
     }
 
     loop = asyncio.new_event_loop()
