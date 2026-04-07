@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import UTC
+from datetime import UTC, datetime, timezone
 
 from agents.sre.models import Anomaly
 from core.constants import ActionType, Severity
@@ -83,9 +83,10 @@ def _get_pod_logs(resource_name: str, namespace: str, lines: int = 50) -> str:
             return ""
 
         # Tomar el pod más reciente
+        _epoch = datetime.min.replace(tzinfo=timezone.utc)
         pod = sorted(
             pods_items,
-            key=lambda p: p.metadata.creation_timestamp or "",
+            key=lambda p: p.metadata.creation_timestamp or _epoch,
             reverse=True,
         )[0]
         pod_name = pod.metadata.name
@@ -98,6 +99,7 @@ def _get_pod_logs(resource_name: str, namespace: str, lines: int = 50) -> str:
                     namespace=namespace,
                     tail_lines=lines,
                     previous=previous,
+                    _request_timeout=5,
                 )
                 if log:
                     return log[:2000]
