@@ -29,7 +29,7 @@ spec:
         - "--vm"
         - "1"
         - "--vm-bytes"
-        - "256M"     # intenta alocar 256MB pero el límite es 64Mi → OOMKilled
+        - "100M"     # intenta alocar 100MB pero el límite es 64Mi → OOMKilled; 2x fix = 128Mi > 100M → resuelto
         - "--vm-hang"
         - "0"
         resources:
@@ -37,5 +37,5 @@ spec:
             memory: "32Mi"
             cpu: "10m"
           limits:
-            memory: "64Mi"   # límite bajo a propósito — Raphael lo detectará y Camael aumentará a 192Mi
+            memory: "64Mi"   # límite bajo a propósito — Raphael lo detectará y Camael aumentará a 128Mi
             cpu: "100m"

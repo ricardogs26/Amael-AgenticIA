@@ -375,6 +375,11 @@ GITOPS_PR_CREATED_TOTAL = Counter(
     "PRs de fix creados por Camael en Bitbucket",
     ["issue_type"],
 )
+GITOPS_PR_MERGED_TOTAL = Counter(
+    "amael_sre_gitops_pr_merged_total",
+    "PRs de fix mergeados y desplegados via GitOps",
+    ["issue_type"],
+)
 
 # ── Health / Registry ─────────────────────────────────────────────────────────
 REGISTRY_HEALTH_STATUS = Gauge(
