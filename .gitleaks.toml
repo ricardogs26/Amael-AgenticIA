@@ -1,0 +1,7 @@
+[allowlist]
+description = "CI test values and known safe strings"
+regexes = [
+  # Variables de entorno de CI — valores fijos, no son secretos reales
+  '''ci-test-secret''',
+  '''ci-internal-secret''',
+]

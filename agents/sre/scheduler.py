@@ -204,8 +204,37 @@ def deactivate_maintenance() -> str:
 
 # ── Deduplicación de incidentes ───────────────────────────────────────────────
 
-_DEDUP_TTL = 600  # 10 minutos
+# TTL por tipo de anomalía.
+# HIGH_RESTARTS y MEMORY_LEAK_PREDICTED usan TTL largo porque, incluso cuando
+# son reales, no requieren re-alertar en minutos — ya hay una acción en curso.
+# Anomalías activas (CRASH_LOOP, OOM, IMAGE_PULL) usan TTL corto para que
+# vuelvan a procesarse si el problema no se resuelve.
+_DEDUP_TTL_DEFAULT = 600       # 10 min — anomalías activas
+_DEDUP_TTL_BY_TYPE: dict[str, int] = {
+    "HIGH_RESTARTS":         3600,   # 1 hora — solo alerta cuando hay crecimiento real
+    "MEMORY_LEAK_PREDICTED": 3600,   # 1 hora — tendencia, no emergencia inmediata
+    "SLO_BUDGET_BURNING":    1800,   # 30 min — importante pero no urgente por segundo
+    "HIGH_CPU":               900,   # 15 min
+    "HIGH_MEMORY":            900,   # 15 min
+    # Infraestructura — TTL largo para no repetir notificaciones de estado persistente
+    "VAULT_SEALED":          1800,   # 30 min — persiste hasta unseal manual
+    "LOADBALANCER_NO_IP":    1800,   # 30 min — persiste hasta fix de MetalLB
+    "PVC_PENDING":           1800,   # 30 min — persiste hasta provisionar
+    "DEPLOYMENT_DEGRADED":    300,   # 5 min — puede cambiar rápido post-restart
+    "SERVICE_NO_ENDPOINTS":   600,   # 10 min
+    "NODE_PRESSURE":         1800,   # 30 min — condición de nodo persiste
+    "K8S_EVENT_WARNING":      300,   # 5 min — eventos se repiten
+    "PVC_MOUNT_ERROR":        600,   # 10 min
+}
+
 _dedup_cache: dict[str, float] = {}  # fallback in-memory
+
+
+def _dedup_ttl_for(key: str) -> int:
+    """Retorna el TTL de dedup apropiado según el tipo de anomalía en la clave."""
+    # La clave tiene formato "namespace:resource_name:ISSUE_TYPE"
+    issue_type = key.rsplit(":", 1)[-1] if ":" in key else key
+    return _DEDUP_TTL_BY_TYPE.get(issue_type, _DEDUP_TTL_DEFAULT)
 
 
 def is_duplicate_incident(key: str) -> bool:
@@ -215,7 +244,8 @@ def is_duplicate_incident(key: str) -> bool:
         return get_client().exists(f"sre:incident:{key}") == 1
     except Exception:
         now = time.time()
-        if key in _dedup_cache and now - _dedup_cache[key] < _DEDUP_TTL:
+        ttl = _dedup_ttl_for(key)
+        if key in _dedup_cache and now - _dedup_cache[key] < ttl:
             return True
         _dedup_cache.pop(key, None)
         return False
@@ -223,9 +253,10 @@ def is_duplicate_incident(key: str) -> bool:
 
 def mark_incident(key: str) -> None:
     """Marca el incidente como procesado para deduplicación."""
+    ttl = _dedup_ttl_for(key)
     try:
         from storage.redis import get_client
-        get_client().set(f"sre:incident:{key}", "1", ex=_DEDUP_TTL)
+        get_client().set(f"sre:incident:{key}", "1", ex=ttl)
     except Exception:
         _dedup_cache[key] = time.time()
 
@@ -271,6 +302,7 @@ def sre_autonomous_loop(
     try:
         # ── OBSERVE ──────────────────────────────────────────────────────────
         structural = observer.observe_cluster()
+        infra      = observer.observe_infrastructure()
         metrics    = observer.observe_metrics(prometheus_url)
         trends     = observer.observe_trends(prometheus_url)
         slo_anoms  = observer.observe_slo(prometheus_url, slo_targets)
@@ -278,6 +310,7 @@ def sre_autonomous_loop(
         # ── DETECT ───────────────────────────────────────────────────────────
         raw_anomalies = detector.detect_anomalies(
             structural=structural,
+            infrastructure=infra,
             metric=metrics,
             trend=trends,
             slo=slo_anoms,

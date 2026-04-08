@@ -60,6 +60,10 @@ def get_client() -> redis_lib.Redis:
     return _client
 
 
+# Alias para compatibilidad con módulos que importan get_redis_client
+get_redis_client = get_client
+
+
 def health_check() -> bool:
     """Verifica conectividad con Redis."""
     try:

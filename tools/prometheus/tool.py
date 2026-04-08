@@ -189,14 +189,19 @@ class PrometheusTool(BaseTool):
         return await self.query(QueryInput(promql=promql, limit=input.limit))
 
     async def health_check(self) -> bool:
-        """Verifica que Prometheus responde con una query trivial."""
-        try:
-            resp = _req.get(
-                f"{_PROMETHEUS_URL}/api/v1/query",
-                params={"query": "1"},
-                timeout=5,
-            )
-            return resp.status_code == 200
-        except Exception as exc:
-            logger.warning(f"[prometheus_tool] health_check falló: {exc}")
-            return False
+        """Verifica que Prometheus responde con una query trivial (non-blocking)."""
+        import asyncio
+
+        def _check() -> bool:
+            try:
+                resp = _req.get(
+                    f"{_PROMETHEUS_URL}/api/v1/query",
+                    params={"query": "1"},
+                    timeout=5,
+                )
+                return resp.status_code == 200
+            except Exception as exc:
+                logger.warning(f"[prometheus_tool] health_check falló: {exc}")
+                return False
+
+        return await asyncio.to_thread(_check)

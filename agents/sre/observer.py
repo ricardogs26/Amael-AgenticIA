@@ -20,6 +20,11 @@ from core.constants import AnomalyType, Severity
 
 logger = logging.getLogger("agents.sre.observer")
 
+# Baseline de reinicios por pod — persiste entre loops en el mismo proceso.
+# Clave: "namespace/pod_name" → último conteo visto.
+# En el primer loop solo se establece la línea base, sin generar alertas.
+_restart_baseline: dict[str, int] = {}
+
 # Namespaces a observar
 _OBSERVE_NAMESPACES = [
     ns.strip()
@@ -144,17 +149,36 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                             details=f"Pod {pod_name} no puede descargar la imagen: {state.waiting.reason}",
                         ))
 
-                    # HIGH_RESTARTS
+                    # HIGH_RESTARTS — solo si el conteo CRECIÓ desde la última observación.
+                    # Evita falsos positivos por reinicios acumulados históricos en pods
+                    # que llevan semanas corriendo sin problemas recientes.
                     elif restarts >= 5 and phase == "Running":
-                        anomalies.append(Anomaly(
-                            issue_type=AnomalyType.HIGH_RESTARTS,
-                            severity=Severity.MEDIUM if restarts < 10 else Severity.HIGH,
-                            namespace=ns,
-                            resource_name=pod_name,
-                            resource_type="Pod",
-                            owner_name=owner_name,
-                            details=f"Pod {pod_name} tiene {restarts} reinicios.",
-                        ))
+                        pod_key = f"{ns}/{pod_name}"
+                        last_count = _restart_baseline.get(pod_key)
+                        _restart_baseline[pod_key] = restarts  # actualizar baseline siempre
+
+                        if last_count is None:
+                            # Primera observación de este pod — solo establece la línea base.
+                            # No alertar: los reinicios son históricos, no recientes.
+                            logger.debug(
+                                f"[observer] Baseline HIGH_RESTARTS: {pod_key} = {restarts}"
+                            )
+                        elif restarts > last_count:
+                            # El conteo creció → reinicio activo real
+                            new_restarts = restarts - last_count
+                            anomalies.append(Anomaly(
+                                issue_type=AnomalyType.HIGH_RESTARTS,
+                                severity=Severity.MEDIUM if restarts < 10 else Severity.HIGH,
+                                namespace=ns,
+                                resource_name=pod_name,
+                                resource_type="Pod",
+                                owner_name=owner_name,
+                                details=(
+                                    f"Pod {pod_name} tuvo {new_restarts} reinicio(s) nuevo(s) "
+                                    f"(total acumulado: {restarts})."
+                                ),
+                            ))
+                        # else: conteo estable → pod sano, ignorar
 
                 # POD_FAILED
                 if phase == "Failed":
@@ -442,4 +466,246 @@ def observe_slo(prometheus_url: str, slo_targets: list[dict]) -> list[Anomaly]:
 
     if anomalies:
         logger.info(f"[observer] observe_slo: {len(anomalies)} SLOs en riesgo.")
+    return anomalies
+
+
+# ── Eventos K8s que indican problemas de infraestructura ──────────────────────
+# Solo razones que NO están ya cubiertas por observe_cluster() ni son ruido.
+_INFRA_EVENT_REASONS = {
+    "FailedMount",
+    "FailedAttachVolume",
+    "ProvisioningFailed",
+    "FailedScheduling",
+    "NetworkNotReady",
+    "VolumeResizeFailed",
+    "ExceededGracePeriod",
+    "FailedCreatePodSandBox",
+    "ErrImageNeverPull",
+}
+# Razones a ignorar (ruido o ya cubiertas por observe_cluster)
+_IGNORED_EVENT_REASONS = {
+    "Pulled", "Created", "Started", "Scheduled", "Pulling",
+    "Killing", "SuccessfulCreate", "ScalingReplicaSet",
+    "BackOff", "OOMKilling", "NodeSysctlChange",
+}
+
+
+def observe_infrastructure(namespaces: list[str] | None = None) -> list[Anomaly]:
+    """
+    Observa recursos de infraestructura K8s más allá de pods y nodos (P6).
+
+    Detecta:
+      LOADBALANCER_NO_IP   — Service LoadBalancer sin EXTERNAL-IP asignado
+      SERVICE_NO_ENDPOINTS — Service sin pods saludables detrás
+      PVC_PENDING          — PersistentVolumeClaim atascado en Pending
+      PVC_MOUNT_ERROR      — FailedMount/FailedAttachVolume en eventos K8s
+      DEPLOYMENT_DEGRADED  — Deployment con réplicas disponibles < deseadas
+      NODE_PRESSURE        — Nodo con DiskPressure/MemoryPressure/PIDPressure
+      K8S_EVENT_WARNING    — Warning events de infraestructura recientes (< 15 min)
+      VAULT_SEALED         — Vault sellado o no inicializado
+    """
+    import time as _time
+    anomalies: list[Anomaly] = []
+    ns_list = namespaces or _OBSERVE_NAMESPACES
+
+    try:
+        k8s    = _get_k8s_client()
+        v1     = k8s.CoreV1Api()
+        apps_v1 = k8s.AppsV1Api()
+    except Exception as exc:
+        logger.error(f"[observer] observe_infrastructure: K8s client error: {exc}")
+        return []
+
+    for ns in ns_list:
+
+        # ── 1. Services: LoadBalancer sin IP ─────────────────────────────────
+        try:
+            for svc in v1.list_namespaced_service(namespace=ns).items:
+                if svc.spec.type != "LoadBalancer":
+                    continue
+                lb = svc.status.load_balancer
+                if not lb or not lb.ingress:
+                    anomalies.append(Anomaly(
+                        issue_type=AnomalyType.LOADBALANCER_NO_IP,
+                        severity=Severity.HIGH,
+                        namespace=ns,
+                        resource_name=svc.metadata.name,
+                        resource_type="Service",
+                        details=(
+                            f"Service '{svc.metadata.name}' tipo LoadBalancer sin EXTERNAL-IP. "
+                            f"Verificar MetalLB IPAddressPool y subred del nodo."
+                        ),
+                    ))
+        except Exception as exc:
+            logger.warning(f"[observer] Services en {ns}: {exc}")
+
+        # ── 2. Services: sin endpoints saludables ─────────────────────────────
+        try:
+            for ep in v1.list_namespaced_endpoints(namespace=ns).items:
+                name = ep.metadata.name
+                if name in ("kubernetes",):
+                    continue
+                subsets = ep.subsets or []
+                # Si hay subsets pero ninguno tiene addresses listas → problema
+                if subsets and not any(
+                    s.addresses for s in subsets
+                ):
+                    anomalies.append(Anomaly(
+                        issue_type=AnomalyType.SERVICE_NO_ENDPOINTS,
+                        severity=Severity.MEDIUM,
+                        namespace=ns,
+                        resource_name=name,
+                        resource_type="Service",
+                        details=(
+                            f"Service '{name}' sin endpoints saludables. "
+                            f"Todos los pods están NotReady o no existen."
+                        ),
+                    ))
+        except Exception as exc:
+            logger.warning(f"[observer] Endpoints en {ns}: {exc}")
+
+        # ── 3. PVCs: Pending > 5 min ──────────────────────────────────────────
+        try:
+            for pvc in v1.list_namespaced_persistent_volume_claim(namespace=ns).items:
+                if pvc.status.phase != "Pending":
+                    continue
+                ts = pvc.metadata.creation_timestamp
+                if ts:
+                    age = _time.time() - ts.replace(tzinfo=UTC).timestamp()
+                    if age > 300:
+                        anomalies.append(Anomaly(
+                            issue_type=AnomalyType.PVC_PENDING,
+                            severity=Severity.HIGH,
+                            namespace=ns,
+                            resource_name=pvc.metadata.name,
+                            resource_type="PersistentVolumeClaim",
+                            details=(
+                                f"PVC '{pvc.metadata.name}' en Pending por {int(age/60)} min. "
+                                f"StorageClass: {pvc.spec.storage_class_name or 'default'}."
+                            ),
+                        ))
+        except Exception as exc:
+            logger.warning(f"[observer] PVCs en {ns}: {exc}")
+
+        # ── 4. Deployments: réplicas < deseadas ──────────────────────────────
+        try:
+            for dep in apps_v1.list_namespaced_deployment(namespace=ns).items:
+                name    = dep.metadata.name
+                desired = dep.spec.replicas or 1
+                avail   = dep.status.available_replicas or 0
+                if avail < desired:
+                    anomalies.append(Anomaly(
+                        issue_type=AnomalyType.DEPLOYMENT_DEGRADED,
+                        severity=Severity.CRITICAL if avail == 0 else Severity.HIGH,
+                        namespace=ns,
+                        resource_name=name,
+                        resource_type="Deployment",
+                        owner_name=name,
+                        details=(
+                            f"Deployment '{name}' degradado: "
+                            f"{avail}/{desired} réplicas disponibles."
+                        ),
+                    ))
+        except Exception as exc:
+            logger.warning(f"[observer] Deployments en {ns}: {exc}")
+
+        # ── 5. Events K8s: Warning de infraestructura (< 15 min) ─────────────
+        try:
+            now_ts = _time.time()
+            for event in v1.list_namespaced_event(namespace=ns).items:
+                if event.type != "Warning":
+                    continue
+                reason = event.reason or ""
+                if reason in _IGNORED_EVENT_REASONS:
+                    continue
+                if reason not in _INFRA_EVENT_REASONS:
+                    continue
+                # Ventana de 15 minutos
+                ev_time = event.last_timestamp or event.event_time or event.first_timestamp
+                if not ev_time:
+                    continue
+                age = now_ts - ev_time.replace(tzinfo=UTC).timestamp()
+                if age > 900:
+                    continue
+
+                obj      = event.involved_object
+                res_name = obj.name if obj else "unknown"
+                res_kind = obj.kind if obj else "Unknown"
+                msg      = (event.message or "")[:300]
+
+                issue_type = (
+                    AnomalyType.PVC_MOUNT_ERROR
+                    if reason in ("FailedMount", "FailedAttachVolume", "ProvisioningFailed")
+                    else AnomalyType.K8S_EVENT_WARNING
+                )
+                anomalies.append(Anomaly(
+                    issue_type=issue_type,
+                    severity=Severity.HIGH,
+                    namespace=ns,
+                    resource_name=res_name,
+                    resource_type=res_kind,
+                    details=f"[{reason}] {msg}",
+                    metadata={"event_reason": reason, "count": event.count or 1},
+                ))
+        except Exception as exc:
+            logger.warning(f"[observer] Events en {ns}: {exc}")
+
+    # ── 6. Nodos: pressure conditions ────────────────────────────────────────
+    try:
+        for node in v1.list_node().items:
+            node_name = node.metadata.name
+            for cond in (node.status.conditions or []):
+                if cond.type in ("DiskPressure", "MemoryPressure", "PIDPressure"):
+                    if cond.status == "True":
+                        anomalies.append(Anomaly(
+                            issue_type=AnomalyType.NODE_PRESSURE,
+                            severity=Severity.CRITICAL if cond.type == "DiskPressure" else Severity.HIGH,
+                            namespace="cluster",
+                            resource_name=node_name,
+                            resource_type="Node",
+                            details=(
+                                f"Nodo {node_name}: {cond.type} activo. "
+                                f"{cond.message or ''}"
+                            ),
+                        ))
+    except Exception as exc:
+        logger.warning(f"[observer] Node pressure conditions: {exc}")
+
+    # ── 7. Vault health ───────────────────────────────────────────────────────
+    vault_addr = os.environ.get("VAULT_ADDR", "http://vault.vault.svc.cluster.local:8200")
+    try:
+        import requests as _req
+        resp = _req.get(f"{vault_addr}/v1/sys/health", timeout=5)
+        # 200=ok, 429=standby, 472=DR secondary, 473=perf standby
+        # 501=not initialized, 503=sealed
+        if resp.status_code == 503:
+            anomalies.append(Anomaly(
+                issue_type=AnomalyType.VAULT_SEALED,
+                severity=Severity.CRITICAL,
+                namespace="vault",
+                resource_name="vault-0",
+                resource_type="StatefulSet",
+                details=(
+                    "Vault está SELLADO. "
+                    "Requiere unseal manual con 3 de 5 claves Shamir. "
+                    "Secretos de OAuth y tokens no disponibles hasta unsealar."
+                ),
+            ))
+        elif resp.status_code == 501:
+            anomalies.append(Anomaly(
+                issue_type=AnomalyType.VAULT_SEALED,
+                severity=Severity.CRITICAL,
+                namespace="vault",
+                resource_name="vault-0",
+                resource_type="StatefulSet",
+                details="Vault no está inicializado. Ejecutar vault operator init.",
+            ))
+    except Exception as exc:
+        logger.debug(f"[observer] Vault health check: {exc}")
+
+    if anomalies:
+        logger.info(f"[observer] observe_infrastructure: {len(anomalies)} anomalías de infraestructura.")
+    else:
+        logger.debug("[observer] observe_infrastructure: infraestructura saludable.")
+
     return anomalies

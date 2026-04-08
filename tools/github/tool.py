@@ -504,14 +504,19 @@ class GitHubTool(BaseTool):
             return ToolOutput.fail(str(exc), source=self.name)
 
     async def health_check(self) -> bool:
-        """Verifica que la GitHub API responde (usa /zen endpoint sin auth)."""
-        try:
-            resp = _req.get(
-                f"{_GITHUB_API}/zen",
-                headers=_headers(),
-                timeout=5,
-            )
-            return resp.status_code == 200
-        except Exception as exc:
-            logger.warning(f"[github_tool] health_check falló: {exc}")
-            return False
+        """Verifica que la GitHub API responde (usa /zen endpoint sin auth, non-blocking)."""
+        import asyncio
+
+        def _check() -> bool:
+            try:
+                resp = _req.get(
+                    f"{_GITHUB_API}/zen",
+                    headers=_headers(),
+                    timeout=5,
+                )
+                return resp.status_code == 200
+            except Exception as exc:
+                logger.warning(f"[github_tool] health_check falló: {exc}")
+                return False
+
+        return await asyncio.to_thread(_check)

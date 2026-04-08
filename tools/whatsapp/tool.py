@@ -185,10 +185,15 @@ class WhatsAppTool(BaseTool):
         return result
 
     async def health_check(self) -> bool:
-        """Verifica que el whatsapp-bridge responde en /health o /."""
-        try:
-            resp = _req.get(f"{_WA_BRIDGE_URL}/health", timeout=5)
-            return resp.status_code in (200, 404)  # 404 = bridge vivo pero sin /health
-        except Exception as exc:
-            logger.warning(f"[whatsapp_tool] health_check falló: {exc}")
-            return False
+        """Verifica que el whatsapp-bridge responde en /health o / (non-blocking)."""
+        import asyncio
+
+        def _check() -> bool:
+            try:
+                resp = _req.get(f"{_WA_BRIDGE_URL}/health", timeout=5)
+                return resp.status_code in (200, 404)  # 404 = bridge vivo pero sin /health
+            except Exception as exc:
+                logger.warning(f"[whatsapp_tool] health_check falló: {exc}")
+                return False
+
+        return await asyncio.to_thread(_check)
