@@ -94,7 +94,7 @@ async def ingest_document(
     documents: list[LCDocument] = []
 
     if mime == "application/pdf":
-        temp_path = f"/tmp/{uuid.uuid4()}-{file.filename}"
+        temp_path = f"/tmp/{uuid.uuid4()}-{file.filename}"  # nosec B108 — uuid4 hace el nombre único e impredecible
         with open(temp_path, "wb") as buf:
             buf.write(content)
         try:
@@ -337,7 +337,7 @@ def _run_ingest_job(
         temp_path = None
 
         if mime == "application/pdf":
-            temp_path = f"/tmp/{uuid.uuid4()}-{filename}"
+            temp_path = f"/tmp/{uuid.uuid4()}-{filename}"  # nosec B108 — uuid4 hace el nombre único e impredecible
             with open(temp_path, "wb") as buf:
                 buf.write(content)
             try:
