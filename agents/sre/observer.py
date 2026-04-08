@@ -591,8 +591,10 @@ def observe_infrastructure(namespaces: list[str] | None = None) -> list[Anomaly]
         try:
             for dep in apps_v1.list_namespaced_deployment(namespace=ns).items:
                 name    = dep.metadata.name
-                desired = dep.spec.replicas or 1
+                desired = dep.spec.replicas or 0
                 avail   = dep.status.available_replicas or 0
+                if desired == 0:
+                    continue  # deployment scaled to 0 — no alert needed
                 if avail < desired:
                     anomalies.append(Anomaly(
                         issue_type=AnomalyType.DEPLOYMENT_DEGRADED,

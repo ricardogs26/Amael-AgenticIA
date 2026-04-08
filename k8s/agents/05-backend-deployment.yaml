@@ -5,7 +5,7 @@ metadata:
   namespace: amael-ia
   labels:
     app: amael-agentic-backend
-    version: "1.10.65"
+    version: "1.10.74"
 spec:
   replicas: 1
   selector:
@@ -20,7 +20,7 @@ spec:
     metadata:
       labels:
         app: amael-agentic-backend
-        version: "1.10.65"
+        version: "1.10.74"
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port:   "8000"
@@ -64,7 +64,7 @@ spec:
 
       containers:
       - name: amael-agentic-backend
-        image: registry.richardx.dev/amael-agentic-backend:1.10.65
+        image: registry.richardx.dev/amael-agentic-backend:1.10.74
         imagePullPolicy: Always
         ports:
         - name: http
@@ -125,6 +125,10 @@ spec:
               name: amael-agentic-secrets
               key: GITHUB_TOKEN
               optional: true    # GithubTool funciona sin token (rate limit reducido)
+        # Verification delay (GitOps flow: PR+RFC+ArgoCD deploy)
+        - name: SRE_VERIFICATION_DELAY
+          value: "600"
+
         # Gabriel — GitHub defaults para modo autónomo
         - name: GABRIEL_GITHUB_OWNER
           value: "ricardogs26"

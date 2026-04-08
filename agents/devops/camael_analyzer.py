@@ -88,10 +88,29 @@ _analyzer_llm = None
 
 
 def _get_analyzer_llm():
+    """
+    ChatOllama dedicado para el analyzer: think=False + num_predict limitado.
+
+    Se crea fuera de llm_factory para poder pasar opciones específicas de qwen3
+    (think=False deshabilita el modo thinking, que bloquea llm.invoke durante
+    minutos generando tokens <think> antes de la respuesta JSON).
+    """
     global _analyzer_llm
     if _analyzer_llm is None:
-        from agents.base.llm_factory import get_chat_llm
-        _analyzer_llm = get_chat_llm(temperature=0)  # determinístico para decisiones
+        from config.settings import settings
+        from langchain_ollama import ChatOllama
+        _analyzer_llm = ChatOllama(
+            model=settings.llm_model,
+            base_url=settings.ollama_base_url,
+            temperature=0,
+            request_timeout=120,
+            num_predict=4096,   # suficiente para JSON + reasoning sin truncar
+            think=False,        # qwen3: deshabilita thinking mode (evita bloqueo)
+        )
+        logger.info(
+            f"[camael_analyzer] LLM analyzer: model={settings.llm_model} "
+            f"think=False num_predict=4096"
+        )
     return _analyzer_llm
 
 
@@ -101,6 +120,7 @@ async def _fetch_similar_incidents(issue_type: str, resource_name: str, limit: i
     """
     Recupera incidentes similares de PostgreSQL para dar contexto histórico al LLM.
     Retorna string vacío si falla (no bloquea el análisis).
+    Nota: se llama desde un thread con su propio event loop — usa asyncpg directamente.
     """
     try:
         from storage.postgres.pool import get_pool
@@ -289,10 +309,13 @@ async def analyze_and_decide(
 
     try:
         llm = _get_analyzer_llm()
-        raw = await llm.ainvoke(prompt)
-        # BaseChatModel retorna AIMessage — extraer content
-        if hasattr(raw, "content"):
-            raw = raw.content
+        # Usar invoke síncrono: este código corre en un daemon thread con su propio
+        # event loop (no el loop principal de FastAPI). ainvoke falla porque httpx
+        # AsyncClient intenta usar el loop principal que ya está en otro thread.
+        raw_resp = llm.invoke(prompt)
+        raw = raw_resp.content if hasattr(raw_resp, "content") else str(raw_resp)
+        # Safety net: strip residual <think>...</think> si qwen3 los emite
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
 
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         if not match:

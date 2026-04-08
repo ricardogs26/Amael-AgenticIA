@@ -163,7 +163,7 @@ Post-REASONING language detection (v1.10.13): translation fires when target lang
 ```
 # LLM
 OLLAMA_BASE_URL=http://ollama-service:11434
-LLM_MODEL=qwen2.5:14b
+LLM_MODEL=qwen3:14b
 LLM_EMBED_MODEL=nomic-embed-text
 
 # Security

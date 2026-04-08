@@ -25,6 +25,13 @@ _OWNER_PHONE         = os.environ.get("OWNER_PHONE", "")
 _MIN_NOTIFY_SEVERITY = os.environ.get("SRE_MIN_NOTIFY_SEVERITY", "HIGH")
 _SEVERITY_RANK       = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 
+def _to_str(v) -> str:
+    """Convierte listas/dicts a JSON string para columnas TEXT de PostgreSQL."""
+    if isinstance(v, (list, dict)):
+        return json.dumps(v, ensure_ascii=False)
+    return str(v) if v is not None else ""
+
+
 # Singleton LLM para postmortems
 _postmortem_llm = None
 
@@ -232,12 +239,12 @@ def _store_postmortem(incident_key: str, incident: dict, postmortem: dict) -> No
                         incident.get("namespace"),
                         incident.get("resource_name"),
                         incident.get("issue_type"),
-                        postmortem.get("impact", ""),
-                        postmortem.get("timeline", ""),
-                        postmortem.get("root_cause_summary", ""),
-                        postmortem.get("resolution", ""),
-                        postmortem.get("prevention", ""),
-                        postmortem.get("action_items", ""),
+                        _to_str(postmortem.get("impact", "")),
+                        _to_str(postmortem.get("timeline", "")),
+                        _to_str(postmortem.get("root_cause_summary", "")),
+                        _to_str(postmortem.get("resolution", "")),
+                        _to_str(postmortem.get("prevention", "")),
+                        _to_str(postmortem.get("action_items", "")),
                         json.dumps(postmortem),
                     ),
                 )

@@ -90,8 +90,17 @@ APP_MANIFEST_MAP: dict[str, AppManifest] = {
     # podinfo (demo app)
     "podinfo":                   AppManifest("amael-agentic-backend", "k8s/podinfo-deployment.yaml"),
 
-    # amael-demo-oom (POC demo — OOM stress test)
-    "amael-demo-oom":            AppManifest("amael-agentic-backend", "k8s/demo/amael-demo-oom.yaml"),
+    # amael-demo-oom (POC demo Escenario A — OOM stress test)
+    "amael-demo-oom":            AppManifest("amael-agentic-backend", "k8s/agents/06-demo-oom.yaml"),
+
+    # amael-demo-crashloop (POC demo Escenario B — CrashLoopBackOff)
+    "amael-demo-crashloop":      AppManifest("amael-agentic-backend", "k8s/agents/07-demo-crashloop.yaml"),
+
+    # amael-demo-highmem (POC demo Escenario C — HIGH_MEMORY preventivo)
+    "amael-demo-highmem":        AppManifest("amael-agentic-backend", "k8s/agents/08-demo-high-memory.yaml"),
+
+    # amael-demo-degraded (POC demo Escenario D — DEPLOYMENT_DEGRADED)
+    "amael-demo-degraded":       AppManifest("amael-agentic-backend", "k8s/agents/09-demo-degraded.yaml"),
 }
 
 # App por defecto si el resource_name no está en el mapa

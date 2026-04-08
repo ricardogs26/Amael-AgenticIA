@@ -569,6 +569,9 @@ def start_sre_loop() -> Any | None:
             replace_existing=True,
         )
         _sre_scheduler.start()
+        # Registrar scheduler en healer para verificación post-acción (P3-A)
+        from agents.sre import healer as _healer
+        _healer.set_aps_scheduler(_sre_scheduler)
         logger.info(
             f"[sre.agent] Loop autónomo iniciado (interval={_SRE_LOOP_INTERVAL}s)."
         )

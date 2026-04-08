@@ -130,14 +130,21 @@ def _try_acquire_lease() -> bool:
                 > _LEASE_DURATION_S
             )
             if holder == _POD_NAME or expired:
-                lease.spec.holder_identity = _POD_NAME
-                lease.spec.renew_time      = now
-                coord.replace_namespaced_lease(
-                    name=_LEASE_NAME, namespace=_LEASE_NAMESPACE, body=lease
-                )
-                _loop_state.leader_pod = _POD_NAME
-                _loop_state.is_leader  = True
-                return True
+                try:
+                    lease.spec.holder_identity = _POD_NAME
+                    lease.spec.renew_time      = now
+                    coord.replace_namespaced_lease(
+                        name=_LEASE_NAME, namespace=_LEASE_NAMESPACE, body=lease
+                    )
+                    _loop_state.leader_pod = _POD_NAME
+                    _loop_state.is_leader  = True
+                    return True
+                except client.exceptions.ApiException as e409:
+                    if e409.status == 409:
+                        # Otro proceso actualizó el lease primero (race) — no soy líder
+                        _loop_state.is_leader = False
+                        return False
+                    raise
             else:
                 _loop_state.leader_pod = holder
                 _loop_state.is_leader  = False
@@ -372,10 +379,18 @@ def sre_autonomous_loop(
 
             # Schedule verification post-acción (solo ROLLOUT_RESTART)
             if action_type == "ROLLOUT_RESTART" and "✅" in action_result:
-                # Nota: el scheduler se pasa desde el agent.py
                 diagnoser.maybe_save_runbook_entry(anomaly, root_cause, action_type)
                 # GitOps handoff → Camael crea PR + RFC + notifica ECAB (daemon thread)
                 healer.handoff_to_camael(anomaly, anomaly.incident_key, reporter.notify_whatsapp_sre)
+                # Verificación post-acción en 5min → cierra RFC si deployment sano (P3-A)
+                healer.schedule_verification(
+                    incident_key=anomaly.incident_key,
+                    deployment_name=anomaly.owner_name or anomaly.resource_name,
+                    namespace=anomaly.namespace,
+                    update_incident_fn=reporter.update_incident_verification,
+                    notify_fn=reporter.notify_whatsapp_sre,
+                    generate_postmortem_fn=reporter.generate_and_store_postmortem,
+                )
 
             actions_taken += 1
 

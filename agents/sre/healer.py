@@ -28,6 +28,7 @@ _PROTECTED_CSV           = os.environ.get(
 PROTECTED_DEPLOYMENTS    = {d.strip() for d in _PROTECTED_CSV.split(",") if d.strip()}
 AUTO_HEAL_MIN_SEVERITY   = os.environ.get("SRE_AUTO_HEAL_MIN_SEVERITY", "HIGH")
 CONFIDENCE_THRESHOLD     = float(os.environ.get("SRE_CONFIDENCE_THRESHOLD", "0.75"))
+_VERIFICATION_DELAY_S    = int(os.environ.get("SRE_VERIFICATION_DELAY", "300"))
 _SEVERITY_RANK           = {
     Severity.LOW: 0, Severity.MEDIUM: 1,
     Severity.HIGH: 2, Severity.CRITICAL: 3,
@@ -343,22 +344,37 @@ def _run_verification_job(
             )
 
 
+# ── Scheduler singleton (set from agent.py after BackgroundScheduler is created) ──
+_aps_scheduler = None
+
+
+def set_aps_scheduler(scheduler) -> None:
+    """Almacena el BackgroundScheduler para que schedule_verification pueda agregar jobs."""
+    global _aps_scheduler
+    _aps_scheduler = scheduler
+
+
 def schedule_verification(
     incident_key: str,
     deployment_name: str,
     namespace: str,
-    scheduler,
     update_incident_fn,
     notify_fn,
     generate_postmortem_fn=None,
-    delay_seconds: int = 300,
+    delay_seconds: int | None = None,
 ) -> None:
     """
     Schedula el job de verificación post-acción con APScheduler (P3-A).
-    Se ejecuta delay_seconds después de la acción (default: 5 minutos).
+    Se ejecuta delay_seconds después de la acción (default: SRE_VERIFICATION_DELAY env, 300s).
     """
+    if delay_seconds is None:
+        delay_seconds = _VERIFICATION_DELAY_S
     try:
         from datetime import datetime, timedelta
+        scheduler = _aps_scheduler
+        if scheduler is None:
+            logger.warning("[healer] APScheduler no disponible — verificación no schedulada")
+            return
         run_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
         scheduler.add_job(
             _run_verification_job,
@@ -509,15 +525,26 @@ def handoff_to_camael(
     if not fix:
         return
 
-    # Dedup: un solo PR por incident_key (TTL 2h = tiempo de revisión ECAB)
+    # Dedup: un solo PR por deployment (no por issue_type) — TTL 2h.
+    # resource_name puede ser pod con hash (amael-demo-oom-7cf4c6c4b4-5zn6x),
+    # derivamos el deployment base matcheando contra APP_MANIFEST_MAP.
+    from agents.sre.bug_library import APP_MANIFEST_MAP
     from storage.redis.client import get_redis_client
+    _deploy_base = resource_name
+    for key in APP_MANIFEST_MAP:
+        if resource_name == key or resource_name.startswith(key + "-"):
+            _deploy_base = key
+            break
+    _gitops_dedup_key = f"sre:gitops:{anomaly.namespace}:{_deploy_base}"
     try:
         _redis = get_redis_client()
-        gitops_dedup_key = f"sre:gitops:{incident_key}"
-        if _redis.exists(gitops_dedup_key):
-            logger.debug(f"[healer] GitOps handoff ya en curso para {incident_key} — omitido")
+        if _redis.exists(_gitops_dedup_key):
+            logger.debug(
+                f"[healer] GitOps handoff ya en curso para {_deploy_base} — omitido "
+                f"({anomaly.issue_type})"
+            )
             return
-        _redis.setex(gitops_dedup_key, 7200, "1")  # TTL 2h
+        _redis.setex(_gitops_dedup_key, 7200, "1")  # TTL 2h
     except Exception:
         pass  # Si Redis falla, permitir el handoff de todas formas
 
