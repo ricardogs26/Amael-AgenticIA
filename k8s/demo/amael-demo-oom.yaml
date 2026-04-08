@@ -24,6 +24,7 @@ spec:
       containers:
       - name: stress
         image: polinux/stress
+        command: ["stress"]
         args:
         - "--vm"
         - "1"

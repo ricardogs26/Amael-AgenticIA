@@ -89,6 +89,9 @@ APP_MANIFEST_MAP: dict[str, AppManifest] = {
 
     # podinfo (demo app)
     "podinfo":                   AppManifest("amael-agentic-backend", "k8s/podinfo-deployment.yaml"),
+
+    # amael-demo-oom (POC demo — OOM stress test)
+    "amael-demo-oom":            AppManifest("amael-agentic-backend", "k8s/demo/amael-demo-oom.yaml"),
 }
 
 # App por defecto si el resource_name no está en el mapa

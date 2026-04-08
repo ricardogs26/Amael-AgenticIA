@@ -364,6 +364,18 @@ ROUTER_LLM_LATENCY_SECONDS = Histogram(
     buckets=(0.1, 0.5, 1, 2, 4, 8, 15),
 )
 
+# ── GitOps / Camael ───────────────────────────────────────────────────────────
+GITOPS_HANDOFF_TOTAL = Counter(
+    "amael_sre_gitops_handoff_total",
+    "Handoffs de Raphael a Camael para fixes GitOps (PR + RFC)",
+    ["issue_type"],
+)
+GITOPS_PR_CREATED_TOTAL = Counter(
+    "amael_sre_gitops_pr_created_total",
+    "PRs de fix creados por Camael en Bitbucket",
+    ["issue_type"],
+)
+
 # ── Health / Registry ─────────────────────────────────────────────────────────
 REGISTRY_HEALTH_STATUS = Gauge(
     "amael_registry_health_status",

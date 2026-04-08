@@ -374,6 +374,8 @@ def sre_autonomous_loop(
             if action_type == "ROLLOUT_RESTART" and "✅" in action_result:
                 # Nota: el scheduler se pasa desde el agent.py
                 diagnoser.maybe_save_runbook_entry(anomaly, root_cause, action_type)
+                # GitOps handoff → Camael crea PR + RFC + notifica ECAB (daemon thread)
+                healer.handoff_to_camael(anomaly, anomaly.incident_key, reporter.notify_whatsapp_sre)
 
             actions_taken += 1
 
