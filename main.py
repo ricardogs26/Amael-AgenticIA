@@ -401,9 +401,46 @@ def _ensure_schema() -> None:
                     created_at   TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            # Migración: user_documents fue creada con 'timestamp', renombrar a created_at
+            cur.execute("""
+                ALTER TABLE user_documents
+                ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()
+            """)
+            cur.execute("""
+                UPDATE user_documents SET created_at = timestamp WHERE created_at IS NULL AND timestamp IS NOT NULL
+            """)
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_user_documents_user
                 ON user_documents (user_id, created_at DESC)
+            """)
+
+            # ── Camael GitOps — audit trail de PRs y RFCs ─────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS camael_gitops_actions (
+                    id               BIGSERIAL PRIMARY KEY,
+                    incident_key     TEXT NOT NULL UNIQUE,
+                    namespace        TEXT,
+                    deployment_name  TEXT,
+                    issue_type       TEXT,
+                    multiplier       FLOAT,
+                    risk_level       TEXT,
+                    pr_title         TEXT,
+                    pr_id            INT,
+                    pr_url           TEXT,
+                    branch           TEXT,
+                    rfc_sys_id       TEXT,
+                    rfc_number       TEXT,
+                    rfc_url          TEXT,
+                    reasoning        TEXT,
+                    status           TEXT NOT NULL DEFAULT 'PENDING',
+                    verification_result TEXT,
+                    created_at       TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at       TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_camael_gitops_status
+                ON camael_gitops_actions (status, created_at DESC)
             """)
 
 

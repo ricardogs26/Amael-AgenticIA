@@ -588,6 +588,24 @@ class CamaelAgent(BaseAgent):
                 "rfc_url":    rfc_info["url"],
             })
 
+            # 7b. Persistir en PostgreSQL — audit trail permanente
+            _store_gitops_action(incident_key, {
+                "incident_key":    incident_key,
+                "namespace":       namespace,
+                "deployment_name": resource_name,
+                "issue_type":      issue_type,
+                "multiplier":      decision.multiplier,
+                "risk_level":      decision.risk_level,
+                "pr_title":        fix.pr_title,
+                "pr_id":           pr_id,
+                "pr_url":          pr_url,
+                "branch":          branch_name,
+                "rfc_sys_id":      rfc_info["sys_id"],
+                "rfc_number":      rfc_info["number"],
+                "rfc_url":         rfc_info["url"],
+                "reasoning":       decision.reasoning,
+            })
+
             # 8. Notificar por WhatsApp — incluye link al RFC
             rfc_line = (
                 f"🎫 RFC: {rfc_info['number']} — {rfc_info['url']}\n"
@@ -736,6 +754,7 @@ class CamaelAgent(BaseAgent):
 
         if action == "RECHAZAR":
             _delete_pending_pr(incident_key)
+            _update_gitops_action_status(incident_key, "REJECTED")
             from observability.metrics import GITOPS_PR_REJECTED_TOTAL
             GITOPS_PR_REJECTED_TOTAL.labels(issue_type=pr_info.get("issue_type", "unknown")).inc()
             # Cancelar RFC en ServiceNow
@@ -816,6 +835,7 @@ class CamaelAgent(BaseAgent):
                 f"Incidente: {incident_key}"
                 + (f"\n🎫 RFC {rfc_number} en ServiceNow actualizado → Implement." if rfc_sys_id else "")
             )
+            _update_gitops_action_status(incident_key, "APPROVED")
             logger.info(f"[camael] PR #{pr_id} mergeado correctamente — {merge_hash}")
             from observability.metrics import GITOPS_PR_MERGED_TOTAL
             GITOPS_PR_MERGED_TOTAL.labels(issue_type=pr_info.get("issue_type", "unknown")).inc()
@@ -892,6 +912,44 @@ def _delete_pending_pr(incident_key: str) -> None:
         get_client().delete(f"bb:pending_pr:{incident_key}")
     except Exception:
         pass
+
+
+def _store_gitops_action(incident_key: str, data: dict) -> None:
+    """INSERT en camael_gitops_actions. Best-effort, no bloquea el flujo."""
+    try:
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO camael_gitops_actions
+                        (incident_key, namespace, deployment_name, issue_type,
+                         multiplier, risk_level, pr_title, pr_id, pr_url, branch,
+                         rfc_sys_id, rfc_number, rfc_url, reasoning, status)
+                    VALUES
+                        (%(incident_key)s, %(namespace)s, %(deployment_name)s, %(issue_type)s,
+                         %(multiplier)s, %(risk_level)s, %(pr_title)s, %(pr_id)s, %(pr_url)s, %(branch)s,
+                         %(rfc_sys_id)s, %(rfc_number)s, %(rfc_url)s, %(reasoning)s, 'PENDING')
+                    ON CONFLICT (incident_key) DO NOTHING
+                """, data)
+    except Exception as exc:
+        logger.warning(f"[camael] _store_gitops_action error: {exc}")
+
+
+def _update_gitops_action_status(incident_key: str, status: str, verification_result: str | None = None) -> None:
+    """UPDATE status (y opcionalmente verification_result) en camael_gitops_actions."""
+    try:
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE camael_gitops_actions
+                    SET status = %s,
+                        verification_result = COALESCE(%s, verification_result),
+                        updated_at = NOW()
+                    WHERE incident_key = %s
+                """, (status, verification_result, incident_key))
+    except Exception as exc:
+        logger.warning(f"[camael] _update_gitops_action_status error: {exc}")
 
 
 def _notify_whatsapp(message: str) -> None:

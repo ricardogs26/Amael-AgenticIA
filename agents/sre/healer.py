@@ -300,6 +300,7 @@ def _run_verification_job(
     if healthy:
         logger.info(f"[healer] ✅ {deployment_name} verificado como saludable.")
         update_incident_fn(incident_key, "verify:ok")
+        _update_camael_gitops_status(incident_key, "CLOSED", "HEALTHY")
         # Cerrar RFC en ServiceNow → Closed
         if rfc_info:
             _close_rfc_async(rfc_info, deployment_name, namespace, success=True)
@@ -321,6 +322,7 @@ def _run_verification_job(
         else:
             SRE_ROLLBACK_TOTAL.labels(result="error").inc()
             update_incident_fn(incident_key, "verify:rollback:error")
+        _update_camael_gitops_status(incident_key, "FAILED", "UNHEALTHY_ROLLBACK")
         # Marcar RFC como fallido → Review
         if rfc_info:
             _close_rfc_async(rfc_info, deployment_name, namespace,
@@ -333,6 +335,7 @@ def _run_verification_job(
     else:
         logger.warning(f"[healer] {deployment_name} sigue unhealthy pero sin deploy reciente.")
         update_incident_fn(incident_key, "verify:unresolved")
+        _update_camael_gitops_status(incident_key, "FAILED", "UNHEALTHY_NO_DEPLOY")
         if rfc_info:
             _close_rfc_async(rfc_info, deployment_name, namespace,
                              success=False, reason="Deployment sigue unhealthy. Intervención manual requerida.")
@@ -640,6 +643,23 @@ def _get_rfc_from_redis(incident_key: str) -> dict | None:
     except Exception as exc:
         logger.debug(f"[healer] No se pudo leer RFC de Redis: {exc}")
         return None
+
+
+def _update_camael_gitops_status(incident_key: str, status: str, verification_result: str) -> None:
+    """Actualiza el status de camael_gitops_actions en PostgreSQL. Best-effort."""
+    try:
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE camael_gitops_actions
+                    SET status = %s,
+                        verification_result = %s,
+                        updated_at = NOW()
+                    WHERE incident_key = %s
+                """, (status, verification_result, incident_key))
+    except Exception as exc:
+        logger.debug(f"[healer] _update_camael_gitops_status error: {exc}")
 
 
 def _close_rfc_async(
