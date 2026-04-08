@@ -5,7 +5,7 @@ metadata:
   namespace: amael-ia
   labels:
     app: amael-agentic-backend
-    version: "1.10.64"
+    version: "1.10.65"
 spec:
   replicas: 1
   selector:
@@ -20,7 +20,7 @@ spec:
     metadata:
       labels:
         app: amael-agentic-backend
-        version: "1.10.64"
+        version: "1.10.65"
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port:   "8000"
@@ -64,7 +64,7 @@ spec:
 
       containers:
       - name: amael-agentic-backend
-        image: registry.richardx.dev/amael-agentic-backend:1.10.64
+        image: registry.richardx.dev/amael-agentic-backend:1.10.65
         imagePullPolicy: Always
         ports:
         - name: http
