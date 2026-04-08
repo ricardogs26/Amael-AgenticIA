@@ -162,19 +162,18 @@ async def add_work_note(sys_id: str, note: str) -> bool:
 
 async def advance_rfc_to_assess(sys_id: str) -> None:
     """
-    Avanza el RFC desde Draft (-5) → New (1) → Assess (2).
-    ServiceNow no acepta saltar estados en un solo PATCH.
+    Avanza el RFC desde Draft (-5) → Assess (2).
+    Emergency Change Model: New(1) y Authorize(3) están bloqueados por Business Rule.
     """
-    await update_rfc(sys_id, {"state": RFCState.NEW})
     await update_rfc(sys_id, {"state": RFCState.ASSESS})
 
 
 async def advance_rfc_to_implement(sys_id: str, work_note: str = "") -> None:
     """
-    Avanza el RFC: Assess → Authorize → Scheduled → Implement.
+    Avanza el RFC: Assess → Scheduled → Implement.
     Llamar cuando el operador aprueba el PR.
+    Emergency Change Model: Authorize(3) bloqueado por Business Rule — saltar a Scheduled(4).
     """
-    await update_rfc(sys_id, {"state": RFCState.AUTHORIZE})
     await update_rfc(sys_id, {"state": RFCState.SCHEDULED})
     payload: dict = {"state": RFCState.IMPLEMENT}
     if work_note:
