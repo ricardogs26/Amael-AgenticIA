@@ -368,8 +368,38 @@ async def _cmd_aprobar(pr_id_arg: str | None = None) -> str:
     except Exception:
         pass
 
+    # Avanzar RFC en ServiceNow: Assess → Authorize → Scheduled → Implement
+    rfc_sys_id  = pr_info.get("rfc_sys_id", "")
+    rfc_number  = pr_info.get("rfc_number", "")
+    # Intentar obtener sys_id desde sn:rfc:* si no está en pr_info
+    if not rfc_sys_id:
+        import json as _json
+        sn_keys = redis.keys("sn:rfc:*")
+        if sn_keys:
+            key = sn_keys[0] if isinstance(sn_keys[0], str) else sn_keys[0].decode()
+            raw_sn = redis.get(key)
+            rfc_data = _json.loads(raw_sn) if raw_sn else {}
+            rfc_sys_id = rfc_data.get("sys_id", "")
+            rfc_number = rfc_data.get("number", "")
+
+    rfc_line = ""
+    if rfc_sys_id:
+        try:
+            from agents.devops import servicenow_client as sn
+            await sn.advance_rfc_to_implement(
+                rfc_sys_id,
+                work_note=(
+                    f"PR #{pr_id} aprobado por operador vía WhatsApp y mergeado a main.\n"
+                    f"ArgoCD sincronizando cambios al cluster..."
+                ),
+            )
+            rfc_line = f"\n🎫 RFC {rfc_number} → Authorize → Scheduled → Implement"
+            logger.info(f"[devops/command] RFC {rfc_number} avanzado a Implement")
+        except Exception as exc_sn:
+            logger.warning(f"[devops/command] SN state advance falló: {exc_sn}")
+
     logger.info(f"[devops/command] PR #{pr_id} mergeado via WhatsApp (repo={repo})")
-    return f"✅ PR #{pr_id} mergeado a main · repo: `{repo}`"
+    return f"✅ PR #{pr_id} mergeado a main · repo: `{repo}`" + rfc_line
 
 
 async def _cmd_rechazar(pr_id_arg: str | None = None) -> str:
