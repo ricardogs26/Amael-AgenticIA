@@ -29,6 +29,16 @@ class Settings(BaseSettings):
         default="http://ollama-service:11434",
         alias="OLLAMA_BASE_URL",
     )
+    llm_provider: str = Field(
+        default="ollama",
+        alias="LLM_PROVIDER",
+    )
+    embed_provider: str = Field(
+        default="ollama",
+        alias="EMBED_PROVIDER",
+    )
+    embed_api_key: str | None = Field(default=None, alias="EMBED_API_KEY")
+    llm_api_key: str | None = Field(default=None, alias="LLM_API_KEY")
     llm_model: str = Field(
         default="qwen2.5:14b",
         alias="LLM_MODEL",

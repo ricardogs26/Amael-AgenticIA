@@ -509,6 +509,18 @@ def handoff_to_camael(
     if not fix:
         return
 
+    # Dedup: un solo PR por incident_key (TTL 2h = tiempo de revisión ECAB)
+    from storage.redis.client import get_redis_client
+    try:
+        _redis = get_redis_client()
+        gitops_dedup_key = f"sre:gitops:{incident_key}"
+        if _redis.exists(gitops_dedup_key):
+            logger.debug(f"[healer] GitOps handoff ya en curso para {incident_key} — omitido")
+            return
+        _redis.setex(gitops_dedup_key, 7200, "1")  # TTL 2h
+    except Exception:
+        pass  # Si Redis falla, permitir el handoff de todas formas
+
     from observability.metrics import GITOPS_HANDOFF_TOTAL
     GITOPS_HANDOFF_TOTAL.labels(issue_type=anomaly.issue_type).inc()
     logger.info(
