@@ -30,8 +30,16 @@ logger = logging.getLogger("interfaces.api.routers.ingest")
 
 router = APIRouter(prefix="/api", tags=["ingest"])
 
-_OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
-_MODEL_NAME = os.environ.get("MODEL_NAME", "qwen2.5:14b")
+# Singleton LLM para resúmenes de documentos
+_ingest_llm = None
+
+
+def _get_ingest_llm():
+    global _ingest_llm
+    if _ingest_llm is None:
+        from agents.base.llm_factory import get_chat_llm
+        _ingest_llm = get_chat_llm(timeout=60)
+    return _ingest_llm
 
 
 def _extract_docx_text(content: bytes) -> str:
@@ -86,7 +94,7 @@ async def ingest_document(
     documents: list[LCDocument] = []
 
     if mime == "application/pdf":
-        temp_path = f"/tmp/{uuid.uuid4()}-{file.filename}"
+        temp_path = f"/tmp/{uuid.uuid4()}-{file.filename}"  # nosec B108 — uuid4 hace el nombre único e impredecible
         with open(temp_path, "wb") as buf:
             buf.write(content)
         try:
@@ -171,11 +179,11 @@ async def ingest_document(
     # ── 4. Generar resumen con LLM ────────────────────────────────────────────
     summary = ""
     try:
-        from langchain_ollama import OllamaLLM
-        llm = OllamaLLM(model=_MODEL_NAME, base_url=_OLLAMA_URL)
-        summary = llm.invoke(
+        llm = _get_ingest_llm()
+        _resp = llm.invoke(
             f"Resume el siguiente documento en 2-3 oraciones en español:\n\n{full_text[:3000]}"
-        ).strip()
+        )
+        summary = (_resp.content if hasattr(_resp, "content") else str(_resp)).strip()
     except Exception as e:
         summary = f"Documento procesado ({n_chunks} fragmentos)."
         logger.warning(f"[ingest] Error generando resumen: {e}")
@@ -329,7 +337,7 @@ def _run_ingest_job(
         temp_path = None
 
         if mime == "application/pdf":
-            temp_path = f"/tmp/{uuid.uuid4()}-{filename}"
+            temp_path = f"/tmp/{uuid.uuid4()}-{filename}"  # nosec B108 — uuid4 hace el nombre único e impredecible
             with open(temp_path, "wb") as buf:
                 buf.write(content)
             try:
@@ -366,11 +374,11 @@ def _run_ingest_job(
         # ── Resumen LLM ───────────────────────────────────────────────────
         summary = ""
         try:
-            from langchain_ollama import OllamaLLM
-            llm = OllamaLLM(model=_MODEL_NAME, base_url=_OLLAMA_URL)
-            summary = llm.invoke(
+            llm = _get_ingest_llm()
+            _resp = llm.invoke(
                 f"Resume el siguiente documento en 2-3 oraciones en español:\n\n{full_text[:3000]}"
-            ).strip()
+            )
+            summary = (_resp.content if hasattr(_resp, "content") else str(_resp)).strip()
         except Exception:
             summary = f"Documento procesado ({n_chunks} fragmentos)."
 

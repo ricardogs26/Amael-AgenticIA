@@ -181,13 +181,18 @@ class VaultSkill(BaseSkill):
             return SkillOutput.fail(str(exc))
 
     async def health_check(self) -> bool:
-        """Verifica que Vault está unsealed y responde."""
-        try:
-            import requests as _req
-            resp = _req.get(f"{_VAULT_ADDR}/v1/sys/health", timeout=5)
-            # 200 = initialized, unsealed, active
-            # 429 = standby (still healthy for reads)
-            return resp.status_code in (200, 429)
-        except Exception as exc:
-            logger.warning(f"[vault_skill] health_check falló: {exc}")
-            return False
+        """Verifica que Vault está unsealed y responde (non-blocking)."""
+        import asyncio
+
+        def _check() -> bool:
+            try:
+                import requests as _req
+                resp = _req.get(f"{_VAULT_ADDR}/v1/sys/health", timeout=5)
+                # 200 = initialized, unsealed, active
+                # 429 = standby (still healthy for reads)
+                return resp.status_code in (200, 429)
+            except Exception as exc:
+                logger.warning(f"[vault_skill] health_check falló: {exc}")
+                return False
+
+        return await asyncio.to_thread(_check)

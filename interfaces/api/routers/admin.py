@@ -207,7 +207,7 @@ def update_user(
                 updates.append("updated_at = NOW()")
                 params.append(uid)
                 cur.execute(
-                    f"UPDATE user_profile SET {', '.join(updates)} WHERE user_id = %s",
+                    f"UPDATE user_profile SET {', '.join(updates)} WHERE user_id = %s",  # nosec B608 — `updates` solo contiene strings hardcodeados (col=%s), valores van en params
                     params,
                 )
         return {"status": "ok"}

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import urllib.request
 import uuid
 from typing import Annotated
 
@@ -41,6 +42,8 @@ class ChatRequest(BaseModel):
     # audio_base64: nota de voz recibida por WhatsApp — se transcribe antes de procesar
     audio_base64:    str | None = None
     audio_mimetype:  str | None = Field(default="audio/ogg; codecs=opus")
+    # image: imagen enviada por WhatsApp — se analiza con modelo de visión
+    image:           str | None = None
 
     @property
     def effective_question(self) -> str:
@@ -140,6 +143,24 @@ async def chat(
         except Exception as exc:
             logger.error(f"[chat] Error transcribiendo audio: {exc}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al transcribir el audio.")
+
+    # Análisis de imagen con modelo de visión (qwen2.5-vl)
+    if body.image:
+        import time as _time
+        _t0 = _time.time()
+        try:
+            answer = await _analyze_image(body.image, body.effective_question or "Describe esta imagen detalladamente.")
+        except Exception as exc:
+            logger.error(f"[chat] Error analizando imagen: {exc}")
+            answer = "No pude analizar la imagen. Por favor intenta de nuevo."
+        elapsed = round((_time.time() - _t0) * 1000, 1)
+        _persist_message(conversation_id, effective_user, body.effective_question or "[imagen]", answer, request_id, "vision")
+        asyncio.ensure_future(_store_memory_episode(effective_user, conversation_id, body.effective_question or "[imagen]", answer))
+        return ChatResponse(
+            answer=answer, response=answer,
+            conversation_id=conversation_id, request_id=request_id,
+            intent="vision", dispatch_mode="vision", elapsed_ms=elapsed,
+        )
 
     # Input validation
     from security.validator import validate_prompt
@@ -677,3 +698,27 @@ def _set_cached_response(user_id: str, question: str, answer: str) -> None:
         rc.setex(_chat_cache_key(user_id, question), _CHAT_CACHE_TTL, answer)
     except Exception:
         pass
+
+
+async def _analyze_image(image_base64: str, question: str) -> str:
+    """Analiza una imagen usando el modelo de visión vía API nativa de Ollama."""
+    from config.settings import settings
+
+    def _call() -> str:
+        url = f"{settings.ollama_base_url}/api/chat"
+        payload = json.dumps({
+            "model": settings.llm_vision_model,
+            "messages": [{
+                "role": "user",
+                "content": question,
+                "images": [image_base64],
+            }],
+            "stream": False,
+        }).encode()
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        # Timeout largo: Ollama necesita descargar qwen2.5:14b y cargar el modelo de visión
+        with urllib.request.urlopen(req, timeout=180) as resp:  # nosec B310 — URL es OLLAMA_BASE_URL (variable de entorno interna, no input de usuario)
+            data = json.loads(resp.read())
+        return data.get("message", {}).get("content", "No pude interpretar la imagen.")
+
+    return await asyncio.to_thread(_call)

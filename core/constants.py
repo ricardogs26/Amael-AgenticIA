@@ -45,6 +45,15 @@ class AnomalyType(StrEnum):
     ERROR_RATE_ESCALATING   = "ERROR_RATE_ESCALATING"
     # SLO
     SLO_BUDGET_BURNING      = "SLO_BUDGET_BURNING"
+    # Infraestructura K8s (observe_infrastructure)
+    SERVICE_NO_ENDPOINTS    = "SERVICE_NO_ENDPOINTS"    # Service sin pods sanos
+    LOADBALANCER_NO_IP      = "LOADBALANCER_NO_IP"      # LB sin EXTERNAL-IP
+    PVC_PENDING             = "PVC_PENDING"             # PVC atascado en Pending
+    PVC_MOUNT_ERROR         = "PVC_MOUNT_ERROR"         # FailedMount en eventos
+    DEPLOYMENT_DEGRADED     = "DEPLOYMENT_DEGRADED"     # réplicas < deseadas
+    NODE_PRESSURE           = "NODE_PRESSURE"           # DiskPressure/MemoryPressure/PIDPressure
+    K8S_EVENT_WARNING       = "K8S_EVENT_WARNING"       # Warning event de infraestructura
+    VAULT_SEALED            = "VAULT_SEALED"            # Vault sellado o no inicializado
 
 
 class Severity(StrEnum):

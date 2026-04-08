@@ -11,14 +11,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime
 from typing import Any
 
 logger = logging.getLogger("agents.productivity.planner")
-
-_OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
-_MODEL_NAME = os.environ.get("MODEL_NAME",      "qwen2.5:14b")
 
 # Singleton LLM
 _planner_llm = None
@@ -27,8 +23,8 @@ _planner_llm = None
 def _get_llm():
     global _planner_llm
     if _planner_llm is None:
-        from langchain_ollama import OllamaLLM
-        _planner_llm = OllamaLLM(model=_MODEL_NAME, base_url=_OLLAMA_URL)
+        from agents.base.llm_factory import get_chat_llm
+        _planner_llm = get_chat_llm(timeout=60)
     return _planner_llm
 
 

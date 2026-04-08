@@ -32,21 +32,24 @@ def detect_anomalies(
     metric: list[Anomaly] | None = None,
     trend: list[Anomaly] | None = None,
     slo: list[Anomaly] | None = None,
+    infrastructure: list[Anomaly] | None = None,
 ) -> list[Anomaly]:
     """
     Combina todas las fuentes de observación en una lista consolidada.
 
     Orden de prioridad:
       1. SLO violations (CRITICAL)
-      2. Structural anomalies (HIGH)
-      3. Metric anomalies (MEDIUM/HIGH)
-      4. Predictive trends (MEDIUM)
+      2. Structural anomalies — pods/nodos (HIGH)
+      3. Infrastructure anomalies — Services/PVCs/Deployments/Vault (HIGH)
+      4. Metric anomalies (MEDIUM/HIGH)
+      5. Predictive trends (MEDIUM)
 
     Registra métricas Prometheus por tipo y severidad.
     """
     all_anomalies: list[Anomaly] = []
     all_anomalies.extend(slo or [])
     all_anomalies.extend(structural)
+    all_anomalies.extend(infrastructure or [])
     all_anomalies.extend(metric or [])
     all_anomalies.extend(trend or [])
 
@@ -80,8 +83,8 @@ def detect_anomalies(
     if unique:
         logger.info(
             f"[detector] {len(unique)} anomalías únicas detectadas "
-            f"(structural={len(structural)}, metric={len(metric or [])}, "
-            f"trend={len(trend or [])}, slo={len(slo or [])})"
+            f"(structural={len(structural)}, infra={len(infrastructure or [])}, "
+            f"metric={len(metric or [])}, trend={len(trend or [])}, slo={len(slo or [])})"
         )
 
     return unique

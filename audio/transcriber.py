@@ -22,9 +22,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger("audio.transcriber")
 
 # ── Configuración ─────────────────────────────────────────────────────────────
-_WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL", "base")
-_WHISPER_DEVICE     = "cpu"
-_WHISPER_COMPUTE    = "int8"
+_WHISPER_MODEL_SIZE  = os.environ.get("WHISPER_MODEL", "base")
+_WHISPER_DEVICE      = "cpu"
+_WHISPER_COMPUTE     = "int8"
+_WHISPER_CACHE_DIR   = os.environ.get("WHISPER_CACHE_DIR", "/app/whisper-cache")
 
 # ── Singleton lazy del modelo ─────────────────────────────────────────────────
 _model: WhisperModelType | None = None
@@ -39,6 +40,7 @@ def _get_model() -> WhisperModelType:
             _WHISPER_MODEL_SIZE,
             device=_WHISPER_DEVICE,
             compute_type=_WHISPER_COMPUTE,
+            download_root=_WHISPER_CACHE_DIR,
         )
         logger.info("[transcriber] Modelo cargado.")
     return _model

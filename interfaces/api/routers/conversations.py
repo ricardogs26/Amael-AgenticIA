@@ -305,7 +305,7 @@ def update_conversation(
         raise HTTPException(status_code=500, detail="Error al actualizar conversación")
 
 
-@router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 def delete_conversation(
     conversation_id: str,
     user_id:         Annotated[str, Depends(get_current_user)],
