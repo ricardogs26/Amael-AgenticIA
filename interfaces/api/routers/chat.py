@@ -717,7 +717,7 @@ async def _analyze_image(image_base64: str, question: str) -> str:
         }).encode()
         req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
         # Timeout largo: Ollama necesita descargar qwen2.5:14b y cargar el modelo de visión
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with urllib.request.urlopen(req, timeout=180) as resp:  # nosec B310 — URL es OLLAMA_BASE_URL (variable de entorno interna, no input de usuario)
             data = json.loads(resp.read())
         return data.get("message", {}).get("content", "No pude interpretar la imagen.")
 
