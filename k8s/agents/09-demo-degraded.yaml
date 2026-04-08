@@ -1,0 +1,52 @@
+# Demo pod Escenario D — DEPLOYMENT_DEGRADED (Impacto en Disponibilidad)
+# Acto 6 del POC: Raphael detecta 0/2 réplicas disponibles → impacto en SLO
+# ─────────────────────────────────────────────────────────────────────────────
+# DIFERENCIA CLAVE vs Escenarios A/B/C:
+#   - Escenarios A/B/C: 1 réplica afectada
+#   - Escenario D:      2 réplicas, TODAS fallando → servicio completamente CAÍDO
+#   Impacto máximo: 0% disponibilidad → SLO en riesgo → urgencia CRÍTICA
+#   Este escenario muestra Raphael priorizando por severidad de negocio.
+#
+# Problema: 2 réplicas con límite 20Mi intentan alocar 30M → ambas OOMKilled
+#           DEPLOYMENT_DEGRADED: 0 available < 2 desired
+# Fix Camael: 20Mi × 2 = 40Mi > 30M → ambas réplicas sanas → 100% disponibilidad
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amael-demo-degraded
+  namespace: amael-ia
+  labels:
+    app: amael-demo-degraded
+    demo: "true"
+    scenario: "D"
+spec:
+  replicas: 2        # 2 réplicas → ambas deben estar healthy para cumplir SLO
+  selector:
+    matchLabels:
+      app: amael-demo-degraded
+  template:
+    metadata:
+      labels:
+        app: amael-demo-degraded
+        demo: "true"
+        scenario: "D"
+    spec:
+      containers:
+      - name: stress
+        image: polinux/stress
+        command: ["stress"]
+        args:
+        - "--vm"
+        - "1"
+        - "--vm-bytes"
+        - "30M"     # intenta alocar 30MB pero límite es 20Mi → OOM en AMBAS réplicas
+        - "--vm-hang"
+        - "0"
+        resources:
+          requests:
+            memory: "10Mi"
+            cpu: "5m"
+          limits:
+            memory: "20Mi"  # límite intencional bajo → OOM en ambas réplicas
+            cpu: "50m"      # DEPLOYMENT_DEGRADED: 0/2 réplicas disponibles

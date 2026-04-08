@@ -1,0 +1,51 @@
+# Demo pod Escenario C — HIGH_MEMORY (Monitoreo Preventivo)
+# Acto 5 del POC: Raphael detecta uso de memoria >85% → fix preventivo antes del OOM
+# ─────────────────────────────────────────────────────────────────────────────
+# DIFERENCIA CLAVE vs Escenarios A y B:
+#   - Escenarios A/B: pod ya muerto (OOMKilled) → remediación reactiva
+#   - Escenario C:    pod VIVO pero en zona de riesgo → remediación PREVENTIVA
+#   Este escenario demuestra la capacidad P4 del agente SRE: monitoreo proactivo.
+#
+# Problema: stress usa 90M de 100Mi disponibles → uso=90% > umbral=85%
+#           Raphael alerta antes de que el OOM ocurra
+# Fix Camael: 100Mi × 2 = 200Mi → pod corre con 90M/200Mi = 45% → zona segura
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amael-demo-highmem
+  namespace: amael-ia
+  labels:
+    app: amael-demo-highmem
+    demo: "true"
+    scenario: "C"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: amael-demo-highmem
+  template:
+    metadata:
+      labels:
+        app: amael-demo-highmem
+        demo: "true"
+        scenario: "C"
+    spec:
+      containers:
+      - name: stress
+        image: polinux/stress
+        command: ["stress"]
+        args:
+        - "--vm"
+        - "1"
+        - "--vm-bytes"
+        - "90M"     # 90M de 100Mi → 90% uso → sobre umbral 85% → HIGH_MEMORY alert
+        - "--vm-hang"  # mantener la memoria alocada (sin liberar)
+        - "0"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "10m"
+          limits:
+            memory: "100Mi"  # límite intencional: 90M/100Mi = 90% → zona de riesgo
+            cpu: "100m"      # fijo preventivo antes del OOM

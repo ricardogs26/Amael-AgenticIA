@@ -1,0 +1,50 @@
+# Demo pod Escenario B — CrashLoopBackOff por OOM en startup
+# Acto 4 del POC: Raphael detecta CRASH_LOOP → Camael sube memoria ×3
+# ─────────────────────────────────────────────────────────────────────────────
+# Diferencia vs Escenario A (OOM):
+#   - Escenario A: pod arranca OK pero OOMKilled mientras corre
+#   - Escenario B: pod OOMKilled en el primer segundo de startup → CrashLoopBackOff
+#     el exponential backoff de K8s hace que el estado sea claramente "CrashLoop"
+#
+# Problema: stress intenta alocar 40MB pero el límite es 16Mi → OOM en startup
+# Fix Camael: 16Mi × 3 = 48Mi > 40M → pod arranca y corre estable
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: amael-demo-crashloop
+  namespace: amael-ia
+  labels:
+    app: amael-demo-crashloop
+    demo: "true"
+    scenario: "B"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: amael-demo-crashloop
+  template:
+    metadata:
+      labels:
+        app: amael-demo-crashloop
+        demo: "true"
+        scenario: "B"
+    spec:
+      containers:
+      - name: stress
+        image: polinux/stress
+        command: ["stress"]
+        args:
+        - "--vm"
+        - "1"
+        - "--vm-bytes"
+        - "40M"     # intenta alocar 40MB pero límite es 16Mi → OOM en startup → CrashLoop
+        - "--vm-hang"
+        - "0"
+        resources:
+          requests:
+            memory: "8Mi"
+            cpu: "5m"
+          limits:
+            memory: "16Mi"  # límite muy bajo → OOM inmediato en startup → CrashLoopBackOff
+            cpu: "50m"
