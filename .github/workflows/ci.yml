@@ -226,7 +226,7 @@ jobs:
 
       - name: Esperar rollout
         run: |
-          kubectl rollout status deployment/amael-agentic-deployment -n amael-ia --timeout=180s
+          kubectl rollout status deployment/amael-agentic-deployment -n amael-ia --timeout=300s
 
       - name: Verificar pod corriendo
         run: |
