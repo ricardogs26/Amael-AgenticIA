@@ -29,10 +29,50 @@ env:
   IMAGE:    amael-agentic-backend
 
 jobs:
+  # ── 0-A. Secret scanning (todos los branches y PRs) ──────────────────────────
+  secret-scan:
+    name: Secret Scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # historial completo para detectar secrets en commits anteriores
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── 0-B. Dependency vulnerability scan (todos los branches y PRs) ────────────
+  dep-scan:
+    name: Dependency Scan (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalar pip-audit
+        run: pip install pip-audit --quiet
+
+      - name: Instalar dependencias del proyecto
+        run: pip install -e ".[all]" --quiet
+
+      - name: Scan de vulnerabilidades en dependencias
+        run: pip-audit --format=markdown --output=dep-scan-report.md || (cat dep-scan-report.md >> $GITHUB_STEP_SUMMARY && exit 1)
+
+      - name: Publicar reporte en summary
+        if: always()
+        run: cat dep-scan-report.md >> $GITHUB_STEP_SUMMARY || true
+
   # ── 1. Test (en push a develop/main y en PRs a main) ─────────────────────────
   test:
     name: Tests & Lint
     runs-on: ubuntu-latest
+    needs: [secret-scan, dep-scan]
     steps:
       - uses: actions/checkout@v4
         with:
