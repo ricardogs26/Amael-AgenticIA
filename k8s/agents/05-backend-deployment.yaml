@@ -64,7 +64,7 @@ spec:
 
       containers:
       - name: amael-agentic-backend
-        image: registry.richardx.dev/amael-agentic-backend:1.10.74
+        image: registry.richardx.dev/amael-agentic-backend:1.10.75
         imagePullPolicy: Always
         ports:
         - name: http
@@ -185,6 +185,12 @@ spec:
             secretKeyRef:
               name: servicenow-credentials
               key: password
+
+        # ── SRE — WhatsApp notifications ─────────────────────────────────────
+        - name: OWNER_PHONE
+          value: "5219993437008"
+        - name: WHATSAPP_BRIDGE_URL
+          value: "http://whatsapp-bridge-service:3000"
 
         # Identidad del pod para Lease leader election (SRE)
         - name: POD_NAME

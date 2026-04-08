@@ -317,7 +317,7 @@ def notify_whatsapp_sre(message: str, severity: str = "HIGH") -> bool:
         import requests as _req
         resp = _req.post(
             f"{_WHATSAPP_BRIDGE_URL}/send",
-            json={"phone": _OWNER_PHONE, "message": message},
+            json={"phoneNumber": _OWNER_PHONE, "text": message},
             timeout=10,
         )
         if resp.status_code == 200:
