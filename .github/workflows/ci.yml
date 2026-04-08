@@ -68,7 +68,30 @@ jobs:
         if: always()
         run: cat dep-scan-report.md >> $GITHUB_STEP_SUMMARY || true
 
-  # ── 0-C. SAST — análisis estático de código Python (todos los branches y PRs) ─
+  # ── 0-C. IaC scan — Checkov sobre manifests K8s (todos los branches y PRs) ────
+  iac-scan:
+    name: IaC Scan (Checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: IaC scan K8s manifests
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          config_file: .checkov.yaml
+          soft_fail: true          # visible en summary, no bloquea CI aún
+          output_format: cli
+          output_file_path: checkov-report.txt
+
+      - name: Publicar reporte en summary
+        if: always()
+        run: |
+          echo "## Checkov IaC Scan" >> $GITHUB_STEP_SUMMARY
+          tail -20 checkov-report.txt >> $GITHUB_STEP_SUMMARY || true
+
+  # ── 0-E. SAST — análisis estático de código Python (todos los branches y PRs) ─
   sast:
     name: SAST (Bandit)
     runs-on: ubuntu-latest
@@ -99,7 +122,7 @@ jobs:
   test:
     name: Tests & Lint
     runs-on: ubuntu-latest
-    needs: [secret-scan, dep-scan, sast]
+    needs: [secret-scan, dep-scan, iac-scan, sast]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -163,6 +186,30 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
           cache-to: type=inline
+
+      - name: Container scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+          format: table
+          output: trivy-report.txt
+          severity: CRITICAL,HIGH
+          exit-code: 0          # soft-fail: visible pero no bloquea deploy
+        continue-on-error: true
+
+      - name: Publicar reporte Trivy en summary
+        if: always()
+        run: |
+          echo "## Trivy Container Scan" >> $GITHUB_STEP_SUMMARY
+          cat trivy-report.txt >> $GITHUB_STEP_SUMMARY || echo "Sin reporte" >> $GITHUB_STEP_SUMMARY
+
+      - name: Generar SBOM (Syft)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+          artifact-name: sbom-${{ steps.version.outputs.version }}.spdx.json
+          output-file: sbom-${{ steps.version.outputs.version }}.spdx.json
+        continue-on-error: true
 
   # ── 3. Deploy + notificar a Raphael (solo en merge/push a main) ───────────────
   deploy:

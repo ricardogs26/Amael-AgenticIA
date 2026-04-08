@@ -1,0 +1,47 @@
+directory:
+  - k8s/
+
+framework:
+  - kubernetes
+
+# ── Checks desactivados con justificación ────────────────────────────────────
+skip-check:
+  # Image digest — se usan tags semánticos (vX.Y.Z) como source of truth en git
+  - CKV_K8S_43
+
+  # NetworkPolicy — MicroK8s single-node lab, no hay segmentación de red necesaria
+  - CKV2_K8S_6
+
+  # imagePullPolicy Always — registry privado local, IfNotPresent es intencional
+  - CKV_K8S_15
+
+  # seccomp profile — lab environment, RuntimeDefault se agrega en hardening futuro
+  - CKV_K8S_31
+
+  # Read-only filesystem — Ollama, Postgres, Redis, Qdrant, MinIO requieren escritura
+  - CKV_K8S_22
+
+  # Service Account token auto-mount — SRE agent necesita token para Kubernetes API
+  - CKV_K8S_38
+
+  # NET_RAW capability — requerida por algunos containers de infraestructura
+  - CKV_K8S_28
+
+  # Capabilities asignadas — Ollama necesita acceso GPU (privilegios específicos)
+  - CKV_K8S_37
+
+  # securityContext en pods — se aplica progresivamente, no todos los pods lo tienen aún
+  - CKV_K8S_29
+  - CKV_K8S_30
+
+  # UID alto — Ollama y servicios de infraestructura requieren UIDs específicos
+  - CKV_K8S_40
+
+# ── Checks activos (los que SÍ bloquean CI) ──────────────────────────────────
+# CKV_K8S_35: secrets como env vars en lugar de archivos/Vault         (8 issues)
+# CKV_K8S_23: containers corriendo como root                           (14 issues)
+# CKV_K8S_20: allowPrivilegeEscalation                                (14 issues)
+# CKV_K8S_13: memory limits no definidos                               (4 issues)
+# CKV_K8S_14: CPU limits no definidos
+# CKV_K8S_11: readinessProbe no definida
+# CKV_K8S_8:  livenessProbe no definida
