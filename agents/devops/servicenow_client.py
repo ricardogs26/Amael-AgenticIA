@@ -160,6 +160,63 @@ async def add_work_note(sys_id: str, note: str) -> bool:
     return await update_rfc(sys_id, {"work_notes": note})
 
 
+async def advance_rfc_to_assess(sys_id: str) -> None:
+    """
+    Avanza el RFC desde Draft (-5) → New (1) → Assess (2).
+    ServiceNow no acepta saltar estados en un solo PATCH.
+    """
+    await update_rfc(sys_id, {"state": RFCState.NEW})
+    await update_rfc(sys_id, {"state": RFCState.ASSESS})
+
+
+async def advance_rfc_to_implement(sys_id: str, work_note: str = "") -> None:
+    """
+    Avanza el RFC: Assess → Authorize → Scheduled → Implement.
+    Llamar cuando el operador aprueba el PR.
+    """
+    await update_rfc(sys_id, {"state": RFCState.AUTHORIZE})
+    await update_rfc(sys_id, {"state": RFCState.SCHEDULED})
+    payload: dict = {"state": RFCState.IMPLEMENT}
+    if work_note:
+        payload["work_notes"] = work_note
+    await update_rfc(sys_id, payload)
+
+
+async def advance_rfc_to_closed(sys_id: str, close_notes: str) -> None:
+    """
+    Cierra el RFC tras verificación exitosa: Implement → Review → Closed.
+    """
+    await update_rfc(sys_id, {"state": RFCState.REVIEW})
+    await update_rfc(sys_id, {
+        "state":       RFCState.CLOSED,
+        "close_notes": close_notes,
+        "work_notes":  close_notes,
+    })
+
+
+async def get_emergency_chg_model() -> str:
+    """Retorna el sys_id del Change Model 'Emergency' en ServiceNow."""
+    base, user, pwd = _cfg()
+    if not base:
+        return ""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{base}/api/now/table/chg_model",
+                auth=(user, pwd),
+                headers={"Accept": "application/json"},
+                params={
+                    "sysparm_query": "nameSTARTSWITHEmergency",
+                    "sysparm_fields": "sys_id,name",
+                    "sysparm_limit": "1",
+                },
+            )
+            results = r.json().get("result", [])
+            return results[0].get("sys_id", "") if results else ""
+    except Exception:
+        return ""
+
+
 async def close_rfc(sys_id: str, close_notes: str) -> bool:
     """Cierra el RFC como exitoso (ITIL v4: Review → Closed)."""
     return await update_rfc(sys_id, {

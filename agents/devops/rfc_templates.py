@@ -90,12 +90,12 @@ def build_emergency_rfc(
 
         # ── Clasificación ITIL v4 ───────────────────────────────────────────
         "type":              "emergency",
+        "chg_model":         "62d10fa1c303101035ae3f52c1d3aec1",  # Emergency Change Model
         "category":          "Software",
         "subcategory":       "Kubernetes / Containers",
         "risk":              risk,
         "impact":            impact,
         "priority":          priority,
-        "state":             RFCState.ASSESS,
 
         # ── Asignación ─────────────────────────────────────────────────────
         "assignment_group":  "DevOps",

@@ -551,23 +551,24 @@ class CamaelAgent(BaseAgent):
                         detected_at  = task.get("detected_at", ""),
                     )
                     rfc_info = await sn.create_rfc(rfc_payload)
-                    # Actualizar RFC con link al PR de Bitbucket
+                    # Avanzar estado: Draft → New → Assess
                     if rfc_info["sys_id"]:
+                        await sn.advance_rfc_to_assess(rfc_info["sys_id"])
                         await sn.add_work_note(
                             rfc_info["sys_id"],
                             f"Pull Request creado en Bitbucket:\n"
                             f"• PR #{pr_id}: {pr_url}\n"
                             f"• Branch: {branch_name}\n"
-                            f"• Esperando aprobación del operador.",
+                            f"• Esperando aprobación del operador (ECAB).",
                         )
-                    # Persistir en Redis para que el verificador SRE pueda cerrar el RFC
+                    # Persistir en Redis para que _cmd_aprobar y el verificador SRE puedan cerrar el RFC
                     if rfc_info["sys_id"]:
                         import json as _json
 
                         from storage.redis.client import get_client as _redis
                         _redis().setex(
                             f"sn:rfc:{incident_key}",
-                            3600,  # 1 hora — suficiente para verificación post-deploy
+                            3600,  # 1 hora
                             _json.dumps(rfc_info),
                         )
                     logger.info(f"[camael] RFC creado: {rfc_info['number']} — {rfc_info['url']}")
