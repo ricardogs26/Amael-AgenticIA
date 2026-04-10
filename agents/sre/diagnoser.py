@@ -160,6 +160,12 @@ def diagnose_with_llm(anomaly, vault_knowledge: str = "", metrics_knowledge: str
         "SERVICE_NO_ENDPOINTS":("Service sin pods saludables. Verificar readiness probe y selector.", 0.75),
         "NODE_PRESSURE":       ("Nodo bajo presión de recursos. Disco, memoria o PIDs agotados.", 0.85),
         "K8S_EVENT_WARNING":   ("Evento de advertencia en infraestructura K8s. Ver detalles del evento.", 0.60),
+        # Capacidad proactiva (P7)
+        "NODE_DISK_HIGH":      ("Disco del nodo superando umbral. Limpiar logs, imágenes Docker sin usar o ampliar volumen.", 0.90),
+        "NODE_MEMORY_HIGH":    ("RAM del nodo casi agotada. Revisar pods sin límites de memoria o procesos con memory leak.", 0.85),
+        "PVC_CAPACITY_HIGH":   ("PVC casi lleno. Limpiar datos o ampliar el PVC antes de que falle el pod por falta de espacio.", 0.90),
+        # TLS (P7)
+        "CERTIFICATE_EXPIRING":("Certificado TLS próximo a vencer. Verificar que cert-manager pueda renovar (desafío ACME/DNS activo).", 0.95),
     }
     cause, conf = fallbacks.get(anomaly.issue_type, (anomaly.details, 0.5))
     SRE_DIAGNOSIS_CONFIDENCE.observe(conf)

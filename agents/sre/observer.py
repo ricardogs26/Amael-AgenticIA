@@ -2,10 +2,14 @@
 SRE Observer — observa el estado del clúster desde múltiples fuentes.
 
 Extrae las funciones de observación de k8s-agent/main.py:
-  observe_cluster()  — estado estructural de pods y nodos (P0)
-  observe_metrics()  — métricas CPU/memoria/errores via Prometheus (P4-A)
-  observe_trends()   — predicción lineal + derivadas (P5-A)
-  observe_slo()      — burn rate de error budget (P5-C)
+  observe_cluster()          — estado estructural de pods y nodos (P0)
+  observe_metrics()          — métricas CPU/memoria/errores via Prometheus (P4-A)
+  observe_trends()           — predicción lineal + derivadas (P5-A)
+  observe_slo()              — burn rate de error budget (P5-C)
+  observe_infrastructure()   — recursos K8s: PVC, Deployments, Services, Vault (P6)
+  observe_node_resources()   — disco y memoria del nodo vía Prometheus (P7)
+  observe_pvc_capacity()     — capacidad de PVCs vía Prometheus (P7)
+  observe_certificates()     — certificados TLS de cert-manager vía K8s API (P7)
 
 Principio: Solo observa, nunca actúa. Retorna listas de Anomaly.
 """
@@ -710,4 +714,264 @@ def observe_infrastructure(namespaces: list[str] | None = None) -> list[Anomaly]
     else:
         logger.debug("[observer] observe_infrastructure: infraestructura saludable.")
 
+    return anomalies
+
+
+def observe_node_resources(prometheus_url: str) -> list[Anomaly]:
+    """
+    Observa el uso actual de disco y memoria del nodo vía Prometheus (P7).
+
+    A diferencia de observe_trends() que predice el agotamiento futuro,
+    esta función detecta umbrales ya superados en el momento actual.
+    A diferencia de observe_infrastructure() que detecta condiciones K8s
+    (DiskPressure/MemoryPressure activadas por el kubelet), esta función
+    es proactiva: alerta antes de que el kernel active la condición.
+
+    Detecta:
+      NODE_DISK_HIGH    — uso de disco > SRE_NODE_DISK_THRESHOLD (default 80%)
+      NODE_MEMORY_HIGH  — uso de memoria > SRE_NODE_MEMORY_THRESHOLD (default 90%)
+
+    Variables de entorno:
+      SRE_NODE_DISK_THRESHOLD   — fracción 0.0-1.0 (default 0.80)
+      SRE_NODE_MEMORY_THRESHOLD — fracción 0.0-1.0 (default 0.90)
+    """
+    disk_threshold   = float(os.environ.get("SRE_NODE_DISK_THRESHOLD",   "0.80"))
+    memory_threshold = float(os.environ.get("SRE_NODE_MEMORY_THRESHOLD", "0.90"))
+    anomalies: list[Anomaly] = []
+
+    # ── Disco: porcentaje usado por punto de montaje raíz ─────────────────────
+    # Fórmula: 1 - (disponible / total)
+    # Se excluye tmpfs para no reportar RAM usada como disco virtual.
+    disk_results = _prometheus_query(
+        prometheus_url,
+        '1 - (node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"}'
+        ' / node_filesystem_size_bytes{mountpoint="/",fstype!="tmpfs"})',
+    )
+    for r in (disk_results or []):
+        try:
+            ratio = float(r["value"][1])
+            if ratio > disk_threshold:
+                labels   = r.get("metric", {})
+                # instance puede ser "hostname:port" o solo "hostname"
+                instance = labels.get("instance", "unknown").split(":")[0]
+                severity = Severity.CRITICAL if ratio > 0.95 else Severity.HIGH
+                anomalies.append(Anomaly(
+                    issue_type=AnomalyType.NODE_DISK_HIGH,
+                    severity=severity,
+                    namespace="cluster",
+                    resource_name=instance,
+                    resource_type="Node",
+                    details=(
+                        f"Nodo {instance}: disco al {ratio:.1%} "
+                        f"(umbral {disk_threshold:.0%}). "
+                        f"{'CRÍTICO — riesgo de llenado inminente.' if ratio > 0.95 else 'Limpiar logs, imágenes sin usar (docker system prune) o ampliar volumen.'}"
+                    ),
+                    metadata={"disk_ratio": ratio, "threshold": disk_threshold},
+                ))
+        except (ValueError, KeyError):
+            pass
+
+    # ── Memoria: porcentaje de RAM usada ──────────────────────────────────────
+    # Fórmula: 1 - (MemAvailable / MemTotal)
+    # MemAvailable es la métrica correcta (incluye caché reclaimable), no MemFree.
+    mem_results = _prometheus_query(
+        prometheus_url,
+        "1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
+    )
+    for r in (mem_results or []):
+        try:
+            ratio    = float(r["value"][1])
+            if ratio > memory_threshold:
+                instance = r.get("metric", {}).get("instance", "unknown").split(":")[0]
+                severity = Severity.CRITICAL if ratio > 0.97 else Severity.HIGH
+                anomalies.append(Anomaly(
+                    issue_type=AnomalyType.NODE_MEMORY_HIGH,
+                    severity=severity,
+                    namespace="cluster",
+                    resource_name=instance,
+                    resource_type="Node",
+                    details=(
+                        f"Nodo {instance}: memoria al {ratio:.1%} "
+                        f"(umbral {memory_threshold:.0%}). "
+                        f"Revisar pods sin límites de memoria o memory leaks activos."
+                    ),
+                    metadata={"memory_ratio": ratio, "threshold": memory_threshold},
+                ))
+        except (ValueError, KeyError):
+            pass
+
+    if anomalies:
+        logger.info(f"[observer] observe_node_resources: {len(anomalies)} anomalías de nodo.")
+    else:
+        logger.debug("[observer] observe_node_resources: recursos del nodo OK.")
+    return anomalies
+
+
+def observe_pvc_capacity(prometheus_url: str) -> list[Anomaly]:
+    """
+    Observa el uso de capacidad de PersistentVolumeClaims vía Prometheus (P7).
+
+    La función observe_infrastructure() detecta PVCs en estado Pending (sin volumen),
+    pero no detecta PVCs Bound que están casi llenos. Esta función cubre ese gap:
+    alerta cuando el espacio usado supera el umbral antes de que el pod falle
+    por "no space left on device".
+
+    Detecta:
+      PVC_CAPACITY_HIGH — PVC con uso > SRE_PVC_CAPACITY_THRESHOLD (default 80%)
+
+    Variables de entorno:
+      SRE_PVC_CAPACITY_THRESHOLD — fracción 0.0-1.0 (default 0.80)
+
+    Nota: kubelet_volume_stats_* solo está disponible para pods activos.
+    PVCs montados en pods Running son los únicos visibles.
+    """
+    threshold = float(os.environ.get("SRE_PVC_CAPACITY_THRESHOLD", "0.80"))
+    anomalies: list[Anomaly] = []
+
+    # Construir el filtro de namespaces desde la variable de entorno
+    ns_regex = "|".join(_OBSERVE_NAMESPACES)
+
+    # kubelet_volume_stats_used_bytes y _capacity_bytes se emiten por PVC montado.
+    # El label 'persistentvolumeclaim' identifica el PVC; 'namespace' el namespace.
+    results = _prometheus_query(
+        prometheus_url,
+        f'kubelet_volume_stats_used_bytes{{namespace=~"{ns_regex}"}}'
+        f' / kubelet_volume_stats_capacity_bytes{{namespace=~"{ns_regex}"}}',
+    )
+    for r in (results or []):
+        try:
+            ratio = float(r["value"][1])
+            if ratio > threshold:
+                labels   = r.get("metric", {})
+                pvc_name = labels.get("persistentvolumeclaim", "unknown")
+                ns       = labels.get("namespace", "unknown")
+                severity = Severity.CRITICAL if ratio > 0.95 else Severity.HIGH
+
+                # Calcular espacio libre aproximado si está disponible en el resultado
+                anomalies.append(Anomaly(
+                    issue_type=AnomalyType.PVC_CAPACITY_HIGH,
+                    severity=severity,
+                    namespace=ns,
+                    resource_name=pvc_name,
+                    resource_type="PersistentVolumeClaim",
+                    details=(
+                        f"PVC '{pvc_name}' en {ns}: capacidad al {ratio:.1%} "
+                        f"(umbral {threshold:.0%}). "
+                        f"{'CRÍTICO — riesgo de quedarse sin espacio.' if ratio > 0.95 else 'Limpiar datos o ampliar el PVC antes de que se llene.'}"
+                    ),
+                    metadata={"capacity_ratio": ratio, "threshold": threshold},
+                ))
+        except (ValueError, KeyError):
+            pass
+
+    if anomalies:
+        logger.info(f"[observer] observe_pvc_capacity: {len(anomalies)} PVCs con alta capacidad.")
+    else:
+        logger.debug("[observer] observe_pvc_capacity: PVCs con capacidad OK.")
+    return anomalies
+
+
+def observe_certificates() -> list[Anomaly]:
+    """
+    Observa certificados TLS gestionados por cert-manager vía Kubernetes API (P7).
+
+    Detecta certificados próximos a vencer antes de que expiren y provoquen
+    errores TLS en producción. cert-manager renueva automáticamente cuando
+    quedan 2/3 del tiempo de vida, pero fallos en el desafío ACME o en la
+    renovación pueden dejar un certificado sin renovar.
+
+    Detecta:
+      CERTIFICATE_EXPIRING — certificado vence en menos de SRE_CERT_WARN_DAYS días
+
+    Variables de entorno:
+      SRE_CERT_WARN_DAYS — días de anticipación para alertar (default 14)
+
+    Usa el API group cert-manager.io/v1 (CustomObjectsApi).
+    Si cert-manager no está instalado, la función retorna [] silenciosamente.
+    """
+    import time as _time
+
+    warn_days = int(os.environ.get("SRE_CERT_WARN_DAYS", "14"))
+    warn_secs = warn_days * 24 * 3600
+    anomalies: list[Anomaly] = []
+    now_ts    = _time.time()
+
+    try:
+        k8s = _get_k8s_client()
+        custom = k8s.CustomObjectsApi()
+    except Exception as exc:
+        logger.error(f"[observer] observe_certificates: K8s client error: {exc}")
+        return []
+
+    for ns in _OBSERVE_NAMESPACES + ["cert-manager"]:
+        try:
+            certs = custom.list_namespaced_custom_object(
+                group="cert-manager.io",
+                version="v1",
+                namespace=ns,
+                plural="certificates",
+            )
+        except Exception:
+            # cert-manager no instalado, namespace no existe, o sin CRDs → silencio
+            continue
+
+        for cert in certs.get("items", []):
+            name   = cert.get("metadata", {}).get("name", "unknown")
+            status = cert.get("status", {})
+
+            # .status.notAfter es una cadena ISO 8601: "2026-04-15T12:00:00Z"
+            not_after_str = status.get("notAfter")
+            if not not_after_str:
+                # Certificado recién creado o sin estado — ignorar
+                continue
+
+            try:
+                from datetime import datetime
+                not_after = datetime.fromisoformat(
+                    not_after_str.replace("Z", "+00:00")
+                )
+                seconds_left = not_after.timestamp() - now_ts
+                days_left    = seconds_left / 86400
+            except (ValueError, TypeError):
+                continue
+
+            if seconds_left < warn_secs:
+                if seconds_left <= 0:
+                    # Ya expirado
+                    severity = Severity.CRITICAL
+                    msg = f"Certificado '{name}' en {ns} EXPIRADO hace {abs(days_left):.0f} días."
+                elif days_left < 3:
+                    severity = Severity.CRITICAL
+                    msg = f"Certificado '{name}' en {ns} expira en {days_left:.1f} días. CRÍTICO."
+                else:
+                    severity = Severity.HIGH
+                    msg = (
+                        f"Certificado '{name}' en {ns} expira en {days_left:.0f} días "
+                        f"(umbral: {warn_days} días). "
+                        f"Verificar que cert-manager pueda renovar (desafío ACME/DNS)."
+                    )
+
+                # Incluir dominios cubiertos por el certificado si están disponibles
+                dns_names = cert.get("spec", {}).get("dnsNames", [])
+                if dns_names:
+                    msg += f" Dominios: {', '.join(dns_names[:3])}"
+
+                anomalies.append(Anomaly(
+                    issue_type=AnomalyType.CERTIFICATE_EXPIRING,
+                    severity=severity,
+                    namespace=ns,
+                    resource_name=name,
+                    resource_type="Certificate",
+                    details=msg,
+                    metadata={
+                        "days_left": round(days_left, 1),
+                        "not_after": not_after_str,
+                        "dns_names": dns_names,
+                    },
+                ))
+
+    if anomalies:
+        logger.warning(f"[observer] observe_certificates: {len(anomalies)} certificados próximos a vencer.")
+    else:
+        logger.debug("[observer] observe_certificates: certificados TLS OK.")
     return anomalies
