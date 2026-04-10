@@ -188,7 +188,7 @@ spec:
 
         # ── SRE — WhatsApp notifications ─────────────────────────────────────
         - name: OWNER_PHONE
-          value: "5219993437008"
+          value: "521XXXXXXXXXX"
         - name: WHATSAPP_BRIDGE_URL
           value: "http://whatsapp-bridge-service:3000"
 

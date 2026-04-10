@@ -78,7 +78,7 @@ El proyecto evolucionó desde un backend monolítico (`backend-ia`) hacia una ar
 | Usuarios humanos | Frontend Next.js + WhatsApp | Email Google OAuth / número WhatsApp |
 | Bot de servicio | Interno | `bot-amael@richardx.dev` (JWT fijo) |
 | SRE autónomo | Internal k8s-agent API | `INTERNAL_API_SECRET` |
-| Admin | Todos los canales | `5219993437008` (número de admin) |
+| Admin | Todos los canales | `521XXXXXXXXXX` (número de admin) |
 
 ---
 
@@ -1000,13 +1000,13 @@ Usuario WhatsApp: "¿Qué dice el documento de DevOps sobre cultura de equipos?"
     │
     ▼
 whatsapp-bridge (Express.js)
-    │ POST /api/chat body={prompt: "...", user_id: "5219993437008"}
+    │ POST /api/chat body={prompt: "...", user_id: "521XXXXXXXXXX"}
     │ Authorization: Bearer {jwt-token bot}
     ▼
 POST /api/chat (FastAPI)
     │ get_current_user() → "bot-amael@richardx.dev"
-    │ effective_user = "5219993437008" (del body.user_id)
-    │ check_rate_limit("5219993437008")
+    │ effective_user = "521XXXXXXXXXX" (del body.user_id)
+    │ check_rate_limit("521XXXXXXXXXX")
     │ validate_prompt() → ok
     ▼
 AgentRouter.route()

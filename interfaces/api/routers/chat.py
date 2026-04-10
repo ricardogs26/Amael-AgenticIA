@@ -624,7 +624,7 @@ def _is_voice_request(question: str) -> bool:
 
 def _is_whatsapp_user(user_id: str) -> bool:
     """True si el user_id es un número de teléfono (usuario de WhatsApp)."""
-    # Los usuarios de WhatsApp tienen user_id numérico (ej: 5219993437008)
+    # Los usuarios de WhatsApp tienen user_id numérico (ej: 521XXXXXXXXXX)
     return user_id.replace("+", "").replace("-", "").isdigit()
 
 

@@ -90,7 +90,7 @@ class Settings(BaseSettings):
 
     # Control de acceso gestionado en PostgreSQL (user_profile + user_identities)
     # El admin_phone se usa en el day-planner para notificaciones WhatsApp
-    admin_phone: str = Field(default="5219993437008", alias="ADMIN_PHONE")
+    admin_phone: str = Field(default="521XXXXXXXXXX", alias="ADMIN_PHONE")
 
     # ── PostgreSQL ────────────────────────────────────────────────────────────
     postgres_host: str = Field(default="postgres-service", alias="POSTGRES_HOST")
