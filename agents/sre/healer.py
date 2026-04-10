@@ -38,6 +38,21 @@ _AUTO_HEALABLE_ISSUES = {
     "HIGH_RESTARTS", "HIGH_MEMORY", "MEMORY_LEAK_PREDICTED",
     "DEPLOYMENT_DEGRADED",   # réplicas < deseadas → rollout restart del deployment
 }
+# Tipos que siempre van a NOTIFY_HUMAN — requieren intervención manual.
+# NODE_DISK_HIGH / NODE_MEMORY_HIGH / PVC_CAPACITY_HIGH / CERTIFICATE_EXPIRING
+# no tienen remediación automática válida: ampliar disco, limpiar PVC o renovar
+# un certificado con problemas de ACME requiere decisión humana.
+_NOTIFY_ONLY_ISSUES = {
+    "NODE_DISK_HIGH", "NODE_MEMORY_HIGH",
+    "PVC_CAPACITY_HIGH", "CERTIFICATE_EXPIRING",
+    # Los siguientes ya eran NOTIFY_HUMAN por no estar en _AUTO_HEALABLE_ISSUES,
+    # se listan explícitamente para claridad en la documentación:
+    "IMAGE_PULL_ERROR", "POD_PENDING_STUCK", "HIGH_CPU",
+    "DISK_EXHAUSTION_PREDICTED", "ERROR_RATE_ESCALATING",
+    "SLO_BUDGET_BURNING", "SERVICE_NO_ENDPOINTS", "LOADBALANCER_NO_IP",
+    "PVC_PENDING", "PVC_MOUNT_ERROR", "NODE_PRESSURE",
+    "K8S_EVENT_WARNING", "VAULT_SEALED", "NODE_NOT_READY",
+}
 
 
 def _get_k8s_apps():

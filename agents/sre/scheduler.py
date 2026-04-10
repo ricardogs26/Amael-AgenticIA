@@ -232,6 +232,12 @@ _DEDUP_TTL_BY_TYPE: dict[str, int] = {
     "NODE_PRESSURE":         1800,   # 30 min — condición de nodo persiste
     "K8S_EVENT_WARNING":      300,   # 5 min — eventos se repiten
     "PVC_MOUNT_ERROR":        600,   # 10 min
+    # P7: capacidad proactiva
+    "NODE_DISK_HIGH":        1800,   # 30 min — estado del disco cambia lentamente
+    "NODE_MEMORY_HIGH":       900,   # 15 min — puede resolverse con GC de pods
+    "PVC_CAPACITY_HIGH":     1800,   # 30 min — persiste hasta limpiar/ampliar
+    # P7: certificados TLS
+    "CERTIFICATE_EXPIRING":  3600,   # 1 hora — alertar una vez por hora hasta resolver
 }
 
 _dedup_cache: dict[str, float] = {}  # fallback in-memory
@@ -308,16 +314,24 @@ def sre_autonomous_loop(
 
     try:
         # ── OBSERVE ──────────────────────────────────────────────────────────
-        structural = observer.observe_cluster()
-        infra      = observer.observe_infrastructure()
-        metrics    = observer.observe_metrics(prometheus_url)
-        trends     = observer.observe_trends(prometheus_url)
-        slo_anoms  = observer.observe_slo(prometheus_url, slo_targets)
+        structural   = observer.observe_cluster()
+        infra        = observer.observe_infrastructure()
+        metrics      = observer.observe_metrics(prometheus_url)
+        trends       = observer.observe_trends(prometheus_url)
+        slo_anoms    = observer.observe_slo(prometheus_url, slo_targets)
+        # P7: capacidad de nodo/PVC y certificados TLS
+        node_res     = observer.observe_node_resources(prometheus_url)
+        pvc_cap      = observer.observe_pvc_capacity(prometheus_url)
+        certs        = observer.observe_certificates()
+
+        # Las observaciones de P7 se agregan a infrastructure para reutilizar
+        # el pipeline de detect/diagnose/decide sin cambiar la firma de detect_anomalies.
+        infra_full   = infra + node_res + pvc_cap + certs
 
         # ── DETECT ───────────────────────────────────────────────────────────
         raw_anomalies = detector.detect_anomalies(
             structural=structural,
-            infrastructure=infra,
+            infrastructure=infra_full,
             metric=metrics,
             trend=trends,
             slo=slo_anoms,

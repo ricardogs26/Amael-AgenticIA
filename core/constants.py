@@ -54,6 +54,12 @@ class AnomalyType(StrEnum):
     NODE_PRESSURE           = "NODE_PRESSURE"           # DiskPressure/MemoryPressure/PIDPressure
     K8S_EVENT_WARNING       = "K8S_EVENT_WARNING"       # Warning event de infraestructura
     VAULT_SEALED            = "VAULT_SEALED"            # Vault sellado o no inicializado
+    # Capacidad proactiva (observe_node_resources / observe_pvc_capacity)
+    NODE_DISK_HIGH          = "NODE_DISK_HIGH"          # Disco del nodo > umbral (antes de condición K8s)
+    NODE_MEMORY_HIGH        = "NODE_MEMORY_HIGH"        # Memoria del nodo > umbral (proactivo)
+    PVC_CAPACITY_HIGH       = "PVC_CAPACITY_HIGH"       # PVC usado > umbral (antes de llenarse)
+    # TLS (observe_certificates)
+    CERTIFICATE_EXPIRING    = "CERTIFICATE_EXPIRING"    # Certificado TLS vence en < N días
 
 
 class Severity(StrEnum):
