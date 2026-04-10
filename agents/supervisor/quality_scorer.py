@@ -155,7 +155,7 @@ def evaluate(state: dict, redis_client=None) -> dict:
         try:
             _sv_resp = _get_llm().invoke(messages)
             SUPERVISOR_LATENCY_SECONDS.observe(time.time() - t0)
-            raw = (_sv_resp.content if hasattr(_sv_resp, "content") else str(_sv_resp)).strip()
+            raw = re.sub(r"<think>.*?</think>", "", (_sv_resp.content if hasattr(_sv_resp, "content") else str(_sv_resp)), flags=re.DOTALL).strip()
             try:
                 from config.settings import settings as _s
                 _model = _s.llm_model
