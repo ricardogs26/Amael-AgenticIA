@@ -130,7 +130,7 @@ class TestGetUserRole:
         # user_profile no tiene el teléfono → identities tiene el canonical_user_id
         # → user_profile tiene el rol del canonical
         with self._patch_pg([None, ("canonical@example.com",), ("operator",)]):
-            role = get_user_role("5219993437008")
+            role = get_user_role("521XXXXXXXXXX")
         assert role == "operator"
 
     def test_fallback_user_on_db_exception(self):
@@ -145,7 +145,7 @@ class TestGetUserRole:
         # user_profile → None, identities → canonical_id encontrado,
         # pero canonical no tiene fila en user_profile → None
         with self._patch_pg([None, ("canonical@example.com",), None]):
-            role = get_user_role("5219993437008")
+            role = get_user_role("521XXXXXXXXXX")
         assert role == "user"
 
 

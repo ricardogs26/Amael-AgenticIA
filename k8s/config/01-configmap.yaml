@@ -79,7 +79,7 @@ data:
   SRE_PROTECTED_DEPLOYMENTS:  "postgres-deployment,ollama-deployment,vault-0"
   SRE_LEASE_NAME:             "sre-agentic-leader"
   SRE_MIN_ALERT_SEVERITY:     "MEDIUM"
-  SRE_ALERT_PHONE:            "5219993437008"
+  SRE_ALERT_PHONE:            "521XXXXXXXXXX"
 
   # ── SLO targets ───────────────────────────────────────────────────────────
   SLO_TARGETS_JSON: |
@@ -101,4 +101,4 @@ data:
   APP_VERSION: "1.0.0"
 
   # Número WhatsApp del admin para notificaciones del day-planner
-  ADMIN_PHONE: "5219993437008"
+  ADMIN_PHONE: "521XXXXXXXXXX"
