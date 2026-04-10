@@ -354,7 +354,7 @@ Solo usuarios en la whitelist pueden usar el sistema. La whitelist vive en Postg
 SELECT user_id FROM user_profile WHERE status = 'active';
 ```
 
-Usuarios configurados: `admin@example.com`, `usuario@bancobase.com`, `521XXXXXXXXXX` (WhatsApp)
+Usuarios configurados: `admin@example.com`, `usuario@example.com`, `521XXXXXXXXXX` (WhatsApp)
 
 Para agregar un usuario:
 ```bash
