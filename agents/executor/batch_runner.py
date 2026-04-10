@@ -16,6 +16,11 @@ from typing import Any
 from langchain_ollama import ChatOllama
 
 from agents.executor.step_handlers import STEP_HANDLERS
+
+
+def _strip_think_tags(text: str) -> str:
+    """Elimina bloques <think>...</think> que emite qwen3 en modo thinking."""
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 from observability.metrics import (
     EXECUTOR_BACKPRESSURE_QUEUE_DEPTH,
     EXECUTOR_CONTEXT_TRUNCATIONS_TOTAL,
@@ -285,7 +290,7 @@ def run_reasoning_step(
         HumanMessage(content=human_prompt),
     ])
     _track_llm_tokens(response, _model, system_prompt + human_prompt)
-    new_answer = response.content if hasattr(response, "content") else str(response)
+    new_answer = _strip_think_tags(response.content if hasattr(response, "content") else str(response))
 
     # Post-traducción: si el idioma de destino es español pero la respuesta no lo es,
     # forzar traducción con prompt dedicado (más confiable que instrucciones en el mismo system prompt).
@@ -300,7 +305,7 @@ def run_reasoning_step(
             HumanMessage(content=new_answer),
         ])
         _track_llm_tokens(trans_response, _model, trans_input, agent="translation")
-        new_answer = trans_response.content if hasattr(trans_response, "content") else str(trans_response)
+        new_answer = _strip_think_tags(trans_response.content if hasattr(trans_response, "content") else str(trans_response))
 
     if all_media:
         new_answer += "\n\n" + "\n".join(all_media)

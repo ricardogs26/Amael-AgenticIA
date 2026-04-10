@@ -7,7 +7,7 @@ data:
   # ── LLM Provider ──────────────────────────────────────────────────────────
   # Valores válidos: ollama | openai | groq | gemini | anthropic
   LLM_PROVIDER:    "ollama"
-  LLM_MODEL:       "qwen2.5:14b"
+  LLM_MODEL:       "qwen3:14b"
   # LLM_BASE_URL:  ""   # URL base opcional (OpenAI-compatible / llm-adapter)
   # LLM_API_KEY se configura en Secret, no aquí
 

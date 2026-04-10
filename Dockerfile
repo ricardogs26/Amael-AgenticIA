@@ -70,9 +70,10 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
-# Uvicorn con 2 workers — log-config /dev/null para que setup_logging() controle JSON
+# 1 worker: FastAPI es async y maneja concurrencia internamente.
+# Con 2 workers, APScheduler corre en 2 procesos → doble SRE loop → RFCs duplicados.
 CMD ["uvicorn", "main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
-     "--workers", "2", \
+     "--workers", "1", \
      "--no-access-log"]
