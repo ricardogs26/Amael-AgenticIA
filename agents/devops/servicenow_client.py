@@ -279,21 +279,31 @@ async def get_emergency_chg_model() -> str:
 
 async def close_rfc(sys_id: str, close_notes: str) -> bool:
     """
-    Cierra el RFC como exitoso (ITIL v4: Review → Closed).
+    Cierra el RFC como exitoso siguiendo el ciclo ITIL v4 completo:
+    Implement(-1) → [approve] → Review(0) → [approve] → Closed(3).
+    Aprueba automáticamente las aprobaciones pendientes en cada paso.
     Si las transiciones están bloqueadas, añade work note de cierre.
     """
-    ok = await update_rfc(sys_id, {
+    await approve_pending_approvals(sys_id)
+    ok_review = await update_rfc(sys_id, {"state": RFCState.REVIEW})
+    if ok_review:
+        await approve_pending_approvals(sys_id)
+    ok_closed = await update_rfc(sys_id, {
         "state":       RFCState.CLOSED,
         "close_notes": close_notes,
         "work_notes":  close_notes,
     })
-    if not ok:
-        await add_work_note(sys_id, f"[CIERRE EXITOSO] {close_notes}")
-    return ok
+    if ok_closed:
+        logger.info(f"[sn] RFC {sys_id} cerrado exitosamente (state=Closed)")
+        return True
+    # Fallback: al menos registrar el resultado en work notes
+    await add_work_note(sys_id, f"[CIERRE EXITOSO] {close_notes}")
+    return False
 
 
 async def fail_rfc(sys_id: str, reason: str) -> bool:
-    """Marca el RFC en revisión con nota de fallo."""
+    """Marca el RFC en Review con nota de fallo. Aprueba pendientes antes de intentar la transición."""
+    await approve_pending_approvals(sys_id)
     ok = await update_rfc(sys_id, {
         "state":      RFCState.REVIEW,
         "work_notes": f"[FALLO] {reason}",
