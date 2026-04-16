@@ -15,4 +15,4 @@ resources:
 - 12-conversation-pruning-cronjob.yaml
 images:
 - name: registry.richardx.dev/amael-agentic-backend
-  newTag: "1.10.91"
+  newTag: "1.10.92"
