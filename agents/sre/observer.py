@@ -412,6 +412,9 @@ def observe_trends(prometheus_url: str) -> list[Anomaly]:
 
     if anomalies:
         logger.info(f"[observer] observe_trends: {len(anomalies)} tendencias anómalas.")
+        from observability.metrics import SRE_TREND_ANOMALIES_TOTAL
+        for a in anomalies:
+            SRE_TREND_ANOMALIES_TOTAL.labels(issue_type=a.issue_type).inc()
     return anomalies
 
 
