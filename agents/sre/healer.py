@@ -332,6 +332,10 @@ def _run_verification_job(
     )
     healthy = _is_deployment_healthy(deployment_name, namespace)
 
+    # Registrar resultado de verificación en Prometheus
+    from observability.metrics import SRE_VERIFICATION_TOTAL
+    SRE_VERIFICATION_TOTAL.labels(result="healthy" if healthy else "unhealthy").inc()
+
     # Intentar leer RFC de ServiceNow desde Redis (creado por Camael en gitops_fix)
     rfc_info = _get_rfc_from_redis(incident_key)
 
