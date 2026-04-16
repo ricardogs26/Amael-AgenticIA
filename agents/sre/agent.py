@@ -267,6 +267,8 @@ def _build_tools() -> list:
     from agents.sre import healer, reporter, scheduler
 
     # Importaciones lazy para los tools del agente conversacional
+    _MONITORED_NAMESPACES = ["amael-ia", "vault", "observability", "kong"]
+
     def _get_pods(ns: str = "") -> str:
         try:
             from kubernetes import client as k8s
@@ -276,17 +278,29 @@ def _build_tools() -> list:
             except Exception:
                 k8s_config.load_kube_config()
             v1 = k8s.CoreV1Api()
-            namespace = ns.strip() or os.environ.get("DEFAULT_NAMESPACE", "amael-ia")
-            pods = v1.list_namespaced_pod(namespace=namespace)
+            ns = ns.strip()
+            # Sin namespace específico → revisar todos los monitoreados
+            namespaces_to_check = (
+                [ns] if ns and ns != "default"
+                else _SREAgent._MONITORED_NAMESPACES
+            )
             lines = []
-            for p in pods.items:
-                phase = p.status.phase or "Unknown"
-                restarts = sum(
-                    cs.restart_count
-                    for cs in (p.status.container_statuses or [])
-                )
-                lines.append(f"{p.metadata.name}: {phase}, restarts={restarts}")
-            return "\n".join(lines) or "No pods encontrados."
+            for namespace in namespaces_to_check:
+                try:
+                    pods = v1.list_namespaced_pod(namespace=namespace)
+                    if pods.items:
+                        lines.append(f"\n📦 **{namespace}**")
+                        for p in pods.items:
+                            phase = p.status.phase or "Unknown"
+                            restarts = sum(
+                                cs.restart_count
+                                for cs in (p.status.container_statuses or [])
+                            )
+                            icon = "✅" if phase == "Running" and restarts < 5 else ("⚠️" if restarts >= 5 else "❌")
+                            lines.append(f"  {icon} {p.metadata.name}: {phase}, restarts={restarts}")
+                except Exception:
+                    lines.append(f"\n⚠️ {namespace}: no accesible")
+            return "\n".join(lines) or "No pods encontrados en ningún namespace monitoreado."
         except Exception as exc:
             return f"Error listando pods: {exc}"
 

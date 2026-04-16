@@ -241,6 +241,15 @@ class AgentDispatcher:
             )
             task = {"query": question, "user_email": user_id}
 
+        elif intent == "devops":
+            ctx = ContextFactory.build_context(
+                user_id=user_id,
+                request_id=request_id,
+                conversation_id=conversation_id,
+                metadata=extra_metadata,
+            )
+            task = {"query": question, "user_id": user_id}
+
         else:
             ctx = ContextFactory.build_context(
                 user_id=user_id,

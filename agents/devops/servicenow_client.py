@@ -40,26 +40,26 @@ def is_configured() -> bool:
 # ── Estados RFC ITIL v4 ───────────────────────────────────────────────────────
 
 class RFCState:
-    DRAFT      = "-5"
-    NEW        = "1"
-    ASSESS     = "2"
-    AUTHORIZE  = "3"
-    SCHEDULED  = "4"
-    IMPLEMENT  = "5"
-    REVIEW     = "6"
-    CLOSED     = "7"
-    CANCELLED  = "8"
+    # Valores reales de esta instancia ServiceNow (dev373108)
+    # Verificados con: GET /api/now/table/sys_choice?name=change_request&element=state
+    NEW        = "-5"
+    ASSESS     = "-4"
+    AUTHORIZE  = "-3"
+    SCHEDULED  = "-2"
+    IMPLEMENT  = "-1"
+    REVIEW     = "0"
+    CLOSED     = "3"
+    CANCELLED  = "4"
 
     LABELS = {
-        "-5": "Draft",
-        "1":  "New",
-        "2":  "Assess",
-        "3":  "Authorize",
-        "4":  "Scheduled",
-        "5":  "Implement",
-        "6":  "Review",
-        "7":  "Closed",
-        "8":  "Cancelled",
+        "-5": "New",
+        "-4": "Assess",
+        "-3": "Authorize",
+        "-2": "Scheduled",
+        "-1": "Implement",
+        "0":  "Review",
+        "3":  "Closed",
+        "4":  "Cancelled",
     }
 
     @classmethod
@@ -162,35 +162,43 @@ async def add_work_note(sys_id: str, note: str) -> bool:
 
 async def advance_rfc_to_assess(sys_id: str) -> None:
     """
-    Avanza el RFC desde Draft (-5) → Assess (2).
-    Emergency Change Model: New(1) y Authorize(3) están bloqueados por Business Rule.
+    Avanza el RFC desde New (-5) → Authorize (-3).
+    En esta instancia: la única transición permitida desde New es Authorize.
     """
-    await update_rfc(sys_id, {"state": RFCState.ASSESS})
+    # Intentar Authorize (-3) — única transición permitida desde New en esta instancia
+    ok = await update_rfc(sys_id, {"state": RFCState.AUTHORIZE})
+    if not ok:
+        # Fallback: solo añadir work note sin cambio de estado
+        await add_work_note(sys_id, "RFC en revisión — pendiente aprobación del operador (ECAB).")
 
 
 async def advance_rfc_to_implement(sys_id: str, work_note: str = "") -> None:
     """
-    Avanza el RFC: Assess → Scheduled → Implement.
-    Llamar cuando el operador aprueba el PR.
-    Emergency Change Model: Authorize(3) bloqueado por Business Rule — saltar a Scheduled(4).
+    Avanza el RFC hacia Implement: intenta Scheduled(-2) → Implement(-1).
+    Si las transiciones están bloqueadas (Business Rule), añade work note de progreso.
     """
-    await update_rfc(sys_id, {"state": RFCState.SCHEDULED})
-    payload: dict = {"state": RFCState.IMPLEMENT}
-    if work_note:
-        payload["work_notes"] = work_note
-    await update_rfc(sys_id, payload)
+    note = work_note or "PR aprobado y mergeado. Cambio en implementación."
+    # Intentar avanzar estado
+    ok_sched = await update_rfc(sys_id, {"state": RFCState.SCHEDULED})
+    ok_impl  = await update_rfc(sys_id, {"state": RFCState.IMPLEMENT, "work_notes": note})
+    if not ok_sched and not ok_impl:
+        # Si ambas transiciones están bloqueadas, al menos registrar el progreso
+        await add_work_note(sys_id, note)
 
 
 async def advance_rfc_to_closed(sys_id: str, close_notes: str) -> None:
     """
-    Cierra el RFC tras verificación exitosa: Implement → Review → Closed.
+    Cierra el RFC tras verificación exitosa: Review (0) → Closed (3).
+    Si las transiciones están bloqueadas, añade work note de cierre.
     """
-    await update_rfc(sys_id, {"state": RFCState.REVIEW})
-    await update_rfc(sys_id, {
+    ok_review = await update_rfc(sys_id, {"state": RFCState.REVIEW})
+    ok_closed = await update_rfc(sys_id, {
         "state":       RFCState.CLOSED,
         "close_notes": close_notes,
         "work_notes":  close_notes,
     })
+    if not ok_review and not ok_closed:
+        await add_work_note(sys_id, f"[CIERRE] {close_notes}")
 
 
 async def get_emergency_chg_model() -> str:
@@ -217,20 +225,29 @@ async def get_emergency_chg_model() -> str:
 
 
 async def close_rfc(sys_id: str, close_notes: str) -> bool:
-    """Cierra el RFC como exitoso (ITIL v4: Review → Closed)."""
-    return await update_rfc(sys_id, {
+    """
+    Cierra el RFC como exitoso (ITIL v4: Review → Closed).
+    Si las transiciones están bloqueadas, añade work note de cierre.
+    """
+    ok = await update_rfc(sys_id, {
         "state":       RFCState.CLOSED,
         "close_notes": close_notes,
         "work_notes":  close_notes,
     })
+    if not ok:
+        await add_work_note(sys_id, f"[CIERRE EXITOSO] {close_notes}")
+    return ok
 
 
 async def fail_rfc(sys_id: str, reason: str) -> bool:
     """Marca el RFC en revisión con nota de fallo."""
-    return await update_rfc(sys_id, {
+    ok = await update_rfc(sys_id, {
         "state":      RFCState.REVIEW,
         "work_notes": f"[FALLO] {reason}",
     })
+    if not ok:
+        await add_work_note(sys_id, f"[FALLO] {reason}")
+    return ok
 
 
 # ── Helper interno ────────────────────────────────────────────────────────────

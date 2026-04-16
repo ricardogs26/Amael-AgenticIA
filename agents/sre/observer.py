@@ -301,7 +301,7 @@ def observe_metrics(prometheus_url: str) -> list[Anomaly]:
                 pod = labels.get("pod", "unknown")
                 anomalies.append(Anomaly(
                     issue_type=AnomalyType.HIGH_MEMORY,
-                    severity=Severity.HIGH if ratio > 0.95 else Severity.MEDIUM,
+                    severity=Severity.HIGH if ratio > 0.85 else Severity.MEDIUM,
                     namespace=ns,
                     resource_name=pod,
                     resource_type="Pod",

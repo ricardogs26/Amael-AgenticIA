@@ -347,6 +347,11 @@ def sre_autonomous_loop(
             return
 
         # ── DIAGNOSE + DECIDE + ACT ───────────────────────────────────────────
+        # Dedup a nivel de loop: solo un handoff GitOps por deployment por ejecución.
+        # Previene múltiples PRs cuando el mismo pod genera varias anomalías en el
+        # mismo ciclo (p.ej. OOM_KILLED + DEPLOYMENT_DEGRADED simultáneos).
+        _gitops_dispatched_this_run: set[str] = set()
+
         for anomaly in anomalies:
             if is_duplicate_incident(anomaly.incident_key):
                 logger.debug(f"[scheduler] Incidente duplicado: {anomaly.incident_key}")
@@ -370,9 +375,14 @@ def sre_autonomous_loop(
                 anomaly, action_type, reporter.notify_whatsapp_sre
             )
             if action_type == "ROLLOUT_RESTART":
-                healer.record_restart(
-                    anomaly.owner_name or anomaly.resource_name, anomaly.namespace
-                )
+                _restart_target = anomaly.owner_name or anomaly.resource_name
+                # Normalize pod name → deployment name so _check_restart_limit matches
+                from agents.sre.bug_library import APP_MANIFEST_MAP
+                for _map_key in APP_MANIFEST_MAP:
+                    if _restart_target != _map_key and _restart_target.startswith(_map_key + "-"):
+                        _restart_target = _map_key
+                        break
+                healer.record_restart(_restart_target, anomaly.namespace)
 
             # Report
             mark_incident(anomaly.incident_key)
@@ -394,12 +404,33 @@ def sre_autonomous_loop(
             # Schedule verification post-acción (solo ROLLOUT_RESTART)
             if action_type == "ROLLOUT_RESTART" and "✅" in action_result:
                 diagnoser.maybe_save_runbook_entry(anomaly, root_cause, action_type)
-                # GitOps handoff → Camael crea PR + RFC + notifica ECAB (daemon thread)
-                healer.handoff_to_camael(anomaly, anomaly.incident_key, reporter.notify_whatsapp_sre)
-                # Verificación post-acción en 5min → cierra RFC si deployment sano (P3-A)
+
+                # Normalizar nombre de deployment (strip pod hash suffix via APP_MANIFEST_MAP)
+                raw_deploy = anomaly.owner_name or anomaly.resource_name
+                from agents.sre.bug_library import APP_MANIFEST_MAP
+                _deploy_normalized = raw_deploy
+                for _key in APP_MANIFEST_MAP:
+                    if raw_deploy == _key or raw_deploy.startswith(_key + "-"):
+                        _deploy_normalized = _key
+                        break
+
+                # GitOps handoff — solo UNO por deployment por ciclo (loop-level dedup)
+                _deploy_loop_key = f"{anomaly.namespace}:{_deploy_normalized}"
+                if _deploy_loop_key not in _gitops_dispatched_this_run:
+                    healer.handoff_to_camael(anomaly, anomaly.incident_key, reporter.notify_whatsapp_sre)
+                    _gitops_dispatched_this_run.add(_deploy_loop_key)
+                else:
+                    logger.info(
+                        f"[scheduler] GitOps handoff omitido (loop-dedup): "
+                        f"{_deploy_loop_key} ya tiene handoff en este ciclo "
+                        f"({anomaly.issue_type})"
+                    )
+
+                # Verificación post-acción — usar nombre normalizado para que
+                # _has_pending_gitops_pr encuentre la clave Redis correcta
                 healer.schedule_verification(
                     incident_key=anomaly.incident_key,
-                    deployment_name=anomaly.owner_name or anomaly.resource_name,
+                    deployment_name=_deploy_normalized,
                     namespace=anomaly.namespace,
                     update_incident_fn=reporter.update_incident_verification,
                     notify_fn=reporter.notify_whatsapp_sre,

@@ -659,7 +659,7 @@ async def _handle_bb_commit_status(payload: dict) -> dict:
 
 
 async def _handle_bb_pr_fulfilled(payload: dict) -> dict:
-    """PR mergeado → WhatsApp notify: pipeline arrancando."""
+    """PR mergeado → WhatsApp notify + advance RFC to Implement."""
     pr     = payload.get("pullrequest", {})
     pr_id  = pr.get("id", "?")
     title  = pr.get("title", "sin título")
@@ -674,6 +674,30 @@ async def _handle_bb_pr_fulfilled(payload: dict) -> dict:
     )
     logger.info(f"[devops/bb-webhook] PR #{pr_id} mergeado — notificando")
     await _notify_whatsapp(msg)
+
+    # Advance RFC to Implement for the matching pending PR
+    try:
+        from storage.redis import get_client as _redis_client
+        import json as _json
+        _redis = _redis_client()
+        for _key in (_redis.keys("bb:pending_pr:*") or []):
+            _raw = _redis.get(_key)
+            if not _raw:
+                continue
+            _pr_info = _json.loads(_raw)
+            if str(_pr_info.get("pr_id", "")) == str(pr_id):
+                _rfc_sys_id = _pr_info.get("rfc_sys_id", "")
+                if _rfc_sys_id:
+                    import agents.devops.servicenow_client as _sn
+                    await _sn.advance_rfc_to_implement(
+                        _rfc_sys_id,
+                        f"PR #{pr_id} mergeado a main en `{repo}`. ArgoCD sincronizando cambios.",
+                    )
+                    logger.info(f"[devops/bb-webhook] RFC {_pr_info.get('rfc_number')} avanzado a Implement (PR #{pr_id})")
+                break
+    except Exception as _exc:
+        logger.warning(f"[devops/bb-webhook] No se pudo avanzar RFC tras merge PR #{pr_id}: {_exc}")
+
     return {"status": "notified", "event": "pullrequest:fulfilled", "pr": pr_id}
 
 

@@ -8,6 +8,34 @@
 # Sólo se crean los Bindings para el nuevo SA.
 # Si se despliega en un clúster limpio, descomentar los ClusterRole/Role.
 
+# ── ClusterRole: ArgoCD Application reader ────────────────────────────────────
+# Permite a amael-agentic-sa leer ArgoCD Applications para el discovery dinámico
+# de manifests (argocd_discovery.py — reemplaza APP_MANIFEST_MAP estático).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argocd-application-reader
+rules:
+- apiGroups: ["argoproj.io"]
+  resources: ["applications"]
+  verbs: ["get", "list", "watch"]
+
+---
+# ── ClusterRoleBinding: ArgoCD Application reader ────────────────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: amael-agentic-argocd-reader-binding
+subjects:
+- kind: ServiceAccount
+  name: amael-agentic-sa
+  namespace: amael-ia
+roleRef:
+  kind: ClusterRole
+  name: argocd-application-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
 # ── ClusterRoleBinding: observer (lectura global) ─────────────────────────────
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

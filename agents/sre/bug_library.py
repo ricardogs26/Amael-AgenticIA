@@ -456,12 +456,21 @@ def get_fix(issue_type: str, resource_name: str = "") -> BugFix | None:
     """
     Retorna un BugFix completo para (issue_type, resource_name), o None si no hay fix.
 
-    Combina:
-      - BUG_LIBRARY[issue_type]  → qué parche aplicar (genérico)
-      - APP_MANIFEST_MAP[resource_name] → en qué repo y archivo (específico por app)
+    Prioridad de resolución del manifest:
+      1. ArgoCD discovery (fuente de verdad dinámica — lee CRDs argoproj.io)
+         - Si el repo es GitHub → retorna None (Camael solo soporta Bitbucket; el
+           caller debe escalar a NOTIFY_HUMAN)
+         - Si el repo es Bitbucket → usa repo+path descubierto
+      2. APP_MANIFEST_MAP estático (fallback para entradas conocidas sin ArgoCD)
+      3. _DEFAULT_APP (último recurso — loggea advertencia)
 
-    Si resource_name no está en APP_MANIFEST_MAP se usa _DEFAULT_APP como fallback
-    y se logea una advertencia para que el operador añada la entrada.
+    Args:
+        issue_type:    Tipo de anomalía (e.g. "OOM_KILLED", "CRASH_LOOP").
+        resource_name: Nombre del deployment/pod reportado por K8s.
+
+    Returns:
+        BugFix con repo+file_path resueltos, o None si no hay template o el repo
+        es GitHub (no soportado por Camael).
     """
     import logging
     _log = logging.getLogger("agents.sre.bug_library")
@@ -470,21 +479,55 @@ def get_fix(issue_type: str, resource_name: str = "") -> BugFix | None:
     if not template:
         return None
 
-    # Buscar manifest: primero por nombre exacto, luego por prefijo (sufijos hash de pod)
+    manifest: AppManifest | None = None
+
+    # ── 1. APP_MANIFEST_MAP estático (fuente de verdad para recursos conocidos) ──
+    # Tiene prioridad sobre ArgoCD porque contiene file_path exacto.
+    # ArgoCD solo conoce el directorio (e.g. "k8s/agents"), no el archivo específico.
     manifest = APP_MANIFEST_MAP.get(resource_name)
     if manifest is None and resource_name:
-        # Fuzzy: pod name puede incluir sufijo hash (e.g. "k8s-agent-7d9fab12-xk2vp")
-        # Ordenar claves por longitud descendente para preferir el match más específico
         for key in sorted(APP_MANIFEST_MAP, key=len, reverse=True):
             if resource_name.startswith(key):
                 manifest = APP_MANIFEST_MAP[key]
                 break
+    if manifest is not None:
+        _log.debug(
+            f"[bug_library] APP_MANIFEST_MAP: '{resource_name}' → "
+            f"{manifest.repo}/{manifest.file_path}"
+        )
 
+    # ── 2. ArgoCD discovery (solo para recursos NO conocidos en APP_MANIFEST_MAP) ─
+    # ArgoCD retorna el directorio del repo, no el archivo específico.
+    # Solo se usa como fallback cuando el recurso no está en APP_MANIFEST_MAP.
+    if manifest is None:
+        try:
+            from agents.sre.argocd_discovery import discover_manifest
+            discovered = discover_manifest(resource_name)
+            if discovered is not None:
+                if not discovered.is_bitbucket:
+                    # GitHub u otro SCM no soportado — Camael no puede crear el PR
+                    _log.info(
+                        f"[bug_library] '{resource_name}' está en repo GitHub "
+                        f"({discovered.repo_url}) — Camael no soporta GitHub. "
+                        f"Retornando None para escalar a NOTIFY_HUMAN."
+                    )
+                    return None
+                manifest = AppManifest(
+                    repo=discovered.bb_repo_name,
+                    file_path=discovered.path,  # directorio; Camael hará discovery del archivo
+                )
+                _log.debug(
+                    f"[bug_library] ArgoCD: '{resource_name}' → "
+                    f"bb={discovered.bb_repo_name}, path={discovered.path}"
+                )
+        except Exception as exc:
+            _log.debug(f"[bug_library] ArgoCD discovery falló (no crítico): {exc}")
+
+    # ── 3. Fallback default ──────────────────────────────────────────────────
     if manifest is None:
         _log.warning(
-            f"[bug_library] resource_name='{resource_name}' no está en APP_MANIFEST_MAP "
-            f"— usando default ({_DEFAULT_APP.repo}/{_DEFAULT_APP.file_path}). "
-            f"Considera agregar una entrada a APP_MANIFEST_MAP."
+            f"[bug_library] '{resource_name}' no encontrado en ArgoCD ni en "
+            f"APP_MANIFEST_MAP — usando default ({_DEFAULT_APP.repo}/{_DEFAULT_APP.file_path})."
         )
         manifest = _DEFAULT_APP
 

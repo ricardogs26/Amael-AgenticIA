@@ -277,7 +277,8 @@ class HistoryMessage(BaseModel):
 class ChatStreamRequest(BaseModel):
     prompt:          str                  = Field(..., min_length=1, max_length=4000)
     history:         list[HistoryMessage] = Field(default_factory=list)
-    conversation_id: str | None        = None
+    conversation_id: str | None          = None
+    agent:           str | None          = None  # "amael" | "raphael" | "camael"
 
 
 def _sse(type_: str, **kwargs) -> str:
@@ -318,15 +319,33 @@ async def chat_stream(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
     question = result
 
+    # Mapa agente_id → (intent, agents, label)
+    _FORCED_AGENTS: dict[str, tuple[str, list[str], str]] = {
+        "raphael": ("sre",    ["raphael"], "Raphael (SRE)"),
+        "camael":  ("devops", ["camael"],  "Camael (DevOps)"),
+    }
+
     async def generate():
         try:
-            yield _sse("status", msg="Analizando tu pregunta…")
+            from orchestration import AgentRouter, RoutingDecision, dispatch
 
-            from orchestration import AgentRouter, dispatch
+            tools_map = _build_tools_map(user_id)
 
-            router_inst = AgentRouter()
-            decision    = await router_inst.route(question)
-            tools_map   = _build_tools_map(user_id)
+            # Si se especificó un agente concreto, forzar routing sin pasar por el LLM
+            forced = _FORCED_AGENTS.get(body.agent or "")
+            if forced:
+                intent, agents, label = forced
+                decision = RoutingDecision(
+                    intent=intent,
+                    agents=agents,
+                    confidence=1.0,
+                    routing_reason=f"direct_agent_selection:{body.agent}",
+                )
+                yield _sse("status", msg=f"Conectando con {label}…")
+            else:
+                yield _sse("status", msg="Analizando tu pregunta…")
+                router_inst = AgentRouter()
+                decision    = await router_inst.route(question)
 
             yield _sse("status", msg="Procesando respuesta…")
 
