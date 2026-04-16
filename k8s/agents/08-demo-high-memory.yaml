@@ -39,7 +39,7 @@ spec:
         - "--vm"
         - "1"
         - "--vm-bytes"
-        - "90M"     # 90M de 100Mi → 90% uso → sobre umbral 85% → HIGH_MEMORY alert
+        - "90M"     # 90M de 100Mi → ~90.5% uso → severity HIGH (>85%) → auto-heal
         - "--vm-hang"  # mantener la memoria alocada (sin liberar)
         - "0"
         resources:

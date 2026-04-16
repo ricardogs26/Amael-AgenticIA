@@ -76,7 +76,7 @@ async def invoke_llm(prompt: str, context: Any, agent_name: str = "agent") -> st
     # Fallback: OllamaLLM del contexto
     if context.llm is not None:
         result = await asyncio.to_thread(context.llm.invoke, prompt)
-        return str(result)
+        return result.content if hasattr(result, "content") else str(result)
 
     raise RuntimeError(f"[{agent_name}] No hay LLM disponible en el contexto")
 

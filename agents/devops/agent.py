@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Any
 
@@ -97,6 +98,11 @@ class CamaelAgent(BaseAgent):
         "rag_retrieval",
     ]
 
+    # Palabras clave para autodetectar intent desde modo conversacional
+    _PIPELINE_KW  = re.compile(r"\b(pipeline|build|ci|pipelines|construcci[oó]n)\b", re.I)
+    _K8S_KW       = re.compile(r"\b(pod|deploy|deployments?|namespace|kubectl|cluster|estado\s+del?\s+cluster)\b", re.I)
+    _PR_KW        = re.compile(r"\b(pr|pull.?request|merge|aprobar|rechazar|pendiente)\b", re.I)
+
     async def execute(self, task: dict[str, Any]) -> AgentResult:
         task_type = task.get("task", "").lower()
         if task_type == "k8s_status":
@@ -115,6 +121,14 @@ class CamaelAgent(BaseAgent):
             return await self._gitops_fix(task)
         if task_type == "gitops_approve":
             return await self._gitops_approve(task)
+
+        # Sin task_type explícito → autodetectar intent desde la query
+        query = task.get("query", "")
+        if self._PIPELINE_KW.search(query):
+            return await self._pipeline_list(task)
+        if self._K8S_KW.search(query):
+            return await self._k8s_status({**task, "namespace": "amael-ia"})
+
         return await self._conversacional(task)
 
     # ── Conversacional ────────────────────────────────────────────────────────
@@ -253,16 +267,26 @@ class CamaelAgent(BaseAgent):
         repo      = task.get("repo", _BB_DEFAULT_REPO)
         try:
             pipelines = await list_pipelines(workspace, repo, limit=5)
-            lines = ["Pipelines recientes:\n"]
-            for p in pipelines:
-                status_icon = "✅" if p["result"] == "SUCCESSFUL" else (
-                    "❌" if p["result"] == "FAILED" else "🔄"
+            if not pipelines:
+                response = (
+                    f"ℹ️ No hay pipelines recientes en `{workspace}/{repo}`.\n\n"
+                    "Posibles causas:\n"
+                    "• Bitbucket Pipelines no está habilitado en este repo\n"
+                    "• El repo solo contiene manifests K8s (GitOps via ArgoCD)\n"
+                    "• El build/push de imágenes se realiza localmente\n\n"
+                    "Para ver el estado del despliegue usa: **estado de deployments**"
                 )
-                lines.append(
-                    f"{status_icon} #{p['build_number']} | {p['branch']} | "
-                    f"{p['status']} {p['result']} | {p['created_on'][:16]}"
-                )
-            response = "\n".join(lines)
+            else:
+                lines = ["*Pipelines recientes:*\n"]
+                for p in pipelines:
+                    status_icon = "✅" if p["result"] == "SUCCESSFUL" else (
+                        "❌" if p["result"] == "FAILED" else "🔄"
+                    )
+                    lines.append(
+                        f"{status_icon} #{p['build_number']} | {p['branch']} | "
+                        f"{p['status']} {p['result']} | {p['created_on'][:16]}"
+                    )
+                response = "\n".join(lines)
             return AgentResult(
                 success=True,
                 output={"response": response, "pipelines": pipelines,
@@ -536,7 +560,17 @@ class CamaelAgent(BaseAgent):
             from agents.devops import servicenow_client as sn
             from agents.devops.rfc_templates import build_emergency_rfc
             rfc_info = {"sys_id": "", "number": "N/A", "url": ""}
-            if sn.is_configured():
+            # Dedup: si ya existe un RFC para este incidente en Redis, reutilizarlo
+            try:
+                import json as _json_dedup
+                from storage.redis.client import get_client as _redis_dedup
+                _existing_rfc = _redis_dedup().get(f"sn:rfc:{incident_key}")
+                if _existing_rfc:
+                    rfc_info = _json_dedup.loads(_existing_rfc)
+                    logger.info(f"[camael] RFC existente reutilizado: {rfc_info.get('number')} (dedup)")
+            except Exception:
+                pass
+            if sn.is_configured() and not rfc_info["sys_id"]:
                 try:
                     rfc_payload = build_emergency_rfc(
                         issue_type   = issue_type,
@@ -686,8 +720,8 @@ class CamaelAgent(BaseAgent):
                     pr_id=0,
                     confidence=task.get("confidence", 0.0),
                     detected_at=task.get("detected_at", ""),
-                    chg_model=emergency_model,
                 )
+                _ = emergency_model  # fetched above, kept for potential future use
                 rfc_info = await sn.create_rfc(rfc_payload)
                 if rfc_info["sys_id"]:
                     await sn.add_work_note(
@@ -802,19 +836,19 @@ class CamaelAgent(BaseAgent):
 
             merge_hash = (merge_result.get("merge_commit") or {}).get("hash", "")[:8]
 
-            # Actualizar RFC → estado Implement
+            # Actualizar RFC → Scheduled → Implement (seguir Business Rules del Emergency Model)
             if rfc_sys_id:
                 try:
                     from agents.devops import servicenow_client as sn
-                    await sn.update_rfc(rfc_sys_id, {
-                        "state":      sn.RFCState.IMPLEMENT,
-                        "work_notes": (
+                    await sn.advance_rfc_to_implement(
+                        rfc_sys_id,
+                        work_note=(
                             f"PR #{pr_id} aprobado y mergeado a main por el operador.\n"
                             f"Commit: {merge_hash}\n"
                             f"ArgoCD sincronizando cambios al cluster..."
                         ),
-                    })
-                    logger.info(f"[camael] RFC {rfc_number} → Implement en ServiceNow")
+                    )
+                    logger.info(f"[camael] RFC {rfc_number} → Scheduled → Implement en ServiceNow")
                 except Exception as exc_sn:
                     logger.warning(f"[camael] SN update RFC falló: {exc_sn}")
 

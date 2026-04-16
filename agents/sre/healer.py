@@ -290,6 +290,25 @@ def _is_deployment_healthy(deployment_name: str, namespace: str) -> bool:
         return False
 
 
+def _has_pending_gitops_pr(incident_key: str, deployment_name: str, namespace: str) -> bool:
+    """
+    Retorna True si Camael tiene un PR pendiente de aprobación/merge para este incidente.
+    En ese caso, la verificación NO debe hacer rollback — debe esperar al GitOps fix.
+    """
+    try:
+        from storage.redis.client import get_redis_client
+        r = get_redis_client()
+        # Clave exacta por incidente (bb:pending_pr:<incident_key>)
+        if r.exists(f"bb:pending_pr:{incident_key}"):
+            return True
+        # Clave por deployment (sre:gitops:<ns>:<deploy>) — TTL 2h, set al inicio del handoff
+        if r.exists(f"sre:gitops:{namespace}:{deployment_name}"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _run_verification_job(
     incident_key: str,
     deployment_name: str,
@@ -299,9 +318,13 @@ def _run_verification_job(
     generate_postmortem_fn,
 ) -> None:
     """
-    Job de verificación post-acción ejecutado 5 minutos después del ROLLOUT_RESTART (P3-A).
+    Job de verificación post-acción ejecutado N minutos después del ROLLOUT_RESTART (P3-A).
     Si el deployment sigue unhealthy + fue recientemente desplegado → auto-rollback (P5-B).
     Si healthy → genera postmortem (P5-D).
+
+    IMPORTANTE: si Camael tiene un PR pendiente para este incidente, NO se hace rollback.
+    El PR pendiente indica que el fix GitOps está en camino (esperando merge + ArgoCD sync).
+    En ese caso se reprograma la verificación para darle tiempo al flujo GitOps.
     """
     logger.info(
         f"[healer] Verificando {namespace}/{deployment_name} "
@@ -325,6 +348,32 @@ def _run_verification_job(
                 args=(incident_key,),
                 daemon=True,
             ).start()
+    elif _has_pending_gitops_pr(incident_key, deployment_name, namespace):
+        # Camael tiene un PR pendiente → el fix GitOps está en camino.
+        # No hacer rollback: esperamos a que el humano apruebe + ArgoCD sincronice.
+        logger.info(
+            f"[healer] {deployment_name} unhealthy pero hay PR GitOps pendiente — "
+            f"re-schedulando verificación en {_VERIFICATION_DELAY_S}s"
+        )
+        update_incident_fn(incident_key, "verify:waiting_gitops")
+        if notify_fn:
+            notify_fn(
+                f"⏳ *Verificación pendiente* — `{namespace}/{deployment_name}` sigue "
+                f"unhealthy pero hay un PR de Camael pendiente de aprobación.\n"
+                f"Aprueba el PR para completar el fix. Próxima verificación en "
+                f"{_VERIFICATION_DELAY_S // 60} min.",
+                "MEDIUM",
+            )
+        # Re-schedule (una sola vez — si en el siguiente ciclo sigue sin PR, sí hace rollback)
+        schedule_verification(
+            incident_key=incident_key,
+            deployment_name=deployment_name,
+            namespace=namespace,
+            update_incident_fn=update_incident_fn,
+            notify_fn=notify_fn,
+            generate_postmortem_fn=generate_postmortem_fn,
+            delay_seconds=_VERIFICATION_DELAY_S,
+        )
     elif _was_recently_deployed(deployment_name, namespace):
         logger.warning(
             f"[healer] {deployment_name} sigue unhealthy + recién desplegado → auto-rollback"
@@ -450,6 +499,14 @@ def execute_sre_action(
         target = anomaly.owner_name or anomaly.resource_name
         namespace = anomaly.namespace
 
+        # Normalize pod name → deployment name (metric anomalies set resource_name=pod)
+        from agents.sre.bug_library import APP_MANIFEST_MAP
+        for _map_key in APP_MANIFEST_MAP:
+            if target != _map_key and target.startswith(_map_key + "-"):
+                logger.debug(f"[healer] Pod→deployment: {target!r} → {_map_key!r}")
+                target = _map_key
+                break
+
         from agents.sre.healer import _check_restart_limit
         if _check_restart_limit(target, namespace):
             from observability.metrics import SRE_RESTART_LIMIT_HIT
@@ -502,6 +559,10 @@ def record_restart(resource_name: str, namespace: str) -> None:
 
 # ── GitOps Handoff — Raphael → Camael ────────────────────────────────────────
 
+# Fallback en memoria para dedup cuando Redis no está disponible.
+# Se limpia al reiniciar el proceso (TTL implícito = vida del pod).
+_IN_MEMORY_GITOPS_LOCK: set[str] = set()
+
 #: Tipos de anomalía que tienen fix automático via GitOps (debe coincidir con BUG_LIBRARY).
 _GITOPS_FIXABLE = {
     "OOM_KILLED", "CRASH_LOOP", "DEPLOYMENT_DEGRADED",
@@ -541,6 +602,28 @@ def handoff_to_camael(
     resource_name = anomaly.owner_name or anomaly.resource_name or ""
     fix = get_fix(anomaly.issue_type, resource_name)
     if not fix:
+        # get_fix retorna None cuando el repo es GitHub (no soportado por Camael).
+        # Notificar al usuario para intervención manual en el repo correcto.
+        try:
+            from agents.sre.argocd_discovery import discover_manifest
+            discovered = discover_manifest(resource_name)
+            if discovered and not discovered.is_bitbucket:
+                msg = (
+                    f"⚠️ *GitOps manual requerido*\n\n"
+                    f"Raphael aplicó ROLLOUT_RESTART en `{resource_name}` "
+                    f"({anomaly.issue_type}) pero el manifest está en GitHub:\n"
+                    f"`{discovered.repo_url}`\n"
+                    f"Path: `{discovered.path}`\n\n"
+                    f"Camael no puede crear PRs en GitHub automáticamente. "
+                    f"Por favor aplica el fix manualmente."
+                )
+                notify_fn(msg)
+                logger.info(
+                    f"[healer] GitOps skip — '{resource_name}' está en GitHub "
+                    f"({discovered.repo_url}). Usuario notificado."
+                )
+        except Exception as exc:
+            logger.debug(f"[healer] GitHub notify error (no crítico): {exc}")
         return
 
     # Dedup: un solo PR por deployment (no por issue_type) — TTL 2h.
@@ -556,15 +639,23 @@ def handoff_to_camael(
     _gitops_dedup_key = f"sre:gitops:{anomaly.namespace}:{_deploy_base}"
     try:
         _redis = get_redis_client()
-        if _redis.exists(_gitops_dedup_key):
-            logger.debug(
-                f"[healer] GitOps handoff ya en curso para {_deploy_base} — omitido "
-                f"({anomaly.issue_type})"
+        # SET NX EX — atómico: retorna None si la clave ya existe, True si fue creada.
+        # Evita la race condition entre EXISTS + SETEX cuando múltiples issue_types
+        # del mismo deployment llegan casi simultáneamente.
+        acquired = _redis.set(_gitops_dedup_key, "1", nx=True, ex=7200)
+        if not acquired:
+            logger.info(
+                f"[healer] GitOps handoff omitido (Redis dedup): "
+                f"{_deploy_base} ya tiene handoff activo ({anomaly.issue_type})"
             )
             return
-        _redis.setex(_gitops_dedup_key, 7200, "1")  # TTL 2h
-    except Exception:
-        pass  # Si Redis falla, permitir el handoff de todas formas
+    except Exception as _redis_exc:
+        # Redis no disponible: usar lock en memoria como fallback
+        logger.warning(f"[healer] Redis dedup falló ({_redis_exc}), usando lock en memoria")
+        if _gitops_dedup_key in _IN_MEMORY_GITOPS_LOCK:
+            logger.info(f"[healer] GitOps handoff omitido (memory lock): {_deploy_base}")
+            return
+        _IN_MEMORY_GITOPS_LOCK.add(_gitops_dedup_key)
 
     from observability.metrics import GITOPS_HANDOFF_TOTAL
     GITOPS_HANDOFF_TOTAL.labels(issue_type=anomaly.issue_type).inc()
