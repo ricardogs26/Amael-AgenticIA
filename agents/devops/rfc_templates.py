@@ -98,7 +98,10 @@ def build_emergency_rfc(
         "priority":          priority,
 
         # ── Asignación ─────────────────────────────────────────────────────
-        "assignment_group":  "DevOps",
+        # sys_id del grupo "InfraDigital" en dev373108.service-now.com
+        "assignment_group":  "a1690d913b5c03104d83f7c643e45a7e",
+        # assigned_to: admin (System Administrator) — responsable del cambio
+        "assigned_to":       "6816f79cc0a8016401c5a33be04be441",
 
         # ── Planes ITIL v4 ─────────────────────────────────────────────────
         "justification": (

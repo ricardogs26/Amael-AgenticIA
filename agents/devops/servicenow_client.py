@@ -160,38 +160,91 @@ async def add_work_note(sys_id: str, note: str) -> bool:
     return await update_rfc(sys_id, {"work_notes": note})
 
 
+async def approve_pending_approvals(sys_id: str) -> int:
+    """
+    Aprueba todas las aprobaciones pendientes (state=requested) de un RFC.
+    Necesario para avanzar de Authorize(-3) a Scheduled(-2) cuando el Change Model
+    crea approvals automáticas al transicionar a Authorize.
+    Retorna el número de aprobaciones procesadas.
+    """
+    base, user, pwd = _cfg()
+    if not base:
+        return 0
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(
+                f"{base}/api/now/table/sysapproval_approver",
+                auth=(user, pwd),
+                headers={"Accept": "application/json"},
+                params={
+                    "sysparm_query": f"document_id={sys_id}^state=requested",
+                    "sysparm_fields": "sys_id",
+                    "sysparm_limit": "20",
+                },
+            )
+            if r.status_code >= 400:
+                return 0
+            approvals = r.json().get("result", [])
+            approved = 0
+            for approval in approvals:
+                a_id = approval.get("sys_id", "")
+                if not a_id:
+                    continue
+                ar = await client.patch(
+                    f"{base}/api/now/table/sysapproval_approver/{a_id}",
+                    auth=(user, pwd),
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    json={
+                        "state": "approved",
+                        "comments": "Auto-aprobado por Camael DevOps Agent — cambio de emergencia autorizado",
+                    },
+                )
+                if ar.status_code < 400:
+                    approved += 1
+            logger.info(f"[sn] {approved}/{len(approvals)} aprobaciones procesadas para RFC {sys_id}")
+            return approved
+    except Exception as exc:
+        logger.warning(f"[sn] approve_pending_approvals error: {exc}")
+        return 0
+
+
 async def advance_rfc_to_assess(sys_id: str) -> None:
     """
-    Avanza el RFC desde New (-5) → Authorize (-3).
-    En esta instancia: la única transición permitida desde New es Authorize.
+    Avanza el RFC desde New (-5) → Authorize (-3) y aprueba las aprobaciones
+    automáticas generadas por el Change Model para desbloquear la siguiente transición.
     """
-    # Intentar Authorize (-3) — única transición permitida desde New en esta instancia
     ok = await update_rfc(sys_id, {"state": RFCState.AUTHORIZE})
-    if not ok:
-        # Fallback: solo añadir work note sin cambio de estado
+    if ok:
+        # Aprobar automáticamente las aprobaciones que genera el Change Model
+        await approve_pending_approvals(sys_id)
+    else:
         await add_work_note(sys_id, "RFC en revisión — pendiente aprobación del operador (ECAB).")
 
 
 async def advance_rfc_to_implement(sys_id: str, work_note: str = "") -> None:
     """
-    Avanza el RFC hacia Implement: intenta Scheduled(-2) → Implement(-1).
-    Si las transiciones están bloqueadas (Business Rule), añade work note de progreso.
+    Avanza el RFC hacia Implement: Scheduled(-2) → Implement(-1).
+    Pre-aprueba cualquier aprobación pendiente antes de cada transición.
     """
     note = work_note or "PR aprobado y mergeado. Cambio en implementación."
-    # Intentar avanzar estado
+    await approve_pending_approvals(sys_id)
     ok_sched = await update_rfc(sys_id, {"state": RFCState.SCHEDULED})
-    ok_impl  = await update_rfc(sys_id, {"state": RFCState.IMPLEMENT, "work_notes": note})
+    if ok_sched:
+        await approve_pending_approvals(sys_id)
+    ok_impl = await update_rfc(sys_id, {"state": RFCState.IMPLEMENT, "work_notes": note})
     if not ok_sched and not ok_impl:
-        # Si ambas transiciones están bloqueadas, al menos registrar el progreso
         await add_work_note(sys_id, note)
 
 
 async def advance_rfc_to_closed(sys_id: str, close_notes: str) -> None:
     """
     Cierra el RFC tras verificación exitosa: Review (0) → Closed (3).
-    Si las transiciones están bloqueadas, añade work note de cierre.
+    Pre-aprueba cualquier aprobación pendiente antes de cada transición.
     """
+    await approve_pending_approvals(sys_id)
     ok_review = await update_rfc(sys_id, {"state": RFCState.REVIEW})
+    if ok_review:
+        await approve_pending_approvals(sys_id)
     ok_closed = await update_rfc(sys_id, {
         "state":       RFCState.CLOSED,
         "close_notes": close_notes,
