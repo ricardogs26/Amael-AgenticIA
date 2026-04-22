@@ -1,0 +1,285 @@
+# raphael-service — SRE Agent autónomo (extraído del backend)
+#
+# Fase 2.3 · feature/agents-split — ver docs/PHASE0-ANALYSIS.md
+#
+# Este servicio reemplaza al `k8s-agent` legacy 5.2.0 (a retirar en Fase 5) y
+# promueve `agents/sre/` del backend `amael-agentic-backend` a un pod independiente.
+#
+# Recursos declarados en este archivo:
+#   1. ConfigMap `raphael-service-config`   — env vars no-sensibles
+#   2. Deployment `raphael-service`         — el pod del SRE agent
+#   3. Service    `raphael-service`         — ClusterIP interno (puerto 8002)
+#   4. PDB        `raphael-service-pdb`     — garantiza 1 réplica viva
+#
+# Dependencias externas (ya existen en el clúster):
+#   - ServiceAccount `raphael-sa`           (k8s/rbac/05-raphael-rbac.yaml)
+#   - NetworkPolicies con label app=raphael-service (k8s/config/03-agents-network-policies.yaml)
+#   - Secret `amael-secrets` en amael-ia    (claves: ver env: del Deployment)
+#
+# El acceso externo NO se expone — raphael-service es puramente interno; el
+# backend lo proxy-ea para el chat y el bridge de WhatsApp.
+
+# ── ConfigMap ───────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: raphael-service-config
+  namespace: amael-ia
+  labels:
+    app: raphael-service
+    tier: agents
+data:
+  # ── LLM ──────────────────────────────────────────────────────────────────
+  OLLAMA_BASE_URL: "http://ollama-service:11434"
+  LLM_MODEL: "qwen3:14b"
+  LLM_EMBED_MODEL: "nomic-embed-text"
+
+  # ── PostgreSQL ───────────────────────────────────────────────────────────
+  POSTGRES_HOST: "postgres-service"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "amael"
+  POSTGRES_USER: "amael"
+  POSTGRES_POOL_MIN: "2"
+  POSTGRES_POOL_MAX: "8"
+
+  # ── Redis ────────────────────────────────────────────────────────────────
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+
+  # ── Qdrant / MinIO ───────────────────────────────────────────────────────
+  QDRANT_URL: "http://qdrant-service:6333"
+  MINIO_ENDPOINT: "minio-service:9000"
+  MINIO_BUCKET: "amael-uploads"
+
+  # ── Vault ────────────────────────────────────────────────────────────────
+  # VAULT_ROLE se creará con la policy de Fase 1 (raphael-service-policy).
+  VAULT_ADDR: "http://vault.vault.svc.cluster.local:8200"
+  VAULT_ROLE: "raphael-service"
+
+  # ── Observabilidad ───────────────────────────────────────────────────────
+  PROMETHEUS_URL: "http://kube-prometheus-stack-prometheus.observability:9090"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.observability.svc.cluster.local:4317"
+  OTEL_SERVICE_NAME: "raphael-service"
+
+  # ── SRE loop ─────────────────────────────────────────────────────────────
+  SRE_NAMESPACE: "amael-ia"
+  SRE_LOOP_INTERVAL: "60"
+  SRE_CONFIDENCE_THRESHOLD: "0.7"
+  SRE_MAX_RESTARTS_PER_HOUR: "3"
+  SRE_CB_THRESHOLD: "5"
+  SRE_CB_RESET_SECONDS: "300"
+  # Mismo Lease que el backend inprocess: si ambos corren, solo uno gana.
+  # Durante la transición coexisten; tras Fase 5 el backend dejará de correr SRE.
+  SRE_LEASE_NAME: "sre-agent-leader"
+
+  # ── Runtime ──────────────────────────────────────────────────────────────
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  # Flag heredado del backend — irrelevante en raphael-service, pero lo
+  # mantenemos consistente por si algún módulo compartido lo consulta.
+  AGENTS_MODE: "inprocess"
+
+---
+# ── Deployment ──────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: raphael-service
+  namespace: amael-ia
+  labels:
+    app: raphael-service
+    tier: agents
+    version: "1.0.0"
+spec:
+  replicas: 1    # single-node MicroK8s; HA futuro ya está soportado vía Lease
+  selector:
+    matchLabels:
+      app: raphael-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0    # nunca bajar por debajo de 1 réplica
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: raphael-service
+        tier: agents
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8002"
+        prometheus.io/path:   "/metrics"
+    spec:
+      serviceAccountName: raphael-sa
+      # fsGroup 1000 = usuario amael (el mismo UID que usa el backend)
+      securityContext:
+        fsGroup: 1000
+      # Permitir que el lifespan drene: cierra SRE loop, PG pool, OTel flush.
+      terminationGracePeriodSeconds: 30
+
+      # Esperar a que PostgreSQL y Redis estén listos antes de arrancar.
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z postgres-service 5432; do
+                echo "Esperando PostgreSQL..."; sleep 3
+              done
+              echo "PostgreSQL listo."
+        - name: wait-for-redis
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z redis-service 6379; do
+                echo "Esperando Redis..."; sleep 3
+              done
+              echo "Redis listo."
+
+      containers:
+        - name: raphael
+          image: registry.richardx.dev/raphael-service:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8002
+
+          # ── Env vars no-sensibles ────────────────────────────────────────
+          envFrom:
+            - configMapRef:
+                name: raphael-service-config
+
+          # ── Secrets ──────────────────────────────────────────────────────
+          # Nombres reales en el cluster (verificado 2026-04-22):
+          #   amael-secrets       → POSTGRES_PASSWORD, MINIO_ACCESS_KEY, MINIO_ROOT_PASSWORD
+          #   google-auth-secret  → jwt_secret_key, session_secret_key, internal_api_secret
+          # Mismo patrón que `k8s/agents/05-backend-deployment.yaml`.
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: amael-secrets
+                  key: POSTGRES_PASSWORD
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: amael-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY     # settings.py espera MINIO_SECRET_KEY pero el Secret lo guarda como MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: amael-secrets
+                  key: MINIO_ROOT_PASSWORD
+            - name: INTERNAL_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: google-auth-secret
+                  key: internal_api_secret
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: google-auth-secret
+                  key: jwt_secret_key
+            - name: SESSION_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: google-auth-secret
+                  key: session_secret_key
+
+            # Identidad del pod para Lease leader election (SRE).
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+          # ── Recursos ─────────────────────────────────────────────────────
+          resources:
+            requests:
+              cpu:    "200m"
+              memory: "512Mi"
+            limits:
+              cpu:    "1000m"
+              memory: "1Gi"
+
+          # ── Probes ───────────────────────────────────────────────────────
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds:       30
+            timeoutSeconds:      5
+            failureThreshold:    3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds:       10
+            timeoutSeconds:      3
+            failureThreshold:    2
+
+          # ── Seguridad ────────────────────────────────────────────────────
+          # readOnlyRootFilesystem=false porque la app puede escribir logs
+          # temporales y cachés locales durante la operación.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+
+---
+# ── Service ─────────────────────────────────────────────────────────────────
+# ClusterIP interno — el backend y el whatsapp-bridge son los únicos
+# consumidores (ver NetworkPolicy en k8s/config/03-agents-network-policies.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: raphael-service
+  namespace: amael-ia
+  labels:
+    app: raphael-service
+    tier: agents
+    monitor: amael-metrics
+spec:
+  type: ClusterIP
+  selector:
+    app: raphael-service
+  ports:
+    - name:       http
+      protocol:   TCP
+      port:       8002
+      targetPort: http    # named port → más robusto ante cambios de containerPort
+
+---
+# ── PodDisruptionBudget ─────────────────────────────────────────────────────
+# Garantiza que al menos 1 pod de raphael-service siga vivo durante drenajes
+# de nodo o actualizaciones voluntarias. Con replicas=1 + minAvailable=1 el
+# drain de un nodo fallará hasta que haya otro pod — aceptable en single-node.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: raphael-service-pdb
+  namespace: amael-ia
+  labels:
+    app: raphael-service
+    tier: agents
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: raphael-service
