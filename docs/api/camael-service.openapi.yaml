@@ -1,0 +1,606 @@
+openapi: 3.1.0
+info:
+  title: Camael Service API
+  version: 1.0.0-rc1
+  description: |
+    API del servicio `camael-service` — DevOps agent GitOps + ITIL v4 extraído
+    del backend `amael-agentic-backend` (`agents/devops/`). Recibe handoffs de
+    Raphael tras remediaciones temporales y los traduce en cambios permanentes:
+    lee el manifest desde Bitbucket, calcula el patch (memory/CPU multiplier
+    vía LLM), abre PR, genera RFC en ServiceNow, y coordina la aprobación
+    humana vía chat o WhatsApp.
+
+    **Consumidores previstos:**
+      - `raphael-service` — `POST /api/camael/handoff` tras ROLLOUT_RESTART
+      - `amael-agentic-backend` — proxy de `/api/devops/*` desde chat/frontend
+      - `whatsapp-bridge` — comandos `/camael <cmd>` y aprobación "APROBAR"
+      - GitHub Actions CI — `POST /api/devops/ci-hook` post-build
+      - Bitbucket — webhook de PR merged/approved
+
+    **Puerto interno:** 8003 (nuevo, no colisiona con raphael-service:8002 ni
+    productivity-service:8001).
+
+  contact:
+    name: Camael Service
+    url: https://amael-ia.richardx.dev
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://camael-service.amael-ia.svc.cluster.local:8003
+    description: In-cluster ClusterIP service
+  - url: http://camael-service:8003
+    description: Alias corto in-cluster
+
+tags:
+  - name: handoff
+    description: Recepción de handoffs desde Raphael
+  - name: gitops
+    description: Estado de PRs y branches en Bitbucket
+  - name: itil
+    description: Estado de RFCs en ServiceNow
+  - name: command
+    description: Despacho de comandos desde WhatsApp
+  - name: ci
+    description: Hooks CI/CD
+  - name: webhook
+    description: Webhooks externos (Bitbucket)
+  - name: health
+    description: Liveness y readiness
+
+security:
+  - InternalBearer: []
+
+paths:
+
+  # ── Handoff entry point (el endpoint crítico de la Fase 3) ─────────────────
+
+  /api/camael/handoff:
+    post:
+      operationId: receiveHandoff
+      summary: Recibe un handoff de Raphael tras remediación temporal
+      description: |
+        Punto de entrada principal de Camael. Llamado por Raphael tras un
+        `ROLLOUT_RESTART` exitoso sobre un deployment con un issue conocido
+        en el `BUG_LIBRARY`.
+
+        **Comportamiento:**
+          1. Dedup vía Redis `bb:pending_pr:{deployment}` con TTL 2h — si ya
+             hay un PR abierto para este deployment, retorna 200 con el mismo id.
+          2. Encola el handoff en memoria (background task).
+          3. El worker background: lee YAML de Bitbucket → LLM decide multiplier
+             → aplica patch → crea branch + commit + PR → crea RFC ServiceNow.
+          4. Si Camael está saturado, Raphael debe reintentar con exponential backoff.
+
+        **Idempotencia:** usa `incident_key` como deduplication key. Mismo
+        `incident_key` dentro del TTL → mismo PR/RFC (no crea duplicados).
+      tags: [handoff]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HandoffRequest' }
+      responses:
+        '202':
+          description: Handoff aceptado y encolado. Consultar estado vía `/api/camael/handoff/{id}/status`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HandoffAccepted' }
+        '200':
+          description: Handoff ya procesado anteriormente (idempotencia)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HandoffAccepted' }
+        '400':
+          description: Issue type no soportado por Camael (no está en BUG_LIBRARY)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          description: Servicio saturado, reintentar con backoff
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/camael/handoff/{id}/status:
+    get:
+      operationId: getHandoffStatus
+      summary: Consulta el estado de un handoff procesado
+      tags: [handoff]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: "incident_key o id numérico devuelto por receiveHandoff"
+          schema: { type: string }
+      responses:
+        '200':
+          description: Estado actual del handoff
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HandoffStatus' }
+        '404':
+          description: Handoff no encontrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── GitOps (Bitbucket) ─────────────────────────────────────────────────────
+
+  /api/camael/pr/{pr_id}:
+    get:
+      operationId: getPullRequest
+      summary: Estado de un PR en Bitbucket (abierto / mergeado / declinado)
+      tags: [gitops]
+      parameters:
+        - in: path
+          name: pr_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Estado del PR
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PullRequest' }
+        '404':
+          description: PR no encontrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/camael/pr/{pr_id}/merge:
+    post:
+      operationId: mergePullRequest
+      summary: Aprueba y mergea un PR (acción humana proxy-ada)
+      tags: [gitops]
+      parameters:
+        - in: path
+          name: pr_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MergeRequest' }
+      responses:
+        '200':
+          description: PR mergeado; ArgoCD sincronizará
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PullRequest' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: PR no puede ser mergeado (conflictos, ya cerrado, etc.)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ── ITIL v4 (ServiceNow) ───────────────────────────────────────────────────
+
+  /api/camael/rfc/{sys_id}:
+    get:
+      operationId: getRfc
+      summary: Estado de un RFC en ServiceNow
+      tags: [itil]
+      parameters:
+        - in: path
+          name: sys_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Estado del RFC
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rfc' }
+        '404':
+          description: RFC no encontrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Commands ───────────────────────────────────────────────────────────────
+
+  /api/devops/command:
+    post:
+      operationId: handleDevopsCommand
+      summary: Despacha un comando `/camael <cmd>` desde whatsapp-bridge
+      tags: [command]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DevopsCommandRequest' }
+      responses:
+        '200':
+          description: Respuesta del comando
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DevopsCommandResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          description: Rate limit excedido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ── CI hook ────────────────────────────────────────────────────────────────
+
+  /api/devops/ci-hook:
+    post:
+      operationId: notifyCiBuild
+      summary: Notifica a Camael un build de CI (success/fail) para tracking
+      tags: [ci]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CiHookRequest' }
+      responses:
+        '200':
+          description: Evento registrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Bitbucket webhook ──────────────────────────────────────────────────────
+
+  /api/devops/webhook/bitbucket:
+    post:
+      operationId: bitbucketWebhook
+      summary: Webhook de Bitbucket (PR approved, PR merged, PR declined)
+      description: |
+        Autenticado por firma HMAC en el header `X-Hub-Signature` (configurado
+        en el webhook de Bitbucket, no por `INTERNAL_API_SECRET`).
+      tags: [webhook]
+      security:
+        - BitbucketWebhook: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BitbucketWebhookEvent' }
+      responses:
+        '200':
+          description: Evento procesado
+        '401':
+          description: Firma HMAC inválida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ── Health & metrics ───────────────────────────────────────────────────────
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check global (liveness)
+      tags: [health]
+      security: []
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+
+  /health/{component}:
+    get:
+      operationId: healthCheckComponent
+      summary: Health check por componente
+      tags: [health]
+      security: []
+      parameters:
+        - in: path
+          name: component
+          required: true
+          schema:
+            type: string
+            enum: [postgres, redis, vault, bitbucket, servicenow, ollama]
+      responses:
+        '200':
+          description: Componente sano
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComponentHealth' }
+        '503':
+          description: Componente degradado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComponentHealth' }
+
+  /metrics:
+    get:
+      operationId: prometheusMetrics
+      summary: Métricas Prometheus del pod
+      tags: [health]
+      security: []
+      responses:
+        '200':
+          description: Métricas en formato Prometheus
+          content:
+            text/plain:
+              schema:
+                type: string
+
+# ══════════════════════════════════════════════════════════════════════════════
+# COMPONENTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+components:
+
+  securitySchemes:
+    InternalBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: shared-secret
+      description: |
+        Bearer token con valor exacto de `INTERNAL_API_SECRET` montado desde
+        Vault o Secret de Kubernetes.
+    BitbucketWebhook:
+      type: apiKey
+      in: header
+      name: X-Hub-Signature
+      description: HMAC-SHA256 firma del body con el shared secret del webhook
+
+  responses:
+    Unauthorized:
+      description: Token inválido o ausente
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+
+    Error:
+      type: object
+      required: [detail]
+      properties:
+        detail: { type: string }
+        code:   { type: string, nullable: true }
+
+    # ── Handoff ────────────────────────────────────────────────────────────
+
+    HandoffRequest:
+      type: object
+      required: [incident_key, issue_type, namespace, deployment_name, reason, triggered_at]
+      properties:
+        incident_key:
+          type: string
+          description: "Clave única para dedup (dedup key en Redis)"
+          example: "amael-demo-oom::OOM_KILLED::2026-04-22T14:30:00Z"
+        issue_type:
+          type: string
+          enum:
+            - OOM_KILLED
+            - CRASH_LOOP
+            - HIGH_MEMORY
+            - DEPLOYMENT_DEGRADED
+            - HIGH_CPU
+            - MEMORY_LEAK_PREDICTED
+        severity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+          default: HIGH
+        namespace:
+          type: string
+          default: "amael-ia"
+        deployment_name:
+          type: string
+          example: amael-demo-oom
+        resource_name:
+          type: string
+          nullable: true
+          description: "Pod name con hash (derivable del deployment)"
+        owner_name:
+          type: string
+          nullable: true
+          description: "Owner del pod (deployment, statefulset, etc.)"
+        reason:
+          type: string
+          description: "Causa humana-legible (puede venir del diagnóstico LLM)"
+        raphael_action:
+          type: string
+          enum: [ROLLOUT_RESTART, SCALE_UP, PATCH_RESOURCES, ROLLOUT_UNDO, NOOP]
+          default: ROLLOUT_RESTART
+        suggested_fix:
+          $ref: '#/components/schemas/BugFixHint'
+        triggered_at:
+          type: string
+          format: date-time
+        context:
+          type: object
+          additionalProperties: true
+          description: "Free-form metadata (métricas en momento del incidente, logs snippet, etc.)"
+
+    BugFixHint:
+      type: object
+      description: "Sugerencia que Raphael deriva de BUG_LIBRARY; Camael puede honrar o re-decidir con LLM"
+      properties:
+        field:
+          type: string
+          enum: [resources.limits.memory, resources.limits.cpu, resources.requests.memory, resources.requests.cpu, readinessProbe.initialDelaySeconds, livenessProbe.initialDelaySeconds]
+        current_value: { type: string, nullable: true }
+        multiplier:    { type: number, minimum: 1.1, maximum: 10, nullable: true }
+        target_value:  { type: string, nullable: true }
+
+    HandoffAccepted:
+      type: object
+      required: [incident_key, status]
+      properties:
+        incident_key: { type: string }
+        status:
+          type: string
+          enum: [queued, already_processed, in_progress, completed]
+        pr_id: { type: integer, nullable: true }
+        pr_url: { type: string, nullable: true }
+        rfc_number: { type: string, nullable: true }
+
+    HandoffStatus:
+      type: object
+      required: [incident_key, status, created_at]
+      properties:
+        incident_key: { type: string }
+        status:
+          type: string
+          enum: [queued, analyzing, pr_created, rfc_created, pending_approval, approved, merged, deployed, verified, rolled_back, failed]
+        namespace:        { type: string }
+        deployment_name:  { type: string }
+        issue_type:       { type: string }
+        multiplier:       { type: number, nullable: true }
+        risk_level:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+          nullable: true
+        pr_id:            { type: integer, nullable: true }
+        pr_url:           { type: string, nullable: true }
+        rfc_number:       { type: string, nullable: true }
+        rfc_url:          { type: string, nullable: true }
+        reasoning:        { type: string, nullable: true, description: "Razonamiento del LLM" }
+        verification_result: { type: string, nullable: true }
+        created_at:       { type: string, format: date-time }
+        updated_at:       { type: string, format: date-time }
+
+    # ── GitOps (Bitbucket PR) ──────────────────────────────────────────────
+
+    PullRequest:
+      type: object
+      required: [id, state, title, source_branch, destination_branch, url]
+      properties:
+        id: { type: integer }
+        state:
+          type: string
+          enum: [OPEN, MERGED, DECLINED, SUPERSEDED]
+        title: { type: string }
+        description: { type: string, nullable: true }
+        source_branch: { type: string }
+        destination_branch: { type: string, default: main }
+        url: { type: string, format: uri }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        author: { type: string, nullable: true }
+
+    MergeRequest:
+      type: object
+      properties:
+        merge_strategy:
+          type: string
+          enum: [merge_commit, squash, fast_forward]
+          default: merge_commit
+        message:
+          type: string
+          nullable: true
+        approver:
+          type: string
+          nullable: true
+          description: "Email o identificador del aprobador humano"
+
+    # ── ITIL (ServiceNow RFC) ──────────────────────────────────────────────
+
+    Rfc:
+      type: object
+      required: [sys_id, number, state, short_description]
+      properties:
+        sys_id: { type: string }
+        number: { type: string, example: "CHG0030042" }
+        state:
+          type: string
+          enum: [Draft, Assess, Authorize, Scheduled, Implement, Review, Closed, Cancelled]
+        type:
+          type: string
+          enum: [Emergency, Standard, Normal]
+          default: Emergency
+        short_description: { type: string }
+        description: { type: string, nullable: true }
+        assigned_to: { type: string, nullable: true }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+        url: { type: string, format: uri, nullable: true }
+
+    # ── Commands ───────────────────────────────────────────────────────────
+
+    DevopsCommandRequest:
+      type: object
+      required: [command]
+      properties:
+        command:
+          type: string
+          description: "Comando sin prefijo: `prs`, `rfcs`, `pipelines`, `status <pr_id>`, `merge <pr_id>`, `ayuda`"
+        phone:
+          type: string
+          nullable: true
+        quoted_text:
+          type: string
+          nullable: true
+
+    DevopsCommandResponse:
+      type: object
+      required: [reply]
+      properties:
+        reply: { type: string }
+        command_matched: { type: string, nullable: true }
+
+    # ── CI hook ────────────────────────────────────────────────────────────
+
+    CiHookRequest:
+      type: object
+      required: [service, version, result]
+      properties:
+        service: { type: string }
+        version: { type: string }
+        result:
+          type: string
+          enum: [success, failed, cancelled]
+        commit:  { type: string, nullable: true }
+        pipeline_url: { type: string, format: uri, nullable: true }
+
+    # ── Bitbucket webhook ──────────────────────────────────────────────────
+
+    BitbucketWebhookEvent:
+      type: object
+      required: [event_key, pullrequest]
+      properties:
+        event_key:
+          type: string
+          enum: [pullrequest:approved, pullrequest:fulfilled, pullrequest:rejected]
+        pullrequest:
+          type: object
+          properties:
+            id:    { type: integer }
+            state: { type: string }
+            title: { type: string }
+
+    # ── Health ─────────────────────────────────────────────────────────────
+
+    ComponentHealth:
+      type: object
+      required: [component, status]
+      properties:
+        component:
+          type: string
+          enum: [postgres, redis, vault, bitbucket, servicenow, ollama]
+        status:
+          type: string
+          enum: [ok, degraded, down]
+        latency_ms: { type: integer, nullable: true }
+        detail:     { type: string, nullable: true }

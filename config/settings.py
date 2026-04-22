@@ -11,6 +11,7 @@ Uso:
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
@@ -50,6 +51,26 @@ class Settings(BaseSettings):
     llm_embed_model: str = Field(
         default="nomic-embed-text",
         alias="LLM_EMBED_MODEL",
+    )
+
+    # ── Agents split — Phase 1 (feature flag) ────────────────────────────────
+    # Controla si agents/sre/ y agents/devops/ corren in-process dentro del
+    # backend o se delegan por HTTP a raphael-service y camael-service.
+    # Default "inprocess" = comportamiento actual sin cambios.
+    # En Phase 2/3 se flipa a "remote" tras canary.
+    agents_mode: Literal["inprocess", "remote"] = Field(
+        default="inprocess",
+        alias="AGENTS_MODE",
+        description="inprocess: SRE/DevOps corren dentro del backend. "
+                    "remote: se llaman por HTTP a raphael-service y camael-service.",
+    )
+    raphael_service_url: str = Field(
+        default="http://raphael-service:8002",
+        alias="RAPHAEL_SERVICE_URL",
+    )
+    camael_service_url: str = Field(
+        default="http://camael-service:8003",
+        alias="CAMAEL_SERVICE_URL",
     )
 
     # ── Servicios internos ────────────────────────────────────────────────────
