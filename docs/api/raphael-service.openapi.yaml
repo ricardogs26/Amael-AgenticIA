@@ -1,0 +1,606 @@
+openapi: 3.1.0
+info:
+  title: Raphael Service API
+  version: 1.0.0-rc1
+  description: |
+    API del servicio `raphael-service` — SRE agent autónomo extraído del backend
+    `amael-agentic-backend`. Implementa el loop Observe → Detect → Diagnose →
+    Decide → Act → Report cada 60 segundos, más la interfaz conversacional
+    LangGraph heredada del k8s-agent legacy.
+
+    **Consumidores previstos:**
+      - `amael-agentic-backend` — proxy de `/api/sre/*` desde chat/frontend
+      - `whatsapp-bridge` — comandos `/sre <cmd>` y `/estado`
+      - GitHub Actions CI — `POST /api/sre/deploy-hook` post-build
+      - `camael-service` — catch-up de handoffs replayados (opcional)
+
+    **Puerto interno:** 8002 (mantenido del k8s-agent legacy para no romper CI).
+
+  contact:
+    name: Raphael Service
+    url: https://amael-ia.richardx.dev
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://raphael-service.amael-ia.svc.cluster.local:8002
+    description: In-cluster ClusterIP service
+  - url: http://raphael-service:8002
+    description: Alias corto in-cluster
+
+tags:
+  - name: loop
+    description: Estado del loop autónomo y sus controles
+  - name: incidents
+    description: Incidentes detectados y postmortems
+  - name: learning
+    description: Estadísticas de aprendizaje histórico
+  - name: slo
+    description: Service-level objectives y burn rates
+  - name: maintenance
+    description: Ventanas de mantenimiento que pausan el loop
+  - name: command
+    description: Despacho de comandos desde WhatsApp
+  - name: ci
+    description: Hooks de CI/CD
+  - name: conversation
+    description: Interfaz LangGraph conversacional
+  - name: health
+    description: Liveness y readiness
+
+security:
+  - InternalBearer: []
+
+paths:
+
+  # ── Loop control ───────────────────────────────────────────────────────────
+
+  /api/sre/loop/status:
+    get:
+      operationId: getLoopStatus
+      summary: Estado actual del loop autónomo
+      tags: [loop]
+      security: []  # público (leído desde frontend con JWT del backend)
+      responses:
+        '200':
+          description: Estado del loop
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoopStatus'
+
+  # ── Incidents & postmortems ────────────────────────────────────────────────
+
+  /api/sre/incidents:
+    get:
+      operationId: listIncidents
+      summary: Lista de incidentes recientes
+      tags: [incidents]
+      security: []
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: since
+          description: ISO 8601 timestamp inferior
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Lista de incidentes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Incident' }
+
+  /api/sre/postmortems:
+    get:
+      operationId: listPostmortems
+      summary: Postmortems generados por LLM
+      tags: [incidents]
+      security: []
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+      responses:
+        '200':
+          description: Lista de postmortems
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Postmortem' }
+
+  # ── Learning stats ─────────────────────────────────────────────────────────
+
+  /api/sre/learning/stats:
+    get:
+      operationId: getLearningStats
+      summary: Tasas de éxito histórico por (issue_type, action)
+      tags: [learning]
+      security: []
+      parameters:
+        - in: query
+          name: window_days
+          schema: { type: integer, minimum: 1, maximum: 90, default: 7 }
+      responses:
+        '200':
+          description: Stats agregados
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LearningStats' }
+
+  # ── SLO ────────────────────────────────────────────────────────────────────
+
+  /api/sre/slo/status:
+    get:
+      operationId: getSloStatus
+      summary: SLO targets con burn rate en vivo desde Prometheus
+      tags: [slo]
+      security: []
+      responses:
+        '200':
+          description: Estado de SLOs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SloTarget' }
+
+  # ── Maintenance windows ────────────────────────────────────────────────────
+
+  /api/sre/maintenance:
+    get:
+      operationId: getMaintenance
+      summary: Ventana de mantenimiento activa (si existe)
+      tags: [maintenance]
+      security: []
+      responses:
+        '200':
+          description: Estado de maintenance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MaintenanceState' }
+
+    post:
+      operationId: activateMaintenance
+      summary: Activa ventana de mantenimiento (pausa el loop)
+      tags: [maintenance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MaintenanceRequest' }
+      responses:
+        '200':
+          description: Maintenance activado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MaintenanceState' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    delete:
+      operationId: deactivateMaintenance
+      summary: Desactiva maintenance y reanuda el loop
+      tags: [maintenance]
+      responses:
+        '200':
+          description: Maintenance desactivado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MaintenanceState' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── WhatsApp command dispatcher ────────────────────────────────────────────
+
+  /api/sre/command:
+    post:
+      operationId: handleSreCommand
+      summary: Despacha un comando `/sre <cmd>` recibido desde whatsapp-bridge
+      tags: [command]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SreCommandRequest' }
+      responses:
+        '200':
+          description: Respuesta del comando
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SreCommandResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          description: Rate limit excedido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ── CI deploy hook ─────────────────────────────────────────────────────────
+
+  /api/sre/deploy-hook:
+    post:
+      operationId: registerDeploy
+      summary: Notifica a Raphael un deploy reciente (ventana para auto-rollback)
+      description: |
+        Llamado por GitHub Actions tras push de una nueva imagen. Raphael
+        registra el evento en Redis con TTL de 30min; si detecta DEPLOYMENT_DEGRADED
+        dentro de esa ventana, ejecuta `rollout undo` automáticamente en vez de
+        handoff a Camael.
+      tags: [ci]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeployHookRequest' }
+      responses:
+        '200':
+          description: Evento registrado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  window_seconds: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Conversational agent (heredado del k8s-agent legacy) ───────────────────
+
+  /api/k8s-agent:
+    post:
+      operationId: queryAgent
+      summary: Consulta conversacional al agente LangGraph
+      description: |
+        Interfaz LangGraph conversacional heredada del k8s-agent legacy 5.2.0.
+        Usada por `amael-agentic-backend` como step type `K8S_TOOL` del pipeline.
+      tags: [conversation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentRequest' }
+      responses:
+        '200':
+          description: Respuesta del agente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Health & metrics ───────────────────────────────────────────────────────
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check global (liveness)
+      tags: [health]
+      security: []
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+
+  /health/{component}:
+    get:
+      operationId: healthCheckComponent
+      summary: Health check por componente (postgres, redis, qdrant, ollama, prometheus, scheduler)
+      tags: [health]
+      security: []
+      parameters:
+        - in: path
+          name: component
+          required: true
+          schema:
+            type: string
+            enum: [postgres, redis, qdrant, ollama, prometheus, scheduler, lease]
+      responses:
+        '200':
+          description: Componente sano
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComponentHealth' }
+        '503':
+          description: Componente degradado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComponentHealth' }
+
+  /metrics:
+    get:
+      operationId: prometheusMetrics
+      summary: Métricas Prometheus del pod
+      tags: [health]
+      security: []
+      responses:
+        '200':
+          description: Métricas en formato Prometheus
+          content:
+            text/plain:
+              schema:
+                type: string
+
+# ══════════════════════════════════════════════════════════════════════════════
+# COMPONENTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+components:
+
+  securitySchemes:
+    InternalBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: shared-secret
+      description: |
+        Bearer token con valor exacto de `INTERNAL_API_SECRET` (montado desde
+        Vault o Secret de Kubernetes). No es un JWT — es un shared-secret para
+        comunicación pod-to-pod dentro del cluster.
+
+  responses:
+    Unauthorized:
+      description: Token inválido o ausente
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+
+    Error:
+      type: object
+      required: [detail]
+      properties:
+        detail: { type: string }
+        code:   { type: string, nullable: true }
+
+    # ── Loop ───────────────────────────────────────────────────────────────
+
+    LoopStatus:
+      type: object
+      required: [is_leader, circuit_breaker_state, maintenance_active, last_run_ts]
+      properties:
+        is_leader:
+          type: boolean
+          description: True si este pod tiene el Lease
+        circuit_breaker_state:
+          type: string
+          enum: [closed, open, half_open]
+        maintenance_active:
+          type: boolean
+        last_run_ts:
+          type: string
+          format: date-time
+          nullable: true
+        last_run_result:
+          type: string
+          enum: [ok_clean, ok, error, maintenance, skipped_cb, skipped_not_leader]
+          nullable: true
+        anomalies_last_run:
+          type: integer
+          minimum: 0
+        slo_targets_count:
+          type: integer
+          minimum: 0
+        uptime_seconds:
+          type: integer
+          minimum: 0
+
+    # ── Incident model ─────────────────────────────────────────────────────
+
+    Incident:
+      type: object
+      required: [id, incident_key, issue_type, severity, resource_name, created_at]
+      properties:
+        id: { type: integer }
+        incident_key: { type: string, description: "Clave única para dedup" }
+        issue_type:
+          type: string
+          enum:
+            - CRASH_LOOP
+            - OOM_KILLED
+            - IMAGE_PULL_ERROR
+            - POD_FAILED
+            - POD_PENDING_STUCK
+            - HIGH_RESTARTS
+            - NODE_NOT_READY
+            - HIGH_CPU
+            - HIGH_MEMORY
+            - HIGH_ERROR_RATE
+            - DISK_EXHAUSTION_PREDICTED
+            - MEMORY_LEAK_PREDICTED
+            - ERROR_RATE_ESCALATING
+            - SLO_BUDGET_BURNING
+            - NODE_DISK_HIGH
+            - NODE_MEMORY_HIGH
+            - PVC_CAPACITY_HIGH
+            - CERTIFICATE_EXPIRING
+            - DEPLOYMENT_DEGRADED
+        severity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        resource_name: { type: string }
+        owner_name:    { type: string, nullable: true }
+        namespace:     { type: string, default: "amael-ia" }
+        action_taken:
+          type: string
+          enum: [ROLLOUT_RESTART, NOTIFY_HUMAN, SCALE_UP, PATCH_RESOURCES, ROLLOUT_UNDO, NOOP]
+          nullable: true
+        action_result:
+          type: string
+          enum: [success, failed, pending, skipped]
+          nullable: true
+        confidence: { type: number, minimum: 0, maximum: 1, nullable: true }
+        diagnosis: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        verified_at: { type: string, format: date-time, nullable: true }
+
+    Postmortem:
+      type: object
+      required: [id, incident_key, summary, created_at]
+      properties:
+        id: { type: integer }
+        incident_key: { type: string }
+        summary: { type: string }
+        root_cause: { type: string, nullable: true }
+        action_items:
+          type: array
+          items:
+            type: object
+            properties:
+              title:   { type: string }
+              owner:   { type: string, nullable: true }
+              status:  { type: string, enum: [open, in_progress, done] }
+        created_at: { type: string, format: date-time }
+
+    # ── Learning stats ─────────────────────────────────────────────────────
+
+    LearningStats:
+      type: object
+      properties:
+        window_days: { type: integer }
+        rows:
+          type: array
+          items:
+            type: object
+            required: [issue_type, action, total, success, success_rate]
+            properties:
+              issue_type: { type: string }
+              action:     { type: string }
+              total:      { type: integer }
+              success:    { type: integer }
+              success_rate: { type: number, minimum: 0, maximum: 1 }
+
+    # ── SLO ────────────────────────────────────────────────────────────────
+
+    SloTarget:
+      type: object
+      required: [service, handler, target, window_seconds]
+      properties:
+        service: { type: string }
+        handler: { type: string, description: "e.g. /api/chat" }
+        target:  { type: number, description: "0.995 = 99.5%" }
+        window_seconds: { type: integer }
+        current_availability: { type: number, nullable: true }
+        burn_rate_1h:  { type: number, nullable: true }
+        burn_rate_6h:  { type: number, nullable: true }
+        budget_remaining_pct: { type: number, nullable: true }
+
+    # ── Maintenance ────────────────────────────────────────────────────────
+
+    MaintenanceRequest:
+      type: object
+      required: [duration_minutes]
+      properties:
+        duration_minutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+        reason:
+          type: string
+          nullable: true
+
+    MaintenanceState:
+      type: object
+      required: [active]
+      properties:
+        active: { type: boolean }
+        expires_at: { type: string, format: date-time, nullable: true }
+        reason: { type: string, nullable: true }
+
+    # ── Commands ───────────────────────────────────────────────────────────
+
+    SreCommandRequest:
+      type: object
+      required: [command]
+      properties:
+        command:
+          type: string
+          description: "Comando sin el prefijo `/sre`: `estado`, `grafana`, `status`, `incidents`, `postmortems`, `slo`, `maintenance on 60`, `maintenance off`, `ayuda`"
+        phone:
+          type: string
+          nullable: true
+          description: "Número del emisor (para rate limiting y routing de respuesta)"
+        quoted_text:
+          type: string
+          nullable: true
+
+    SreCommandResponse:
+      type: object
+      required: [reply]
+      properties:
+        reply:
+          type: string
+          description: "Texto formateado para WhatsApp (con markdown de WA)"
+        command_matched:
+          type: string
+          nullable: true
+
+    # ── CI deploy hook ─────────────────────────────────────────────────────
+
+    DeployHookRequest:
+      type: object
+      required: [service, version]
+      properties:
+        service:
+          type: string
+          examples: [amael-agentic-backend, raphael-service, camael-service]
+        version:
+          type: string
+          examples: ["1.10.95"]
+        commit:
+          type: string
+          nullable: true
+          description: "Full SHA"
+        author:
+          type: string
+          nullable: true
+
+    # ── Conversational agent ───────────────────────────────────────────────
+
+    AgentRequest:
+      type: object
+      required: [query]
+      properties:
+        query:      { type: string, minLength: 1, maxLength: 4000 }
+        user_email: { type: string, default: "unknown" }
+
+    AgentResponse:
+      type: object
+      required: [answer]
+      properties:
+        answer: { type: string }
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              tool:    { type: string }
+              input:   { type: string }
+              output:  { type: string }
+        tokens_used: { type: integer, nullable: true }
+
+    # ── Health ─────────────────────────────────────────────────────────────
+
+    ComponentHealth:
+      type: object
+      required: [component, status]
+      properties:
+        component:
+          type: string
+          enum: [postgres, redis, qdrant, ollama, prometheus, scheduler, lease]
+        status:
+          type: string
+          enum: [ok, degraded, down]
+        latency_ms: { type: integer, nullable: true }
+        detail: { type: string, nullable: true }
