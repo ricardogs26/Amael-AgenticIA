@@ -30,54 +30,69 @@ metadata:
     tier: agents
 data:
   # ── LLM ──────────────────────────────────────────────────────────────────
-  OLLAMA_BASE_URL: "http://ollama-service:11434"
-  LLM_MODEL: "qwen3:14b"
-  LLM_EMBED_MODEL: "nomic-embed-text"
+  # Valores verificados contra el env real de amael-agentic-deployment (2026-04-22).
+  OLLAMA_BASE_URL:  "http://ollama-service:11434"
+  LLM_PROVIDER:     "ollama"
+  LLM_MODEL:        "qwen3:14b"
+  LLM_VISION_MODEL: "qwen2.5vl:3b"
+  LLM_EMBED_MODEL:  "nomic-embed-text"
 
-  # ── PostgreSQL ───────────────────────────────────────────────────────────
-  POSTGRES_HOST: "postgres-service"
-  POSTGRES_PORT: "5432"
-  POSTGRES_DB: "amael"
-  POSTGRES_USER: "amael"
+  # ── PostgreSQL (user/db reales: amael_user / amael_db) ──────────────────
+  POSTGRES_HOST:     "postgres-service"
+  POSTGRES_PORT:     "5432"
+  POSTGRES_DB:       "amael_db"
+  POSTGRES_USER:     "amael_user"
   POSTGRES_POOL_MIN: "2"
-  POSTGRES_POOL_MAX: "8"
+  POSTGRES_POOL_MAX: "10"
 
   # ── Redis ────────────────────────────────────────────────────────────────
   REDIS_HOST: "redis-service"
   REDIS_PORT: "6379"
-  REDIS_DB: "0"
+  REDIS_DB:   "0"
 
   # ── Qdrant / MinIO ───────────────────────────────────────────────────────
-  QDRANT_URL: "http://qdrant-service:6333"
+  QDRANT_URL:     "http://qdrant-service:6333"
   MINIO_ENDPOINT: "minio-service:9000"
-  MINIO_BUCKET: "amael-uploads"
+  MINIO_BUCKET:   "amael-uploads"
+  MINIO_SECURE:   "false"
 
   # ── Vault ────────────────────────────────────────────────────────────────
-  # VAULT_ROLE se creará con la policy de Fase 1 (raphael-service-policy).
+  # VAULT_ROLE requiere crear auth/kubernetes/role/raphael-service en Vault
+  # con la policy docs/vault/raphael-policy.hcl. Mientras tanto queda como
+  # referencia sin efecto (raphael no llama a Vault en el path crítico).
   VAULT_ADDR: "http://vault.vault.svc.cluster.local:8200"
   VAULT_ROLE: "raphael-service"
 
   # ── Observabilidad ───────────────────────────────────────────────────────
-  PROMETHEUS_URL: "http://kube-prometheus-stack-prometheus.observability:9090"
+  PROMETHEUS_URL:              "http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.observability.svc.cluster.local:4317"
-  OTEL_SERVICE_NAME: "raphael-service"
+  OTEL_SERVICE_NAME:           "raphael-service"
 
-  # ── SRE loop ─────────────────────────────────────────────────────────────
-  SRE_NAMESPACE: "amael-ia"
-  SRE_LOOP_INTERVAL: "60"
-  SRE_CONFIDENCE_THRESHOLD: "0.7"
-  SRE_MAX_RESTARTS_PER_HOUR: "3"
-  SRE_CB_THRESHOLD: "5"
-  SRE_CB_RESET_SECONDS: "300"
-  # Mismo Lease que el backend inprocess: si ambos corren, solo uno gana.
-  # Durante la transición coexisten; tras Fase 5 el backend dejará de correr SRE.
-  SRE_LEASE_NAME: "sre-agent-leader"
+  # ── SRE loop (verificado contra backend real) ────────────────────────────
+  SRE_NAMESPACE:               "amael-ia"
+  SRE_OBSERVE_NAMESPACES:      "amael-ia,vault,observability,kong"
+  SRE_PROTECTED_DEPLOYMENTS:   "postgres-deployment,ollama-deployment,vault-0"
+  SRE_LOOP_ENABLED:            "true"
+  SRE_LOOP_INTERVAL:           "60"
+  SRE_CONFIDENCE_THRESHOLD:    "0.7"
+  SRE_MAX_RESTARTS_PER_HOUR:   "3"
+  SRE_CB_THRESHOLD:            "5"
+  SRE_CB_RESET_SECONDS:        "300"
+  SRE_VERIFICATION_DELAY:      "600"
+  SRE_AUTO_HEAL_MIN_SEVERITY:  "HIGH"
+  SRE_MIN_ALERT_SEVERITY:      "MEDIUM"
+  SRE_ALERT_PHONE:             "5219993437008"
+  # El Lease nombre DEBE coincidir con el que usa el backend inprocess
+  # (sre-agentic-leader, NO sre-agent-leader). Durante la transición solo
+  # uno de los dos gana el Lease y corre el loop; tras Fase 5 el backend
+  # deja de competir.
+  SRE_LEASE_NAME: "sre-agentic-leader"
 
   # ── Runtime ──────────────────────────────────────────────────────────────
   ENVIRONMENT: "production"
-  LOG_LEVEL: "INFO"
-  # Flag heredado del backend — irrelevante en raphael-service, pero lo
-  # mantenemos consistente por si algún módulo compartido lo consulta.
+  LOG_LEVEL:   "INFO"
+  # Flag heredado del backend — irrelevante en raphael-service pero
+  # consistente por si algún módulo compartido lo consulta.
   AGENTS_MODE: "inprocess"
 
 ---
@@ -144,7 +159,7 @@ spec:
 
       containers:
         - name: raphael
-          image: registry.richardx.dev/raphael-service:1.0.0
+          image: registry.richardx.dev/raphael-service:1.0.1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
