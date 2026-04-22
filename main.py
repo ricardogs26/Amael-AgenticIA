@@ -130,15 +130,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning(f"[startup] Schema check falló: {exc}")
 
-    # 6. SRE agent
-    try:
-        from agents.sre import init_runbooks_qdrant, init_sre_db, start_sre_loop
-        init_sre_db()
-        await _run_in_thread(init_runbooks_qdrant)
-        start_sre_loop()
-        logger.info("[startup] SRE agent iniciado")
-    except Exception as exc:
-        logger.error(f"[startup] SRE agent FALLÓ: {exc}", exc_info=True)
+    # 6. SRE agent (Raphael)
+    # Phase 2.2: gateado por feature flag AGENTS_MODE.
+    #   inprocess → el SRE loop corre dentro del backend (comportamiento histórico).
+    #   remote    → el loop vive en raphael-service; el backend no lo arranca.
+    if settings.agents_mode == "inprocess":
+        try:
+            from agents.sre import init_runbooks_qdrant, init_sre_db, start_sre_loop
+            init_sre_db()
+            await _run_in_thread(init_runbooks_qdrant)
+            start_sre_loop()
+            logger.info("[startup] SRE agent iniciado (modo inprocess)")
+        except Exception as exc:
+            logger.error(f"[startup] SRE agent FALLÓ: {exc}", exc_info=True)
+    else:
+        logger.info(
+            "[startup] SRE loop NO arrancado — AGENTS_MODE=%s. "
+            "Raphael corre en raphael-service; el backend delega vía clients.raphael_client.",
+            settings.agents_mode,
+        )
 
     # 7. LangGraph warm-up (compilar grafo una vez antes del primer request)
     try:
@@ -178,12 +188,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     import asyncio
     await asyncio.sleep(5)
 
-    try:
-        from agents.sre import stop_sre_loop
-        stop_sre_loop()
-        logger.info("[shutdown] SRE loop detenido")
-    except Exception as exc:
-        logger.warning(f"[shutdown] SRE loop stop falló: {exc}")
+    # Solo intentar detener el loop si lo arrancamos (modo inprocess).
+    if settings.agents_mode == "inprocess":
+        try:
+            from agents.sre import stop_sre_loop
+            stop_sre_loop()
+            logger.info("[shutdown] SRE loop detenido")
+        except Exception as exc:
+            logger.warning(f"[shutdown] SRE loop stop falló: {exc}")
 
     try:
         from storage.postgres.client import close_pool
