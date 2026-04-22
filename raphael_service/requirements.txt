@@ -1,0 +1,45 @@
+# raphael-service — dependencias mínimas para el SRE microservicio.
+# NO incluye: langgraph, streamlit, pandas pesado, transformers.
+# El servicio sólo corre el SRE agent autónomo + rutas conversacionales vía LangChain.
+
+# ── FastAPI / ASGI ────────────────────────────────────────────────────────────
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
+pydantic-settings>=2.2
+
+# ── Storage clients ───────────────────────────────────────────────────────────
+psycopg2-binary>=2.9
+redis>=5.0
+qdrant-client>=1.11
+
+# ── HTTP / net ────────────────────────────────────────────────────────────────
+httpx>=0.27
+
+# ── Prometheus ────────────────────────────────────────────────────────────────
+prometheus-client>=0.20
+prometheus-fastapi-instrumentator>=7.0
+
+# ── Kubernetes ────────────────────────────────────────────────────────────────
+kubernetes>=29.0
+
+# ── Scheduler (APScheduler drive el loop SRE cada 60s) ────────────────────────
+apscheduler>=3.10
+
+# ── LLM stack (LangChain clásico + ChatOllama; NO langgraph aquí) ─────────────
+langchain>=0.3
+langchain-core>=0.3
+langchain-ollama>=0.2
+
+# ── OpenTelemetry ─────────────────────────────────────────────────────────────
+opentelemetry-api>=1.26
+opentelemetry-sdk>=1.26
+opentelemetry-instrumentation-fastapi>=0.46b0
+opentelemetry-instrumentation-httpx>=0.46b0
+opentelemetry-exporter-otlp-proto-grpc>=1.26
+
+# ── Auth / JWT (require_internal_secret tolera ausencia, pero get_current_user la necesita) ──
+python-jose[cryptography]>=3.3
+
+# ── Env ───────────────────────────────────────────────────────────────────────
+python-dotenv>=1.0
