@@ -45,7 +45,7 @@ def get_loop_status() -> dict[str, Any]:
     try:
         import dataclasses
 
-        from agents.sre import get_loop_state
+        from clients.raphael_client import get_loop_state
         state = get_loop_state()
         return dataclasses.asdict(state) if dataclasses.is_dataclass(state) else state
     except Exception as exc:
@@ -61,7 +61,7 @@ def get_incidents(
 ) -> list[dict[str, Any]]:
     """Últimos N incidentes desde PostgreSQL."""
     try:
-        from agents.sre import get_recent_incidents
+        from clients.raphael_client import get_recent_incidents
         return get_recent_incidents(limit=limit)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -76,7 +76,7 @@ def get_postmortems(
 ) -> list[dict[str, Any]]:
     """Últimos N postmortems generados por LLM."""
     try:
-        from agents.sre import get_recent_postmortems
+        from clients.raphael_client import get_recent_postmortems
         return get_recent_postmortems(limit=limit)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -91,7 +91,7 @@ def get_learning_stats(
 ) -> list[dict[str, Any]]:
     """Tasa de éxito por (issue_type, action) en los últimos N días."""
     try:
-        from agents.sre import get_historical_success_rate
+        from clients.raphael_client import get_historical_success_rate
         return get_historical_success_rate(days=days)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -105,7 +105,7 @@ def get_slo_status(
 ) -> list[dict[str, Any]]:
     """SLO targets con burn rates actuales desde Prometheus."""
     try:
-        from agents.sre.scheduler import get_slo_burn_rates
+        from clients.raphael_client import get_slo_burn_rates
         return get_slo_burn_rates()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -119,7 +119,7 @@ def get_maintenance(
 ) -> dict[str, Any]:
     """Estado de la ventana de mantenimiento activa."""
     try:
-        from agents.sre import get_loop_state
+        from clients.raphael_client import get_loop_state
         state = get_loop_state()
         return {
             "active":  state.get("maintenance_active", False),
@@ -133,7 +133,7 @@ def get_maintenance(
 def activate_maintenance_window(body: MaintenanceRequest) -> dict[str, Any]:
     """Activa una ventana de mantenimiento por N minutos."""
     try:
-        from agents.sre import activate_maintenance
+        from clients.raphael_client import activate_maintenance
         activate_maintenance(minutes=body.minutes)
         return {"active": True, "minutes": body.minutes}
     except Exception as exc:
@@ -144,7 +144,7 @@ def activate_maintenance_window(body: MaintenanceRequest) -> dict[str, Any]:
 def deactivate_maintenance_window() -> dict[str, Any]:
     """Desactiva la ventana de mantenimiento."""
     try:
-        from agents.sre import deactivate_maintenance
+        from clients.raphael_client import deactivate_maintenance
         deactivate_maintenance()
         return {"active": False}
     except Exception as exc:
@@ -195,7 +195,7 @@ async def handle_sre_command(body: SRECommandRequest) -> dict[str, Any]:
         pass
 
     try:
-        from agents.sre import (
+        from clients.raphael_client import (
             activate_maintenance,
             deactivate_maintenance,
             get_loop_state,
@@ -215,7 +215,7 @@ async def handle_sre_command(body: SRECommandRequest) -> dict[str, Any]:
             return {"response": _format_postmortems(pms)}
 
         elif cmd_base == "slo":
-            from agents.sre import load_slo_targets
+            from clients.raphael_client import load_slo_targets
             targets = load_slo_targets()
             return {"response": f"SLO targets configurados: {len(targets)}"}
 
