@@ -72,8 +72,14 @@ COPY --chown=raphael:raphael interfaces/__init__.py              /app/interfaces
 COPY --chown=raphael:raphael interfaces/api/__init__.py          /app/interfaces/api/__init__.py
 COPY --chown=raphael:raphael interfaces/api/auth.py              /app/interfaces/api/auth.py
 COPY --chown=raphael:raphael interfaces/api/middleware/          /app/interfaces/api/middleware/
-COPY --chown=raphael:raphael interfaces/api/routers/__init__.py  /app/interfaces/api/routers/__init__.py
 COPY --chown=raphael:raphael interfaces/api/routers/sre.py       /app/interfaces/api/routers/sre.py
+# El __init__.py del repo importa TODOS los routers (chat, conversations, etc.)
+# que raphael-service NO necesita. Sobrescribimos con uno vacío que solo
+# marca el paquete como importable — `from interfaces.api.routers.sre import router`
+# sigue funcionando porque Python resuelve el submódulo directamente.
+RUN echo '"""raphael-service stub — solo el router sre está disponible."""' \
+    > /app/interfaces/api/routers/__init__.py \
+    && chown raphael:raphael /app/interfaces/api/routers/__init__.py
 COPY --chown=raphael:raphael runbooks/            /app/runbooks/
 COPY --chown=raphael:raphael raphael_service/     /app/raphael_service/
 
