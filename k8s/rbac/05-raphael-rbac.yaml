@@ -1,0 +1,78 @@
+# RBAC para raphael-service (SRE Agent extraído del backend)
+#
+# Fase 1 · feature/agents-split — promoción de agents/sre/ del backend
+# amael-agentic-backend a un pod independiente `raphael-service`.
+#
+# raphael-sa HEREDA los permisos originalmente creados por el k8s-agent legacy
+# (ClusterRole `sre-agent-observer` y Role `sre-agent-healer`). Estos recursos
+# siguen vigentes en el clúster — esta manifest solo crea el ServiceAccount y
+# los Bindings nuevos, no re-define los roles.
+#
+# Referencias:
+#   - docs/PHASE0-ANALYSIS.md §5 (dependencias), §12 (namespace y networking)
+#   - k8s/rbac/04-sre-rbac.yaml (mismos roles usados hoy por amael-agentic-sa)
+#
+# Permisos concedidos a raphael-sa:
+#   1. sre-agent-observer       (ClusterRole)  — lectura global de K8s
+#   2. sre-agent-healer         (Role)         — restart pods, patch deployments, leases en amael-ia
+#   3. argocd-application-reader (ClusterRole) — lectura de ArgoCD Applications (argocd_discovery.py)
+
+# ── ServiceAccount ────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: raphael-sa
+  namespace: amael-ia
+
+---
+# ── ClusterRoleBinding: observer (lectura global) ─────────────────────────────
+# Necesario para el observe_cluster() — pods, nodes, events, deployments en
+# todos los namespaces que vigila el SRE loop.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: raphael-observer-binding
+subjects:
+- kind: ServiceAccount
+  name: raphael-sa
+  namespace: amael-ia
+roleRef:
+  kind: ClusterRole
+  name: sre-agent-observer        # ClusterRole existente (creado por k8s-agent legacy)
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ── RoleBinding: healer (escritura en amael-ia) ───────────────────────────────
+# Habilita ROLLOUT_RESTART (delete pods, patch deployments) y leader election
+# (leases) dentro del namespace amael-ia — el único donde Raphael actúa.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: raphael-healer-binding
+  namespace: amael-ia
+subjects:
+- kind: ServiceAccount
+  name: raphael-sa
+  namespace: amael-ia
+roleRef:
+  kind: Role
+  name: sre-agent-healer          # Role existente en amael-ia (creado por k8s-agent legacy)
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ── ClusterRoleBinding: ArgoCD Application reader ─────────────────────────────
+# Para argocd_discovery.py — resolver dinámicamente qué ArgoCD Application mapea
+# a cada deployment cuando Raphael detecta una anomalía (reemplaza el
+# APP_MANIFEST_MAP estático del k8s-agent legacy).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: raphael-argocd-reader-binding
+subjects:
+- kind: ServiceAccount
+  name: raphael-sa
+  namespace: amael-ia
+roleRef:
+  kind: ClusterRole
+  name: argocd-application-reader  # ClusterRole definido en 04-sre-rbac.yaml
+  apiGroup: rbac.authorization.k8s.io

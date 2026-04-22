@@ -1,0 +1,365 @@
+---
+# =============================================================================
+# NetworkPolicies — raphael-service y camael-service (Fase 1)
+# =============================================================================
+# Separación de agentes a pods independientes. Principio: deny-all por defecto,
+# whitelist explícita de fuentes y destinos. Sigue el mismo estilo de
+# 01-network-policy.yaml (amael-agentic-backend).
+#
+# Asunciones de labels (a respetar en los Deployments de Fase 2/3):
+#   - raphael-service pods → metadata.labels.app: raphael-service
+#   - camael-service pods  → metadata.labels.app: camael-service
+#
+# Puertos: raphael-service escucha en 8002 (hereda del k8s-agent legacy),
+#          camael-service escucha en 8003 (puerto nuevo — ver §7 de PHASE0).
+# =============================================================================
+
+---
+# -----------------------------------------------------------------------------
+# 1) raphael-service · INGRESS
+# Controla quién puede alcanzar raphael-service:8002.
+# -----------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: raphael-service-ingress
+  namespace: amael-ia
+spec:
+  podSelector:
+    matchLabels:
+      app: raphael-service
+  policyTypes:
+    - Ingress
+
+  ingress:
+    # Kubelet health/readiness probes — desde la IP del nodo.
+    # Calico en MicroK8s aplica NetworkPolicy también al tráfico kubelet→pod.
+    - from:
+        - ipBlock:
+            cidr: 192.168.1.88/32
+      ports:
+        - port: 8002
+          protocol: TCP
+
+    # Backend principal — llama a raphael vía clients/raphael_client.py
+    # (proxy de /api/sre/*, /api/k8s-agent, K8S_TOOL step).
+    - from:
+        - podSelector:
+            matchLabels:
+              app: amael-agentic-backend
+      ports:
+        - port: 8002
+          protocol: TCP
+
+    # WhatsApp bridge — POST /api/sre/command (comandos /sre <cmd> y /estado).
+    - from:
+        - podSelector:
+            matchLabels:
+              app: whatsapp-bridge
+      ports:
+        - port: 8002
+          protocol: TCP
+
+    # Camael — catch-up / status queries opcionales (reverse handoff, polling).
+    - from:
+        - podSelector:
+            matchLabels:
+              app: camael-service
+      ports:
+        - port: 8002
+          protocol: TCP
+
+    # Prometheus scrape desde namespace observability — /metrics.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - port: 8002
+          protocol: TCP
+
+---
+# -----------------------------------------------------------------------------
+# 2) raphael-service · EGRESS
+# Controla adonde puede salir raphael-service.
+# -----------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: raphael-service-egress
+  namespace: amael-ia
+spec:
+  podSelector:
+    matchLabels:
+      app: raphael-service
+  policyTypes:
+    - Egress
+
+  egress:
+    # PostgreSQL — sre_incidents, sre_learning_stats, sre_postmortems.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+
+    # Redis — dedup (sre:incident:*), counters (sre:restarts:*), maintenance,
+    # handoff queue hacia Camael (sre:gitops:*).
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - port: 6379
+          protocol: TCP
+
+    # Qdrant — colección sre_runbooks (search_runbooks + auto-runbook save).
+    - to:
+        - podSelector:
+            matchLabels:
+              app: qdrant
+      ports:
+        - port: 6333
+          protocol: TCP
+
+    # Ollama — diagnose_with_llm (qwen3:14b) + nomic-embed-text para runbooks.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: ollama
+      ports:
+        - port: 11434
+          protocol: TCP
+
+    # whatsapp-bridge — notificaciones SRE (notify_whatsapp_sre en reporter.py).
+    - to:
+        - podSelector:
+            matchLabels:
+              app: whatsapp-bridge
+      ports:
+        - port: 3000
+          protocol: TCP
+
+    # camael-service:8003 — handoff Raphael → Camael (POST /api/camael/handoff)
+    # y creación de RFC ServiceNow vía Camael.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: camael-service
+      ports:
+        - port: 8003
+          protocol: TCP
+
+    # OTel Collector + Prometheus (queries PromQL para observe_metrics,
+    # observe_trends, observe_slo, observe_node_resources, observe_pvc_capacity).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - port: 4317
+          protocol: TCP    # OTel gRPC
+        - port: 9090
+          protocol: TCP    # Prometheus
+
+    # Kubernetes API server — K8s Python client (observe_cluster, rollout_restart,
+    # rollout_undo_deployment, Lease management, cert-manager API).
+    # MicroK8s expone el apiserver en 192.168.1.88:16443.
+    # Calico evalúa ipBlock sobre el IP pre-DNAT (10.152.183.1) Y post-DNAT.
+    - to:
+        - ipBlock:
+            cidr: 10.152.183.1/32   # ClusterIP del servicio kubernetes (pre-DNAT)
+      ports:
+        - port: 443
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.88/32   # Node IP — apiserver real (post-DNAT)
+      ports:
+        - port: 16443
+          protocol: TCP
+
+    # DNS — siempre necesario para resolver nombres de servicios.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+
+---
+# -----------------------------------------------------------------------------
+# 3) camael-service · INGRESS
+# Controla quién puede alcanzar camael-service:8003.
+# -----------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: camael-service-ingress
+  namespace: amael-ia
+spec:
+  podSelector:
+    matchLabels:
+      app: camael-service
+  policyTypes:
+    - Ingress
+
+  ingress:
+    # Kubelet health/readiness probes — desde la IP del nodo.
+    - from:
+        - ipBlock:
+            cidr: 192.168.1.88/32
+      ports:
+        - port: 8003
+          protocol: TCP
+
+    # Backend principal — proxy de /api/devops/* (ci-hook, command).
+    - from:
+        - podSelector:
+            matchLabels:
+              app: amael-agentic-backend
+      ports:
+        - port: 8003
+          protocol: TCP
+
+    # Raphael — handoff Raphael → Camael (POST /api/camael/handoff).
+    - from:
+        - podSelector:
+            matchLabels:
+              app: raphael-service
+      ports:
+        - port: 8003
+          protocol: TCP
+
+    # WhatsApp bridge — POST /api/devops/command (comandos /devops <cmd>).
+    - from:
+        - podSelector:
+            matchLabels:
+              app: whatsapp-bridge
+      ports:
+        - port: 8003
+          protocol: TCP
+
+    # ingress-nginx — webhooks externos de Bitbucket (PR approved/merged) entran
+    # vía Ingress hacia /api/devops/webhook/bitbucket en camael-service.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8003
+          protocol: TCP
+
+    # Prometheus scrape — /metrics.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - port: 8003
+          protocol: TCP
+
+---
+# -----------------------------------------------------------------------------
+# 4) camael-service · EGRESS
+# Controla adonde puede salir camael-service.
+# -----------------------------------------------------------------------------
+# Nota de seguridad: Camael necesita salida a Internet para Bitbucket
+# (api.bitbucket.org) y ServiceNow (*.service-now.com), ambos SaaS. Para
+# prevenir que camael-service se use como pivot hacia recursos privados del
+# hogar/laboratorio (router, NAS, otros clusters), el egress externo 0.0.0.0/0
+# EXCLUYE explícitamente los rangos RFC1918 (10/8, 172.16/12, 192.168/16).
+# El tráfico interno al cluster debe ir por los podSelector/namespaceSelector
+# definidos arriba — no por el bloque de Internet.
+# -----------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: camael-service-egress
+  namespace: amael-ia
+spec:
+  podSelector:
+    matchLabels:
+      app: camael-service
+  policyTypes:
+    - Egress
+
+  egress:
+    # PostgreSQL — camael_gitops_actions.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+
+    # Redis — dedup PRs (bb:pending_pr:*), estado handoff (sre:gitops:*),
+    # lectura de maintenance window.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - port: 6379
+          protocol: TCP
+
+    # Ollama — camael_analyzer.py (qwen3:14b con think=False para decidir
+    # multiplier + PR title).
+    - to:
+        - podSelector:
+            matchLabels:
+              app: ollama
+      ports:
+        - port: 11434
+          protocol: TCP
+
+    # Vault — lectura de credenciales Bitbucket y ServiceNow
+    # (secret/data/amael/bitbucket/*, secret/data/amael/servicenow/*).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vault
+      ports:
+        - port: 8200
+          protocol: TCP
+
+    # Kubernetes API server — sólo lectura (ArgoCD discovery vía CR o
+    # verificación de estado de deployments post-merge).
+    - to:
+        - ipBlock:
+            cidr: 10.152.183.1/32   # ClusterIP servicio kubernetes (pre-DNAT)
+      ports:
+        - port: 443
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.88/32   # Node IP — apiserver real (post-DNAT)
+      ports:
+        - port: 16443
+          protocol: TCP
+
+    # Internet (Bitbucket + ServiceNow, SaaS externos). Excluye rangos RFC1918
+    # para evitar que Camael pivote hacia recursos privados de la red interna.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - port: 443
+          protocol: TCP
+
+    # DNS — siempre necesario.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP

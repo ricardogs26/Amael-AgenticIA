@@ -1,0 +1,92 @@
+# RBAC para camael-service (DevOps / GitOps Agent extraído del backend)
+#
+# Fase 1 · feature/agents-split — extracción de agents/devops/ del backend
+# amael-agentic-backend a un pod independiente `camael-service`.
+#
+# Principio de diseño: Camael NO tiene permisos de remediación directa. Su
+# ciclo es GitOps puro — modifica YAML en Bitbucket, crea PRs, abre RFCs en
+# ServiceNow. En el clúster solo necesita LEER y hacer PATCH en deployments
+# existentes para verificar el resultado del handoff post-merge (ArgoCD
+# sincroniza el manifest real; Camael solo observa que converja).
+#
+# Diferencias con raphael-sa (contraste intencional):
+#   - Camael NO puede eliminar pods       (Raphael sí — vía sre-agent-healer)
+#   - Camael NO puede crear/borrar deployments  (solo patch de recursos existentes)
+#   - Camael NO tiene pods/exec ni pods/log     (no hace troubleshooting en vivo)
+#   - Camael SÍ puede leer ArgoCD Applications  (para mapear Bitbucket ↔ Deployment)
+#
+# Referencias:
+#   - docs/PHASE0-ANALYSIS.md §5 (dependencias), §6 (estado compartido), §12 (namespace)
+#   - k8s/rbac/04-sre-rbac.yaml (argocd-application-reader ya definido ahí)
+
+# ── ServiceAccount ────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: camael-sa
+  namespace: amael-ia
+
+---
+# ── Role: camael-deployer ─────────────────────────────────────────────────────
+# Role NUEVO — no existe equivalente en el clúster. Alcance: solo amael-ia.
+# Se usa para la fase de verificación post-handoff (T+600s tras aplicar el
+# patch de recursos en Bitbucket): Camael espera que ArgoCD sincronice y luego
+# valida que el deployment converja.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: camael-deployer
+  namespace: amael-ia
+rules:
+# Deployments: observar y ajustar recursos existentes para verificación
+# post-handoff. `patch` habilita tocar campos puntuales (p.ej. anotaciones
+# de sync) sin permitir create/delete — evita que Camael genere deployments
+# nuevos fuera del flujo GitOps.
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "patch"]
+# Pods: observar el resultado del rollout tras el merge del PR
+# (readiness, restarts, estado de los contenedores). Solo lectura —
+# si hay que matarlos, es trabajo de Raphael.
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+# Leases: leader election si en el futuro camael-service escala a >1 réplica
+# (hoy replicas=1, pero dejar el permiso evita un cambio de RBAC al escalar).
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "create", "update"]
+
+---
+# ── RoleBinding: camael-deployer → camael-sa ──────────────────────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: camael-deployer-binding
+  namespace: amael-ia
+subjects:
+- kind: ServiceAccount
+  name: camael-sa
+  namespace: amael-ia
+roleRef:
+  kind: Role
+  name: camael-deployer
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ── ClusterRoleBinding: ArgoCD Application reader ─────────────────────────────
+# Para resolver qué ArgoCD Application sincroniza cada deployment — Camael
+# necesita esa info para saber qué repo Bitbucket y qué path debe tocar
+# cuando recibe un handoff desde Raphael.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: camael-argocd-reader-binding
+subjects:
+- kind: ServiceAccount
+  name: camael-sa
+  namespace: amael-ia
+roleRef:
+  kind: ClusterRole
+  name: argocd-application-reader  # ClusterRole definido en 04-sre-rbac.yaml
+  apiGroup: rbac.authorization.k8s.io
