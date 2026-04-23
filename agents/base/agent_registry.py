@@ -152,10 +152,10 @@ def register_all_agents(skip_camael: bool = False) -> None:
         ("agents.qa.agent",           "QAAgent"),
     ]
     for module_path, class_name in _agent_modules:
-        if skip_camael and module_path == "agents.devops.agent":
+        if skip_camael and module_path.startswith("agents.devops"):
             logger.info(
-                "[registry] Camael (agents.devops.agent) OMITIDO — "
-                "CAMAEL_MODE=remote. Delegación vía clients.camael_client."
+                f"[registry] {module_path} OMITIDO — "
+                f"CAMAEL_MODE=remote. Delegación vía clients.camael_client."
             )
             continue
         try:
