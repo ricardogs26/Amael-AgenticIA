@@ -64,6 +64,16 @@ class Settings(BaseSettings):
         description="inprocess: SRE/DevOps corren dentro del backend. "
                     "remote: se llaman por HTTP a raphael-service y camael-service.",
     )
+    # CAMAEL_MODE — flag SEPARADO de AGENTS_MODE para canary independiente.
+    # Default "inprocess" incluso si AGENTS_MODE=remote, porque el canary de
+    # Raphael (Fase 2) y el de Camael (Fase 3) se activan en commits distintos.
+    # Ver docs/superpowers/specs/2026-04-23-phase-3-camael-standalone-design.md §7
+    camael_mode: Literal["inprocess", "remote"] = Field(
+        default="inprocess",
+        alias="CAMAEL_MODE",
+        description="inprocess: agents/devops/ corre dentro del proceso. "
+                    "remote: se delega por HTTP a camael-service:8003.",
+    )
     raphael_service_url: str = Field(
         default="http://raphael-service:8002",
         alias="RAPHAEL_SERVICE_URL",
