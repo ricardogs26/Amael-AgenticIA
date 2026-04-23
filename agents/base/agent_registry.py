@@ -124,11 +124,17 @@ class AgentRegistry:
         cls._agents.clear()
 
 
-def register_all_agents() -> None:
+def register_all_agents(skip_camael: bool = False) -> None:
     """
     Importa todos los módulos de agentes para que sus decoradores
     @AgentRegistry.register se ejecuten.
     Llamar una vez en el startup de la aplicación.
+
+    Args:
+        skip_camael: Si True, NO importa `agents.devops.agent` (Camael).
+            Usado por el backend cuando CAMAEL_MODE=remote — Camael corre en
+            camael-service:8003 y el backend delega vía clients.camael_client.
+            Ver Fase 3.2 de agents-split.
     """
     _agent_modules = [
         ("agents.planner.agent",      "SarielAgent"),
@@ -146,6 +152,12 @@ def register_all_agents() -> None:
         ("agents.qa.agent",           "QAAgent"),
     ]
     for module_path, class_name in _agent_modules:
+        if skip_camael and module_path == "agents.devops.agent":
+            logger.info(
+                "[registry] Camael (agents.devops.agent) OMITIDO — "
+                "CAMAEL_MODE=remote. Delegación vía clients.camael_client."
+            )
+            continue
         try:
             import importlib
             importlib.import_module(module_path)
