@@ -33,7 +33,8 @@ _REDIS_PENDING_TTL = 3600  # 1h — ventana de catch-up
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _is_inprocess() -> bool:
-    return settings.agents_mode == "inprocess"
+    """Camael usa su propio flag CAMAEL_MODE independiente de AGENTS_MODE."""
+    return settings.camael_mode == "inprocess"
 
 
 def _now_iso() -> str:

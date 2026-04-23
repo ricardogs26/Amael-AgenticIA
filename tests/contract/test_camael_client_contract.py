@@ -211,3 +211,77 @@ class TestCamaelAuthHeader:
 
         auth = captured[0].headers["authorization"]
         assert auth.startswith("Bearer ")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Tests del flag CAMAEL_MODE separado
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestCamaelModeFlag:
+    """Verifica que camael_client usa CAMAEL_MODE, no AGENTS_MODE."""
+
+    def test_agents_mode_remote_but_camael_mode_inprocess_calls_local(
+        self, monkeypatch, fake_redis
+    ):
+        """AGENTS_MODE=remote + CAMAEL_MODE=inprocess → llama a healer.handoff local."""
+        from clients import camael_client
+
+        class FakeSettings:
+            agents_mode = "remote"
+            camael_mode = "inprocess"
+            internal_api_secret = "x"
+            camael_service_url = "http://camael-service:8003"
+
+        monkeypatch.setattr(camael_client, "settings", FakeSettings())
+
+        local_called = []
+
+        def fake_local_handoff(anomaly, incident_key, notify_fn):
+            local_called.append(incident_key)
+
+        monkeypatch.setattr(
+            "agents.sre.healer.handoff_to_camael", fake_local_handoff
+        )
+
+        anomaly = FakeAnomaly()
+        camael_client.handoff_to_camael(anomaly, "test-key", lambda m: None)
+
+        assert local_called == ["test-key"]
+        # Verificar que NO se intentó HTTP (no fallback a Redis queue)
+        fake_redis.set.assert_not_called()
+
+    def test_both_modes_remote_attempts_http(self, monkeypatch, fake_redis):
+        """AGENTS_MODE=remote + CAMAEL_MODE=remote → intenta HTTP a Camael."""
+        from clients import camael_client
+
+        class FakeSettings:
+            agents_mode = "remote"
+            camael_mode = "remote"
+            internal_api_secret = "x"
+            camael_service_url = "http://camael-service:8003"
+
+        monkeypatch.setattr(camael_client, "settings", FakeSettings())
+
+        http_calls = []
+
+        class FakeResponse:
+            status_code = 202
+            content = b'{"status":"accepted","pr_id":"PR-1"}'
+            text = '{"status":"accepted","pr_id":"PR-1"}'
+            def json(self):
+                return {"status": "accepted", "pr_id": "PR-1"}
+
+        class FakeClient:
+            def post(self, path, json):
+                http_calls.append((path, json))
+                return FakeResponse()
+
+        monkeypatch.setattr(
+            "clients._http.get_camael_client", lambda: FakeClient()
+        )
+
+        camael_client.handoff_to_camael(FakeAnomaly(), "test-key-2", lambda m: None)
+
+        assert len(http_calls) == 1
+        assert http_calls[0][0] == "/api/camael/handoff"
+        assert http_calls[0][1]["incident_key"] == "test-key-2"
