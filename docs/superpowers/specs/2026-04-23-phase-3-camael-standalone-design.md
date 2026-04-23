@@ -5,6 +5,13 @@
 **Precursor:** `docs/PHASE0-ANALYSIS.md` (análisis completo del split Raphael/Camael)
 **Estado previo:** Fase 2 cerrada. Raphael corre en `raphael-service:8002`. Camael sigue embebido en el backend **y duplicado en raphael-service** (ambas imágenes importan `agents/devops/*`).
 
+**Scaffolding ya existente (Fase 1):**
+- `clients/camael_client.py` — `handoff_to_camael()`, `get_handoff_status()`, `drain_pending_handoffs()` ya implementados; usa `settings.agents_mode` para decidir inprocess vs HTTP
+- `clients/_http.py` — `get_camael_client()`, `get_camael_async_client()` listos
+- `config/settings.py` — `agents_mode`, `raphael_service_url`, `camael_service_url` (default `http://camael-service:8003`)
+- `tests/contract/test_camael_client_contract.py` — contract tests de la Fase 1
+- Endpoint acordado en el OpenAPI de Fase 1: **`/api/camael/*`** (no `/api/devops/*`)
+
 ---
 
 ## 1. Objetivo
@@ -81,7 +88,7 @@ Handoffs pendientes en `wal:camael:*` los drena el backend o raphael al siguient
 | `camael_service/main.py` | nuevo | Entry point FastAPI análogo a `raphael_service/main.py`. Lifespan dispara drain del WAL al arrancar. Puerto `:8003`. Reutiliza imagen del monorepo |
 | `clients/camael_client.py` | nuevo | Dispatcher: `CAMAEL_MODE=remote` → HTTP a `camael-service:8003`; `inprocess` → import directo. Expone `handoff(anomaly, incident_key, notifier)` y `update_rfc(sys_id, result, message)` |
 | `storage/redis/wal.py` | nuevo | WAL genérico. `enqueue(topic, key, payload)` / `drain(topic, consumer_fn)`. Topics: `wal:camael:handoff`, `wal:camael:rfc_update`. TTL 24h. Idempotencia por `key` |
-| `docs/openapi/camael-service.yaml` | nuevo | Contrato: `POST /api/devops/handoff`, `PATCH /api/devops/rfc/{sys_id}`, más todos los `/api/devops/*` que ya existen en el backend |
+| `docs/openapi/camael-service.yaml` | nuevo | Contrato: `POST /api/camael/handoff`, `PATCH /api/camael/rfc/{sys_id}`, más todos los `/api/devops/*` que ya existen en el backend |
 | `k8s/agents/1X-camael-service-*.yaml` | nuevo | Deployment, Service, SA, Role+RoleBinding (acceso a secretos Bitbucket/SN), NetworkPolicy, Vault role `camael-service` |
 
 ### Código modificado
@@ -91,7 +98,8 @@ Handoffs pendientes en `wal:camael:*` los drena el backend o raphael al siguient
 | `config/settings.py` | `camael_mode: Literal["inprocess","remote"] = "inprocess"`, `camael_service_url: str = "http://camael-service:8003"` |
 | `agents/sre/healer.py:807` | `from agents.devops import servicenow_client` → `from clients.camael_client import update_rfc`. Fallback WAL en excepción |
 | `agents/sre/scheduler.py:420` | `healer.handoff_to_camael(...)` → `camael_client.handoff(...)`. Fallback WAL en excepción |
-| `interfaces/api/routers/devops.py` | Todas las rutas delegan a `camael_client` (patrón igual al usado en `routers/sre.py` en Fase 2.2) |
+| `interfaces/api/routers/devops.py` | **Sin cambios en Fase 3.** Son webhooks externos (GitHub / Bitbucket); llegan por el ingress del backend. Su delegación a camael-service se pospone (Fase 4 o 5) — no bloquea el split del agente-a-agente que es el objetivo de Fase 3 |
+| `agents/sre/scheduler.py:420` | `healer.handoff_to_camael(...)` → `clients.camael_client.handoff_to_camael(...)` (dispatcher que decide inprocess vs HTTP) |
 | `main.py` (backend) | Gate: si `CAMAEL_MODE=remote` no importar `agents/devops/*` ni correr sus hooks de lifespan |
 
 ### Fuera de scope (no se toca)
@@ -102,7 +110,7 @@ Handoffs pendientes en `wal:camael:*` los drena el backend o raphael al siguient
 
 ## 5. Contratos HTTP
 
-### `POST /api/devops/handoff`
+### `POST /api/camael/handoff`
 
 Invocado por Raphael cuando decide que una anomalía amerita acción GitOps (ROLLOUT_RESTART que probablemente necesita aumentar recursos).
 
@@ -129,7 +137,7 @@ Response `202 Accepted`:
 
 Response `409 Conflict` si `incident_key` ya está en proceso (dedup por `bb:pending_pr:{incident_key}`).
 
-### `PATCH /api/devops/rfc/{sys_id}`
+### `PATCH /api/camael/rfc/{sys_id}`
 
 Invocado por Raphael al terminar la verificación post-deploy (T+600s).
 
@@ -229,6 +237,7 @@ Puntos de conmutación:
 - 403 recurrente de Raphael sobre `prometheus-kube-prometheus-stack-prometheus` (deuda pre-existente)
 - Warnings de `vault_knowledge.md`, `metrics_knowledge.md`, OTel `opentelemetry.instrumentation.requests`
 - Nuevos dashboards Grafana para Camael (se propone en Fase 4, fuera de este spec)
+- **Migración de webhooks externos** (`/api/devops/ci-hook`, `/api/devops/webhook/bitbucket`): siguen llegando al backend vía ingress existente. Moverlos a camael-service requiere cambios de ingress + tests de integración con GitHub/Bitbucket reales — se aplaza a Fase 4/5
 
 ## 11. Riesgos y mitigaciones
 
