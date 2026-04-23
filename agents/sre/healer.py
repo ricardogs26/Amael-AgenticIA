@@ -802,31 +802,47 @@ async def _update_rfc_state(
     success: bool,
     reason: str,
 ) -> None:
-    """Actualiza el RFC en ServiceNow según el resultado de la verificación."""
-    try:
-        from agents.devops import servicenow_client as sn
-        if not sn.is_configured():
-            return
+    """
+    Actualiza el RFC en ServiceNow según el resultado de la verificación.
 
+    Delega a clients.camael_client.update_rfc — Camael es el único dueño de
+    ServiceNow post Phase 3. Si Camael está caído, el cliente encola el
+    evento en el WAL Redis (topic rfc_update, TTL 24h) para replay.
+    """
+    try:
         sys_id = rfc_info.get("sys_id", "")
         number = rfc_info.get("number", "N/A")
         if not sys_id:
             return
 
         if success:
-            await sn.close_rfc(
-                sys_id,
+            message = (
                 f"Despliegue verificado como exitoso por Raphael (SRE).\n"
                 f"Deployment {namespace}/{deployment_name} saludable 5 min post-deploy.\n"
-                f"RFC {number} cerrado automáticamente.",
+                f"RFC {number} cerrado automáticamente."
+            )
+            from clients.camael_client import update_rfc
+            await update_rfc(
+                sys_id=sys_id,
+                result="closed",
+                message=message,
+                deployment=deployment_name,
+                namespace=namespace,
             )
             logger.info(f"[healer] RFC {number} → Closed (verificación exitosa)")
         else:
-            await sn.fail_rfc(
-                sys_id,
+            message = (
                 f"Verificación post-deploy fallida para {namespace}/{deployment_name}.\n"
                 f"Razón: {reason}\n"
-                f"RFC {number} requiere revisión manual.",
+                f"RFC {number} requiere revisión manual."
+            )
+            from clients.camael_client import update_rfc
+            await update_rfc(
+                sys_id=sys_id,
+                result="review",
+                message=message,
+                deployment=deployment_name,
+                namespace=namespace,
             )
             logger.warning(f"[healer] RFC {number} → Review (verificación fallida)")
     except Exception as exc:
