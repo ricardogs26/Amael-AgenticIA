@@ -64,7 +64,7 @@ spec:
 
       containers:
       - name: amael-agentic-backend
-        image: registry.richardx.dev/amael-agentic-backend:1.10.94
+        image: registry.richardx.dev/amael-agentic-backend:1.11.0
         imagePullPolicy: Always
         ports:
         - name: http
@@ -76,6 +76,13 @@ spec:
             name: amael-agentic-configmap
 
         env:
+        # Phase 2.6 canary — AGENTS_MODE=remote delega el SRE loop a raphael-service.
+        # El backend ya no corre `agents.sre.start_sre_loop()` al arrancar; los
+        # endpoints /api/sre/* en el router ahora hacen HTTP a raphael-service:8002
+        # vía clients/raphael_client.py. Para rollback: cambiar a "inprocess".
+        - name: AGENTS_MODE
+          value: "remote"
+
         # Secrets compartidos con backend-ia
         - name: JWT_SECRET_KEY
           valueFrom:
