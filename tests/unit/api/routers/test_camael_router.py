@@ -33,7 +33,11 @@ AUTH_HEADER = {"Authorization": "Bearer " + ("test-secret-" + "x" * 20)}
 
 def test_handoff_requires_auth(client):
     resp = client.post("/api/camael/handoff", json={"incident_key": "x"})
-    assert resp.status_code == 401
+    # 403 por consistencia con el resto de routers internos (sre, devops, planner).
+    # Semánticamente 401 sería más correcto, pero cambiarlo aquí rompería el
+    # contrato con los clientes existentes (httpx.get().raise_for_status()
+    # trata 403 y 401 distinto en algunos call sites).
+    assert resp.status_code == 403
 
 
 def test_handoff_happy_path(client, monkeypatch):
