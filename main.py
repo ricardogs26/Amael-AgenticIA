@@ -57,6 +57,23 @@ def _check_external_credentials_security() -> None:
         logger.info("[security] GITHUB_TOKEN no configurado — GitHubTool en modo limitado")
 
 
+# ── Gates de feature flag (agents-split) ──────────────────────────────────────
+
+def _should_register_devops_inprocess() -> bool:
+    """
+    Fase 3 gate: si CAMAEL_MODE=remote, el backend NO registra los hooks de
+    agents/devops/ (el pod camael-service los atiende). Si CAMAEL_MODE=inprocess
+    (default), sigue comportamiento actual.
+
+    NOTA: esto gatea solo la carga del AGENTE Camael y sus hooks de startup.
+    El router `interfaces/api/routers/devops.py` (webhooks GitHub/Bitbucket)
+    sigue registrándose siempre — esos webhooks los recibe el backend via
+    ingress y se procesan localmente.
+    """
+    from config.settings import settings
+    return settings.camael_mode == "inprocess"
+
+
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -116,9 +133,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error(f"[startup] Tools registry FALLÓ: {exc}", exc_info=True)
 
     # 4b. Agents registry
+    # Phase 3.2: gateado por feature flag CAMAEL_MODE.
+    #   inprocess → Camael (agents/devops/) se registra dentro del backend.
+    #   remote    → Camael corre en camael-service:8003; el backend NO lo carga
+    #               y delega handoffs vía clients.camael_client.
     try:
         from agents.base.agent_registry import register_all_agents
-        register_all_agents()
+        if _should_register_devops_inprocess():
+            logger.info("[startup] CAMAEL_MODE=inprocess — cargando agents/devops/")
+            register_all_agents()
+        else:
+            logger.info(
+                "[startup] CAMAEL_MODE=remote — agents/devops NO se carga. "
+                "Camael corre en camael-service:8003; backend delega vía "
+                "clients.camael_client."
+            )
+            register_all_agents(skip_camael=True)
         logger.info("[startup] Agentes registrados")
     except Exception as exc:
         logger.error(f"[startup] Agents registry FALLÓ: {exc}", exc_info=True)
