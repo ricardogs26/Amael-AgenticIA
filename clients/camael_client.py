@@ -237,3 +237,68 @@ def drain_pending_handoffs() -> int:
     except Exception as exc:
         logger.error(f"[camael_client] drain FALLÓ: {exc}")
         return 0
+
+
+# ── update_rfc — Raphael cierra / marca review del RFC post-verificación ──────
+
+async def update_rfc(
+    sys_id: str,
+    result: str,
+    message: str,
+    deployment: str | None = None,
+    namespace: str | None = None,
+) -> None:
+    """
+    Actualiza el estado de un RFC ServiceNow tras la verificación post-deploy.
+
+    Contrato (reemplaza `agents/sre/healer._update_rfc_state` + import directo
+    de agents.devops.servicenow_client):
+
+    - result="closed": el deployment está sano 5min post-deploy → cerrar RFC
+    - result="review": verificación falló → marcar para revisión manual
+
+    En CAMAEL_MODE=inprocess llama al módulo servicenow_client local.
+    En CAMAEL_MODE=remote hace PATCH /api/camael/rfc/{sys_id}; si falla,
+    encola en WAL (topic "rfc_update", key=sys_id).
+
+    Idempotencia: ServiceNow acepta transiciones repetidas al mismo estado
+    sin error; el WAL dedup por sys_id cubre el resto.
+    """
+    if _is_inprocess():
+        try:
+            from agents.devops import servicenow_client as sn
+            if not sn.is_configured():
+                return
+            if result == "closed":
+                await sn.close_rfc(sys_id, message)
+            elif result == "review":
+                await sn.fail_rfc(sys_id, message)
+            else:
+                logger.warning(f"[camael_client] update_rfc result inválido: {result}")
+        except Exception as exc:
+            logger.warning(f"[camael_client] update_rfc inprocess FALLÓ: {exc}")
+        return
+
+    # ── Remote path ────────────────────────────────────────────────────────────
+    payload: dict[str, Any] = {"result": result, "message": message}
+    if deployment is not None:
+        payload["deployment"] = deployment
+    if namespace is not None:
+        payload["namespace"] = namespace
+
+    try:
+        from clients._http import get_camael_client
+        client = get_camael_client()
+        resp = client.patch(f"/api/camael/rfc/{sys_id}", json=payload)
+        if resp.status_code in (200, 204):
+            logger.info(f"[camael_client] update_rfc OK {sys_id} result={result}")
+            return
+        if resp.status_code == 404:
+            logger.warning(f"[camael_client] RFC {sys_id} no existe en Camael — skip")
+            return
+        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}")
+    except Exception as exc:
+        logger.error(f"[camael_client] update_rfc FALLÓ {sys_id}: {exc}")
+        from storage.redis import wal
+        wal_payload = {**payload, "_sys_id": sys_id}
+        wal.enqueue("rfc_update", sys_id, wal_payload)

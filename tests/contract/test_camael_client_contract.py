@@ -285,3 +285,133 @@ class TestCamaelModeFlag:
         assert len(http_calls) == 1
         assert http_calls[0][0] == "/api/camael/handoff"
         assert http_calls[0][1]["incident_key"] == "test-key-2"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Tests — update_rfc (Phase 3.4)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestUpdateRfc:
+    """update_rfc(sys_id, result, message) — contract contra /api/camael/rfc/{sys_id}."""
+
+    def _inprocess_settings(self):
+        class S:
+            camael_mode = "inprocess"
+            agents_mode = "inprocess"
+            internal_api_secret = "x"
+            camael_service_url = "http://camael-service:8003"
+        return S()
+
+    def _remote_settings(self):
+        class S:
+            camael_mode = "remote"
+            agents_mode = "remote"
+            internal_api_secret = "x"
+            camael_service_url = "http://camael-service:8003"
+        return S()
+
+    def test_inprocess_calls_servicenow_close_rfc(self, monkeypatch):
+        from clients import camael_client
+        monkeypatch.setattr(camael_client, "settings", self._inprocess_settings())
+
+        calls = []
+
+        class FakeSn:
+            def is_configured(self):
+                return True
+            async def close_rfc(self, sys_id, message):
+                calls.append(("close", sys_id, message))
+            async def fail_rfc(self, sys_id, message):
+                calls.append(("fail", sys_id, message))
+
+        import sys, types
+        fake_module = types.ModuleType("agents.devops.servicenow_client")
+        fake_sn = FakeSn()
+        fake_module.is_configured = fake_sn.is_configured
+        fake_module.close_rfc = fake_sn.close_rfc
+        fake_module.fail_rfc = fake_sn.fail_rfc
+        monkeypatch.setitem(sys.modules, "agents.devops.servicenow_client", fake_module)
+
+        import asyncio
+        asyncio.run(camael_client.update_rfc(
+            sys_id="SN123",
+            result="closed",
+            message="Healthy 5min post-deploy",
+        ))
+        assert calls == [("close", "SN123", "Healthy 5min post-deploy")]
+
+    def test_remote_patch_http_on_success(self, monkeypatch):
+        from clients import camael_client
+        monkeypatch.setattr(camael_client, "settings", self._remote_settings())
+
+        http_calls = []
+
+        class FakeResp:
+            status_code = 200
+            content = b'{"sys_id":"SN123","state":"Closed"}'
+            text = '{"sys_id":"SN123","state":"Closed"}'
+            def json(self):
+                return {"sys_id": "SN123", "state": "Closed"}
+            def raise_for_status(self):
+                pass
+
+        class FakeClient:
+            def patch(self, path, json):
+                http_calls.append((path, json))
+                return FakeResp()
+
+        monkeypatch.setattr(
+            "clients._http.get_camael_client", lambda: FakeClient()
+        )
+
+        import asyncio
+        asyncio.run(camael_client.update_rfc(
+            sys_id="SN123",
+            result="closed",
+            message="ok",
+            deployment="demo-oom",
+            namespace="amael-ia",
+        ))
+        assert http_calls == [
+            (
+                "/api/camael/rfc/SN123",
+                {
+                    "result": "closed",
+                    "message": "ok",
+                    "deployment": "demo-oom",
+                    "namespace": "amael-ia",
+                },
+            )
+        ]
+
+    def test_remote_falls_back_to_wal_on_network_error(self, monkeypatch, fake_redis):
+        from clients import camael_client
+        monkeypatch.setattr(camael_client, "settings", self._remote_settings())
+
+        class FakeClient:
+            def patch(self, path, json):
+                raise ConnectionError("camael unreachable")
+
+        monkeypatch.setattr(
+            "clients._http.get_camael_client", lambda: FakeClient()
+        )
+
+        import asyncio
+        asyncio.run(camael_client.update_rfc(
+            sys_id="SN456",
+            result="review",
+            message="Deploy failed",
+            deployment="demo-oom",
+            namespace="amael-ia",
+        ))
+
+        # fake_redis es un MagicMock, no dict-backed: verificamos vía call_args.
+        # storage.redis.wal.enqueue llama: r.set(full_key, json.dumps(payload), ex=ttl_seconds)
+        fake_redis.set.assert_called_once()
+        args, kwargs = fake_redis.set.call_args
+        assert args[0] == "wal:camael:rfc_update:SN456"
+        # Verificamos que el payload incluya sys_id marker + result + message
+        import json as _json
+        payload = _json.loads(args[1])
+        assert payload.get("result") == "review"
+        assert payload.get("_sys_id") == "SN456"
