@@ -105,8 +105,8 @@ class TestHandoffSkip:
 
 
 class TestHandoffFallback:
-    def test_network_error_enqueues_to_redis_and_notifies(self, mock_camael, fake_redis):
-        """Si camael-service no responde, encolamos en Redis y notificamos humano."""
+    def test_network_error_enqueues_to_wal_and_notifies(self, mock_camael, fake_redis):
+        """Si camael-service no responde, encolamos en el WAL y notificamos humano."""
         def handler(request):
             raise httpx.ConnectError("Connection refused")
         mock_camael(handler)
@@ -116,11 +116,11 @@ class TestHandoffFallback:
         notify = MagicMock()
         handoff_to_camael(FakeAnomaly(), incident_key="k3", notify_fn=notify)
 
-        # Redis.set fue llamado con TTL 3600
+        # wal.enqueue → r.set con la key del WAL y TTL 24h
         fake_redis.set.assert_called_once()
         call = fake_redis.set.call_args
-        assert "camael:pending_handoff:k3" in call[0][0]
-        assert call[1]["ex"] == 3600
+        assert call[0][0] == "wal:camael:handoff:k3"
+        assert call[1]["ex"] == 86400
         # Humano notificado
         notify.assert_called_once()
         msg = notify.call_args[0][0]
@@ -174,7 +174,7 @@ class TestDrainPendingHandoffs:
     def test_drain_reposts_and_deletes_on_success(self, mock_camael, fake_redis):
         import json as _json
         payload = {"incident_key": "k5", "issue_type": "OOM_KILLED", "namespace": "amael-ia"}
-        fake_redis.keys.return_value = [b"camael:pending_handoff:k5"]
+        fake_redis.keys.return_value = [b"wal:camael:handoff:k5"]
         fake_redis.get.return_value = _json.dumps(payload).encode()
 
         captured = mock_camael(lambda req: httpx.Response(202, json={"incident_key": "k5", "status": "queued"}))
@@ -185,12 +185,12 @@ class TestDrainPendingHandoffs:
         assert count == 1
         assert captured[0].method == "POST"
         assert captured[0].url.path == "/api/camael/handoff"
-        fake_redis.delete.assert_called_once_with(b"camael:pending_handoff:k5")
+        fake_redis.delete.assert_called_once_with("wal:camael:handoff:k5")
 
     def test_drain_keeps_entry_on_failure(self, mock_camael, fake_redis):
         import json as _json
         payload = {"incident_key": "k6", "issue_type": "OOM_KILLED"}
-        fake_redis.keys.return_value = [b"camael:pending_handoff:k6"]
+        fake_redis.keys.return_value = [b"wal:camael:handoff:k6"]
         fake_redis.get.return_value = _json.dumps(payload).encode()
 
         mock_camael(lambda req: httpx.Response(503, json={"detail": "still down"}))
@@ -415,3 +415,133 @@ class TestUpdateRfc:
         payload = _json.loads(args[1])
         assert payload.get("result") == "review"
         assert payload.get("_sys_id") == "SN456"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Tests — WAL unificado (Phase 3.3, Task 8)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestHandoffUsesWal:
+    """Fallback de handoff debe usar storage.redis.wal (no el key legacy ad-hoc)."""
+
+    def test_handoff_enqueues_to_wal_on_network_error(self, monkeypatch, fake_redis):
+        from clients import camael_client
+
+        class S:
+            camael_mode = "remote"
+            agents_mode = "remote"
+            internal_api_secret = "x"
+            camael_service_url = "http://camael-service:8003"
+
+        monkeypatch.setattr(camael_client, "settings", S())
+
+        class FakeClient:
+            def post(self, path, json):
+                raise ConnectionError("camael down")
+
+        monkeypatch.setattr(
+            "clients._http.get_camael_client", lambda: FakeClient()
+        )
+
+        camael_client.handoff_to_camael(
+            FakeAnomaly(), "oom:demo:amael-ia", lambda m: None
+        )
+
+        # Verificar que se llamó a Redis SET con la key del WAL (no la legacy)
+        fake_redis.set.assert_called_once()
+        args, kwargs = fake_redis.set.call_args
+        assert args[0] == "wal:camael:handoff:oom:demo:amael-ia"
+        # TTL debe ser 24h (default del WAL), no la legacy 3600
+        assert kwargs.get("ex") == 86400 or (len(args) >= 3 and args[2] == 86400)
+
+    def test_drain_uses_wal_module(self, monkeypatch, fake_redis):
+        """drain_pending_handoffs debe llamar a wal.drain('handoff', ...)."""
+        from clients import camael_client
+
+        class S:
+            camael_mode = "remote"
+            agents_mode = "remote"
+            internal_api_secret = "x"
+            camael_service_url = "http://camael-service:8003"
+
+        monkeypatch.setattr(camael_client, "settings", S())
+
+        drain_calls = []
+
+        def fake_wal_drain(topic, consumer):
+            drain_calls.append((topic, consumer))
+            return 3  # pretend 3 drained
+
+        monkeypatch.setattr("storage.redis.wal.drain", fake_wal_drain)
+
+        count = camael_client.drain_pending_handoffs()
+
+        assert count == 3
+        assert len(drain_calls) == 1
+        assert drain_calls[0][0] == "handoff"
+        # El consumer debe ser un callable
+        assert callable(drain_calls[0][1])
+
+    def test_drain_rfc_updates_uses_wal_module(self, monkeypatch, fake_redis):
+        """drain_pending_rfc_updates debe llamar a wal.drain('rfc_update', ...)."""
+        from clients import camael_client
+
+        class S:
+            camael_mode = "remote"
+            agents_mode = "remote"
+            internal_api_secret = "x"
+            camael_service_url = "http://camael-service:8003"
+
+        monkeypatch.setattr(camael_client, "settings", S())
+
+        drain_calls = []
+
+        def fake_wal_drain(topic, consumer):
+            drain_calls.append((topic, consumer))
+            return 2
+
+        monkeypatch.setattr("storage.redis.wal.drain", fake_wal_drain)
+
+        count = camael_client.drain_pending_rfc_updates()
+
+        assert count == 2
+        assert drain_calls[0][0] == "rfc_update"
+
+    def test_drain_inprocess_is_noop(self, monkeypatch):
+        """En modo inprocess, drain_* debe retornar 0 sin tocar el WAL."""
+        from clients import camael_client
+
+        class S:
+            camael_mode = "inprocess"
+            agents_mode = "inprocess"
+            internal_api_secret = "x"
+            camael_service_url = "http://camael-service:8003"
+
+        monkeypatch.setattr(camael_client, "settings", S())
+
+        drain_calls = []
+
+        def fake_wal_drain(topic, consumer):
+            drain_calls.append(topic)
+            return 1
+
+        monkeypatch.setattr("storage.redis.wal.drain", fake_wal_drain)
+
+        assert camael_client.drain_pending_handoffs() == 0
+        assert camael_client.drain_pending_rfc_updates() == 0
+        assert drain_calls == []  # ninguna invocación a wal.drain
+
+    def test_pending_handoff_count_uses_wal(self, monkeypatch):
+        """get_pending_handoff_count debe usar wal.pending_count('handoff')."""
+        from clients import camael_client
+
+        calls = []
+
+        def fake_pending_count(topic):
+            calls.append(topic)
+            return 7
+
+        monkeypatch.setattr("storage.redis.wal.pending_count", fake_pending_count)
+
+        assert camael_client.get_pending_handoff_count() == 7
+        assert calls == ["handoff"]
