@@ -417,7 +417,8 @@ def sre_autonomous_loop(
                 # GitOps handoff — solo UNO por deployment por ciclo (loop-level dedup)
                 _deploy_loop_key = f"{anomaly.namespace}:{_deploy_normalized}"
                 if _deploy_loop_key not in _gitops_dispatched_this_run:
-                    healer.handoff_to_camael(anomaly, anomaly.incident_key, reporter.notify_whatsapp_sre)
+                    from clients.camael_client import handoff_to_camael as _camael_handoff
+                    _camael_handoff(anomaly, anomaly.incident_key, reporter.notify_whatsapp_sre)
                     _gitops_dispatched_this_run.add(_deploy_loop_key)
                 else:
                     logger.info(
