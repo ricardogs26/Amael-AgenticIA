@@ -24,6 +24,7 @@ os.environ.setdefault("POSTGRES_PASSWORD",    "test")
 os.environ.setdefault("MINIO_ACCESS_KEY",     "test-minio-access-key")
 os.environ.setdefault("MINIO_SECRET_KEY",     "test-minio-secret-key")
 os.environ.setdefault("AGENTS_MODE",          "remote")
+os.environ.setdefault("CAMAEL_MODE",          "remote")
 os.environ.setdefault("RAPHAEL_SERVICE_URL",  "http://raphael-service.test:8002")
 os.environ.setdefault("CAMAEL_SERVICE_URL",   "http://camael-service.test:8003")
 
@@ -37,13 +38,16 @@ from clients import _http
 @pytest.fixture(autouse=True)
 def _remote_mode():
     """Cada contract test corre en modo `remote`. Restaura al terminar."""
-    original = settings.agents_mode
+    original_agents = settings.agents_mode
+    original_camael = settings.camael_mode
     # pydantic-settings es inmutable en runtime; asignamos el atributo privado
     object.__setattr__(settings, "agents_mode", "remote")
+    object.__setattr__(settings, "camael_mode", "remote")
     _http.get_raphael_client.cache_clear()
     _http.get_camael_client.cache_clear()
     yield
-    object.__setattr__(settings, "agents_mode", original)
+    object.__setattr__(settings, "agents_mode", original_agents)
+    object.__setattr__(settings, "camael_mode", original_camael)
     _http.get_raphael_client.cache_clear()
     _http.get_camael_client.cache_clear()
 
