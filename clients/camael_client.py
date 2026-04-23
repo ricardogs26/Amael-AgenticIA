@@ -3,20 +3,20 @@ clients.camael_client — Abstracción de agents/devops/ (Camael) detrás de fea
 
 Función crítica: `handoff_to_camael()` — reemplaza la llamada in-process desde
 `agents/sre/scheduler.py:420` y `agents/sre/healer.py:579` por HTTP cuando
-AGENTS_MODE=remote, con fallback a queue en Redis si camael-service está caído.
+CAMAEL_MODE=remote, con fallback a WAL genérico si camael-service está caído.
 
-Fase 1: skeleton — AGENTS_MODE=inprocess por default.
-Fase 3: se conmuta a remote con canary; el fallback Redis garantiza idempotencia.
+Fase 3: CAMAEL_MODE={inprocess|remote} controla el routing. El fallback usa
+el WAL genérico `storage.redis.wal` (topics: `handoff`, `rfc_update`).
 
 API pública:
     handoff_to_camael(anomaly, incident_key, notify_fn)   → None
     get_handoff_status(incident_key)                       → dict
     get_pending_handoff_count()                            → int  (para métricas)
-    drain_pending_handoffs()                               → int  (procesa queue)
+    drain_pending_handoffs()                               → int  (procesa WAL handoff)
+    drain_pending_rfc_updates()                            → int  (procesa WAL rfc_update)
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -24,10 +24,6 @@ from typing import Any, Callable
 from config.settings import settings
 
 logger = logging.getLogger("clients.camael")
-
-# Redis key template para queue de handoffs pendientes
-_REDIS_PENDING_KEY = "camael:pending_handoff:{incident_key}"
-_REDIS_PENDING_TTL = 3600  # 1h — ventana de catch-up
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -76,19 +72,9 @@ def _anomaly_to_handoff_payload(anomaly: Any, incident_key: str) -> dict[str, An
 
 
 def _enqueue_fallback(incident_key: str, payload: dict[str, Any]) -> bool:
-    """Encola el handoff en Redis para replay posterior. True si exitoso."""
-    try:
-        from storage.redis.client import get_client
-        r = get_client()
-        key = _REDIS_PENDING_KEY.format(incident_key=incident_key)
-        r.set(key, json.dumps(payload), ex=_REDIS_PENDING_TTL)
-        logger.warning(
-            f"[camael_client] handoff encolado en Redis: {incident_key} (TTL {_REDIS_PENDING_TTL}s)"
-        )
-        return True
-    except Exception as exc:
-        logger.error(f"[camael_client] fallback Redis FALLÓ: {exc}", exc_info=True)
-        return False
+    """Encola el handoff en el WAL para replay posterior (topic 'handoff')."""
+    from storage.redis import wal
+    return wal.enqueue("handoff", incident_key, payload)
 
 
 # ── API pública ────────────────────────────────────────────────────────────────
@@ -186,57 +172,84 @@ def get_handoff_status(incident_key: str) -> dict[str, Any] | None:
 
 
 def get_pending_handoff_count() -> int:
-    """Número de handoffs pendientes en Redis (para dashboard / alertas)."""
-    try:
-        from storage.redis.client import get_client
-        r = get_client()
-        keys = r.keys(_REDIS_PENDING_KEY.format(incident_key="*"))
-        return len(keys) if keys else 0
-    except Exception:
-        return 0
+    """Número de handoffs pendientes en el WAL (para dashboard / alertas)."""
+    from storage.redis import wal
+    return wal.pending_count("handoff")
 
 
 def drain_pending_handoffs() -> int:
     """
-    Procesa los handoffs encolados en Redis (catch-up tras reconexión con camael-service).
-    Llamado al arranque del backend y periódicamente (ej. cada 5min via APScheduler).
-
-    Retorna el número de handoffs reenviados exitosamente.
+    Drena handoffs encolados en el WAL reintentando POST /api/camael/handoff.
+    Llamado al arranque de camael-service y cada 5min (APScheduler tick).
     """
     if _is_inprocess():
-        # En modo inprocess el queue no debería crecer; limpiamos por si quedaron restos.
         return 0
+
+    from storage.redis import wal
 
     try:
-        from storage.redis.client import get_client
-        r = get_client()
-        keys = r.keys(_REDIS_PENDING_KEY.format(incident_key="*"))
-        if not keys:
-            return 0
-
         from clients._http import get_camael_client
         client = get_camael_client()
-        ok_count = 0
-
-        for key in keys:
-            raw = r.get(key)
-            if not raw:
-                continue
-            try:
-                payload = json.loads(raw if isinstance(raw, str) else raw.decode())
-                resp = client.post("/api/camael/handoff", json=payload)
-                if resp.status_code in (200, 202):
-                    r.delete(key)
-                    ok_count += 1
-                    logger.info(f"[camael_client] drain: re-enviado {payload.get('incident_key')}")
-            except Exception as exc:
-                logger.warning(f"[camael_client] drain: falló {key}: {exc}")
-
-        return ok_count
-
     except Exception as exc:
-        logger.error(f"[camael_client] drain FALLÓ: {exc}")
+        logger.error(f"[camael_client] drain: http client FALLÓ: {exc}")
         return 0
+
+    def _consume(payload: dict[str, Any]) -> bool:
+        try:
+            resp = client.post("/api/camael/handoff", json=payload)
+            if resp.status_code in (200, 202):
+                logger.info(
+                    f"[camael_client] drain: re-enviado {payload.get('incident_key')}"
+                )
+                return True
+            if resp.status_code == 400:
+                # Issue no soportado — evitar loop infinito, aceptar el drain.
+                logger.info(
+                    f"[camael_client] drain: descartado (400) {payload.get('incident_key')}"
+                )
+                return True
+            return False
+        except Exception as exc:
+            logger.warning(f"[camael_client] drain consume FALLÓ: {exc}")
+            return False
+
+    return wal.drain("handoff", _consume)
+
+
+def drain_pending_rfc_updates() -> int:
+    """
+    Drena actualizaciones de RFC encoladas en el WAL (topic 'rfc_update').
+    El payload guarda `_sys_id` dentro para que el consumer reconstruya la URL.
+    Llamado al arranque de camael-service y cada 5min.
+    """
+    if _is_inprocess():
+        return 0
+
+    from storage.redis import wal
+
+    try:
+        from clients._http import get_camael_client
+        client = get_camael_client()
+    except Exception as exc:
+        logger.error(f"[camael_client] drain_rfc: http client FALLÓ: {exc}")
+        return 0
+
+    def _consume(payload: dict[str, Any]) -> bool:
+        sys_id = payload.get("_sys_id")
+        if not sys_id:
+            logger.warning("[camael_client] drain_rfc: payload sin _sys_id — descartando")
+            return True  # descartar, no reintentar indefinidamente
+        try:
+            body = {k: v for k, v in payload.items() if k != "_sys_id"}
+            resp = client.patch(f"/api/camael/rfc/{sys_id}", json=body)
+            if resp.status_code in (200, 204, 404):
+                return True
+            return False
+        except Exception as exc:
+            logger.warning(f"[camael_client] drain_rfc consume FALLÓ: {exc}")
+            return False
+
+    return wal.drain("rfc_update", _consume)
 
 
 # ── update_rfc — Raphael cierra / marca review del RFC post-verificación ──────
