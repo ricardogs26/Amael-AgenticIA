@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from interfaces.api.auth import require_internal_secret
@@ -27,33 +27,6 @@ from interfaces.api.auth import require_internal_secret
 logger = logging.getLogger("interfaces.api.camael")
 
 router = APIRouter(prefix="/api/camael", tags=["camael"])
-
-
-# ── Auth ──────────────────────────────────────────────────────────────────────
-
-def _require_internal_secret_401(
-    authorization: Annotated[str | None, Header()] = None,
-) -> None:
-    """
-    Wrapper sobre `require_internal_secret` que devuelve HTTP 401 (en vez de 403)
-    cuando falta o es inválido el bearer token.
-
-    Razón: los endpoints de Camael son agente-a-agente y deben seguir la
-    semántica estándar — 401 = credenciales ausentes/inválidas, 403 =
-    autenticado pero sin permiso. El helper global `require_internal_secret`
-    usa 403 por compatibilidad con routers previos; aquí preferimos el código
-    correcto.
-    """
-    try:
-        require_internal_secret(authorization=authorization)
-    except HTTPException as exc:
-        if exc.status_code == status.HTTP_403_FORBIDDEN:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=exc.detail,
-                headers={"WWW-Authenticate": "Bearer"},
-            ) from exc
-        raise
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -97,7 +70,7 @@ class RfcUpdateResponse(BaseModel):
 @router.post("/handoff", response_model=HandoffResponse, status_code=202)
 async def handoff(
     payload: HandoffRequest,
-    _: Annotated[None, Depends(_require_internal_secret_401)],
+    _: Annotated[None, Depends(require_internal_secret)],
 ) -> HandoffResponse:
     """
     Recibe un handoff desde Raphael y lo procesa vía agents.devops.agent.
@@ -137,7 +110,7 @@ async def handoff(
 async def update_rfc(
     sys_id: str,
     payload: RfcUpdateRequest,
-    _: Annotated[None, Depends(_require_internal_secret_401)],
+    _: Annotated[None, Depends(require_internal_secret)],
 ) -> RfcUpdateResponse:
     """
     Actualiza el estado del RFC en ServiceNow.
