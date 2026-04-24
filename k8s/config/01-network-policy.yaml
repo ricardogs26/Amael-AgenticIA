@@ -98,7 +98,7 @@ spec:
       ports:
         - port: 9000
           protocol: TCP
-    # Servicios internos amael-ia: k8s-agent, productivity, whatsapp-bridge, piper, cosyvoice
+    # Servicios internos amael-ia: k8s-agent, productivity, whatsapp-bridge, piper, cosyvoice, camael
     - to:
         - namespaceSelector:
             matchLabels:
@@ -108,6 +108,8 @@ spec:
           protocol: TCP
         - port: 8002
           protocol: TCP
+        - port: 8003
+          protocol: TCP   # camael-service (handoff + RFC update)
         - port: 3000
           protocol: TCP   # whatsapp-bridge
         - port: 3001

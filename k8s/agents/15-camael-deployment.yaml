@@ -123,6 +123,16 @@ spec:
                 secretKeyRef:
                   name: amael-secrets
                   key: POSTGRES_PASSWORD
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: amael-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: amael-secrets
+                  key: MINIO_ROOT_PASSWORD
             - name: INTERNAL_API_SECRET
               valueFrom:
                 secretKeyRef:
