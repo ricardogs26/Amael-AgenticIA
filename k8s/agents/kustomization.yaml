@@ -13,6 +13,7 @@ resources:
 - 10-github-runner.yaml
 - 11-hpa-pdb.yaml
 - 12-conversation-pruning-cronjob.yaml
+- 15-camael-deployment.yaml
 images:
 - name: registry.richardx.dev/amael-agentic-backend
   newTag: "1.10.94"
