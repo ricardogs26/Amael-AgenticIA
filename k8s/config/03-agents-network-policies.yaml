@@ -36,7 +36,7 @@ spec:
     # Calico en MicroK8s aplica NetworkPolicy también al tráfico kubelet→pod.
     - from:
         - ipBlock:
-            cidr: 192.168.1.88/32
+            cidr: 192.168.10.10/32
       ports:
         - port: 8002
           protocol: TCP
@@ -166,7 +166,7 @@ spec:
 
     # Kubernetes API server — K8s Python client (observe_cluster, rollout_restart,
     # rollout_undo_deployment, Lease management, cert-manager API).
-    # MicroK8s expone el apiserver en 192.168.1.88:16443.
+    # MicroK8s expone el apiserver en 192.168.10.10:16443.
     # Calico evalúa ipBlock sobre el IP pre-DNAT (10.152.183.1) Y post-DNAT.
     - to:
         - ipBlock:
@@ -176,7 +176,7 @@ spec:
           protocol: TCP
     - to:
         - ipBlock:
-            cidr: 192.168.1.88/32   # Node IP — apiserver real (post-DNAT)
+            cidr: 192.168.10.10/32   # Node IP — apiserver real (post-DNAT)
       ports:
         - port: 16443
           protocol: TCP
@@ -211,7 +211,7 @@ spec:
     # Kubelet health/readiness probes — desde la IP del nodo.
     - from:
         - ipBlock:
-            cidr: 192.168.1.88/32
+            cidr: 192.168.10.10/32
       ports:
         - port: 8003
           protocol: TCP
@@ -337,7 +337,7 @@ spec:
           protocol: TCP
     - to:
         - ipBlock:
-            cidr: 192.168.1.88/32   # Node IP — apiserver real (post-DNAT)
+            cidr: 192.168.10.10/32   # Node IP — apiserver real (post-DNAT)
       ports:
         - port: 16443
           protocol: TCP
