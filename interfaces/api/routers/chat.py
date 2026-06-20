@@ -39,6 +39,9 @@ class ChatRequest(BaseModel):
     # phone opcional: número WhatsApp original del remitente (enviado por whatsapp-bridge)
     # permite enviar nota de voz aunque canonical_user_id sea un email
     phone:           str | None = None
+    # wa_chat_id opcional: JID completo de WhatsApp (`<id>@c.us` o `<id>@lid`).
+    # Target de envío fiable — evita inferir el sufijo a partir del número.
+    wa_chat_id:      str | None = None
     # audio_base64: nota de voz recibida por WhatsApp — se transcribe antes de procesar
     audio_base64:    str | None = None
     audio_mimetype:  str | None = Field(default="audio/ogg; codecs=opus")
@@ -233,9 +236,12 @@ async def chat(
     )
 
     # Enviar nota de voz si el usuario lo pidió (fire-and-forget)
-    # Usar body.phone si está disponible (bridge envía número aunque canonical sea email)
-    voice_phone = body.phone if body.phone and _is_whatsapp_user(body.phone) else (
-        effective_user if _is_whatsapp_user(effective_user) else None
+    # Preferir el JID completo (wa_chat_id) — el bridge lo usa tal cual sin inferir sufijo.
+    # Fallback a body.phone (número crudo) y, por último, al canonical si es de WhatsApp.
+    voice_phone = body.wa_chat_id or (
+        body.phone if body.phone and _is_whatsapp_user(body.phone) else (
+            effective_user if _is_whatsapp_user(effective_user) else None
+        )
     )
     if _is_voice_request(question) and voice_phone:
         asyncio.create_task(_send_voice_note(phone=voice_phone, text=answer))
