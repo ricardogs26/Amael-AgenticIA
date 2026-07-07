@@ -48,7 +48,10 @@ spec:
     spec:
       containers:
       - name: minio
-        image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+        # Pin a la versión que escribió los datos del PVC. NO downgradar ni usar
+        # 'latest': RELEASE.2024-11-07 no lee el formato xl.meta v3 de los datos
+        # actuales (FATAL decodeXLHeaders). RELEASE.2025-09-07 es la versión viva.
+        image: minio/minio:RELEASE.2025-09-07T16-13-09Z
         args:
         - server
         - /data

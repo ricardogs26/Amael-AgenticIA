@@ -46,7 +46,9 @@ spec:
     spec:
       containers:
       - name: qdrant
-        image: qdrant/qdrant:v1.9.4
+        # La versión viva es 1.18.2. NO aplicar con v1.9.4: downgradear rompe la
+        # lectura de los datos (mismo patrón que el incidente de minio xl.meta v3).
+        image: qdrant/qdrant:v1.18.2
         ports:
         - containerPort: 6333
           name: http
