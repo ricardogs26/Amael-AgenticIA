@@ -1,0 +1,45 @@
+# ── Alertas de backup ──────────────────────────────────────────────────────────
+# PrometheusRule que dispara si un CronJob de backup falla o deja de correr.
+# El label release=kube-prometheus-stack hace que Prometheus la recoja.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: amael-backup-alerts
+  namespace: observability
+  labels:
+    release: kube-prometheus-stack
+    app.kubernetes.io/part-of: amael-ia
+spec:
+  groups:
+  - name: amael-backups
+    rules:
+    # Un Job de backup terminó en estado Failed
+    - alert: BackupJobFailed
+      expr: kube_job_failed{namespace="amael-ia", job_name=~"(postgres|qdrant)-backup.*"} > 0
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Backup falló: {{ $labels.job_name }}"
+        description: "El job de backup {{ $labels.job_name }} en amael-ia terminó en estado Failed. Revisar: kubectl logs -n amael-ia job/{{ $labels.job_name }}"
+
+    # No hubo backup exitoso de Postgres en las últimas 26h (corre diario 3am)
+    - alert: PostgresBackupStale
+      expr: |
+        time() - max(kube_job_status_completion_time{namespace="amael-ia", job_name=~"postgres-backup.*"}) > 26 * 3600
+      labels:
+        severity: warning
+      annotations:
+        summary: "Backup de Postgres atrasado (>26h)"
+        description: "No se registra un backup exitoso de Postgres en más de 26h. El CronJob corre diario 3am México."
+
+    # No hubo backup exitoso de Qdrant en las últimas 26h
+    - alert: QdrantBackupStale
+      expr: |
+        time() - max(kube_job_status_completion_time{namespace="amael-ia", job_name=~"qdrant-backup.*"}) > 26 * 3600
+      labels:
+        severity: warning
+      annotations:
+        summary: "Backup de Qdrant atrasado (>26h)"
+        description: "No se registra un backup exitoso de Qdrant en más de 26h. El CronJob corre diario 3:30am México."

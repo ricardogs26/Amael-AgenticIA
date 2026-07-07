@@ -1,0 +1,107 @@
+# ── Qdrant Backup CronJob ──────────────────────────────────────────────────────
+# Crea un snapshot por colección vía la API de Qdrant, lo descarga y lo sube a MinIO.
+# Retención: 7 días. Borra el snapshot del PVC de Qdrant tras subirlo (ahorra disco).
+#
+# Requisitos previos:
+#   - Secret amael-secrets con MINIO_ACCESS_KEY / MINIO_ROOT_PASSWORD
+#   - amael-agentic-configmap con MINIO_ENDPOINT
+#   - qdrant-service:6333 accesible
+#
+# Verificar último backup:
+#   kubectl logs -n amael-ia job/<nombre-del-job> --tail=40
+#   mc ls minio/amael-backups/qdrant/
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: qdrant-backup
+  namespace: amael-ia
+  labels:
+    app: qdrant-backup
+    app.kubernetes.io/part-of: amael-ia
+spec:
+  schedule: "30 3 * * *"          # 3:30am (después del backup de postgres)
+  timeZone: "America/Mexico_City"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 1800
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: qdrant-backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: qdrant-backup
+            image: alpine:3.20
+            command:
+            - sh
+            - -c
+            - |
+              set -e
+              apk add --no-cache curl jq >/dev/null
+
+              TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+              BUCKET="amael-backups"
+              QDRANT="http://qdrant-service:6333"
+              MINIO_URL="http://${MINIO_ENDPOINT}"
+              WORKDIR="/tmp/qdrant_${TIMESTAMP}"
+              mkdir -p "${WORKDIR}"
+
+              # Instalar y configurar mc
+              wget -qO /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc
+              chmod +x /usr/local/bin/mc
+              mc alias set minio "${MINIO_URL}" "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" --api S3v4
+              mc mb --ignore-existing "minio/${BUCKET}"
+
+              # Una snapshot por colección
+              COLLECTIONS=$(curl -sf "${QDRANT}/collections" | jq -r '.result.collections[].name')
+              echo "[backup] Colecciones: $(echo $COLLECTIONS | tr '\n' ' ')"
+
+              for COL in $COLLECTIONS; do
+                echo "[backup] Snapshot de ${COL}..."
+                SNAP=$(curl -sf -X POST "${QDRANT}/collections/${COL}/snapshots" | jq -r '.result.name')
+                if [ -z "$SNAP" ] || [ "$SNAP" = "null" ]; then
+                  echo "[backup] ERROR: no se pudo crear snapshot de ${COL}"; exit 1
+                fi
+                curl -sf "${QDRANT}/collections/${COL}/snapshots/${SNAP}" -o "${WORKDIR}/${COL}.snapshot"
+                echo "[backup]   ${COL}: $(du -sh ${WORKDIR}/${COL}.snapshot | cut -f1)"
+                # Borrar snapshot del PVC de Qdrant (ya lo tenemos local)
+                curl -sf -X DELETE "${QDRANT}/collections/${COL}/snapshots/${SNAP}" >/dev/null || true
+              done
+
+              # Subir todo a MinIO
+              mc cp --recursive "${WORKDIR}/" "minio/${BUCKET}/qdrant/${TIMESTAMP}/"
+              echo "[backup] Snapshots subidos a minio/${BUCKET}/qdrant/${TIMESTAMP}/"
+
+              # Retención 7 días
+              mc rm --recursive --force --older-than 7d "minio/${BUCKET}/qdrant/" 2>/dev/null || true
+              echo "[backup] OK — backup Qdrant finalizado"
+            env:
+            - name: MINIO_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: amael-agentic-configmap
+                  key: MINIO_ENDPOINT
+                  optional: true
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: amael-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: amael-secrets
+                  key: MINIO_ROOT_PASSWORD
+            resources:
+              requests:
+                cpu: "100m"
+                memory: "128Mi"
+              limits:
+                cpu: "500m"
+                memory: "256Mi"
