@@ -22,13 +22,17 @@ import logging
 import os
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 
 from interfaces.api.auth import get_current_user
 
 logger = logging.getLogger("interfaces.api.routers.ingest")
 
 router = APIRouter(prefix="/api", tags=["ingest"])
+
+# Usuario de servicio (WhatsApp bridge / CronJobs). Puede indexar a nombre del
+# usuario real pasando `user_id` — mismo patrón que chat.py.
+_BOT_USER = "bot-amael@richardx.dev"
 
 # Singleton LLM para resúmenes de documentos
 _ingest_llm = None
@@ -62,15 +66,22 @@ def _sanitize_email(email: str) -> str:
 @router.post("/ingest")
 async def ingest_document(
     file: UploadFile = File(...),
+    user_id: str | None = Form(None),
     user: str = Depends(get_current_user),
 ):
     """
     Sube y procesa un documento (PDF, TXT, DOCX, MD).
     Lo indexa en Qdrant y guarda metadata en PostgreSQL.
 
+    Si el JWT pertenece al bot de servicio, `user_id` permite indexar a nombre
+    del usuario real (usado por el WhatsApp bridge).
+
     Returns:
         { doc_id, filename, summary, chunks }
     """
+    if user_id and user == _BOT_USER:
+        user = user_id
+
     temp_path: str | None = None
     content = await file.read()
 

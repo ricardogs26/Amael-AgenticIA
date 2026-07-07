@@ -1,7 +1,7 @@
 ---
 # HorizontalPodAutoscaler — amael-agentic-backend
-# Escala entre 1 y 3 réplicas basándose en CPU.
-# minReplicas=1 porque el cluster es single-node con 1 GPU (Ollama lo ocupa).
+# Escala entre 2 y 3 réplicas basándose en CPU.
+# minReplicas=2 para HA: durante restarts el otro pod sigue Ready y evita 503 del ingress.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -12,7 +12,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: amael-agentic-deployment
-  minReplicas: 1
+  minReplicas: 2
   maxReplicas: 3
   metrics:
     - type: Resource
