@@ -63,8 +63,12 @@ def _resolve_user_id(jwt_user: str, body_user_id: str | None, request: Request) 
     from config.settings import settings
     internal_secret = getattr(settings, "internal_api_secret", "")
 
+    import hmac
+
     auth_header = request.headers.get("Authorization", "")
-    is_internal = internal_secret and auth_header == f"Bearer {internal_secret}"
+    is_internal = bool(internal_secret) and hmac.compare_digest(
+        auth_header.encode(), f"Bearer {internal_secret}".encode()
+    )
     is_bot      = jwt_user == "bot-amael@richardx.dev"
 
     if body_user_id and (is_internal or is_bot):

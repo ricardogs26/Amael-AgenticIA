@@ -164,7 +164,13 @@ def require_internal_secret(
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
 
-    if not token or token != settings.internal_api_secret:
+    import hmac
+
+    if (
+        not token
+        or not settings.internal_api_secret
+        or not hmac.compare_digest(token.encode(), settings.internal_api_secret.encode())
+    ):
         _emit_security_event("internal_secret_invalid")
         logger.warning("[auth] Intento con internal secret inválido")
         raise HTTPException(
