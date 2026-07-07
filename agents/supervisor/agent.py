@@ -21,7 +21,14 @@ logger = logging.getLogger("agents.supervisor")
 
 def supervisor_node(state: dict[str, Any], redis_client=None) -> dict[str, Any]:
     """Nodo LangGraph: evalúa la respuesta y decide ACCEPT o REPLAN."""
-    return evaluate(state, redis_client=redis_client)
+    from observability.tracing import tracer
+
+    with tracer.start_as_current_span("agent.supervisor") as span:
+        result = evaluate(state, redis_client=redis_client)
+        span.set_attribute("agent.decision", str(result.get("supervisor_decision", "")))
+        span.set_attribute("agent.score", int(result.get("supervisor_score", 0) or 0))
+        span.set_attribute("agent.retry_count", int(result.get("retry_count", 0) or 0))
+        return result
 
 
 # ── BaseAgent wrapper ──────────────────────────────────────────────────────────

@@ -170,8 +170,12 @@ def planner_node(state: dict[str, Any], llm=None) -> dict[str, Any]:
 
 def grouper_node(state: dict[str, Any]) -> dict[str, Any]:
     """Nodo LangGraph: convierte el plan plano en batches paralelos."""
-    batches = group_plan_into_batches(state.get("plan", []))
-    return {**state, "batches": batches, "current_batch": 0}
+    with tracer.start_as_current_span("agent.grouper") as span:
+        plan = state.get("plan", [])
+        batches = group_plan_into_batches(plan)
+        span.set_attribute("agent.plan_steps", len(plan))
+        span.set_attribute("agent.batches", len(batches))
+        return {**state, "batches": batches, "current_batch": 0}
 
 
 # ── BaseAgent wrapper (nueva arquitectura) ────────────────────────────────────
