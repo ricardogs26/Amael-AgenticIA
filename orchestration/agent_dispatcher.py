@@ -162,6 +162,29 @@ class AgentDispatcher:
                     conversation_id=conversation_id,
                     extra_metadata=extra_metadata,
                 )
+            elif intent == "general":
+                # Triage con el modelo chico: conocimiento general lo responde el
+                # 1.7b; si necesita datos/herramientas devuelve None → pipeline (14b).
+                # Cualquier fallo del triador también escala al pipeline (seguro).
+                result = None
+                try:
+                    from orchestration.fast_chat import handle_fast_triage
+                    result = await handle_fast_triage(
+                        question=question,
+                        user_id=user_id,
+                        request_id=request_id,
+                        conversation_id=conversation_id,
+                    )
+                except Exception as exc:
+                    logger.warning(f"[dispatcher] fast_triage falló, escala a pipeline: {exc}")
+                if result is None:
+                    result = await self._dispatch_pipeline(
+                        question=question,
+                        user_id=user_id,
+                        tools_map=tools_map,
+                        request_id=request_id,
+                        conversation_id=conversation_id,
+                    )
             else:
                 result = await self._dispatch_pipeline(
                     question=question,
