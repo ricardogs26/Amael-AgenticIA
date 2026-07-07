@@ -44,6 +44,12 @@ class Settings(BaseSettings):
         default="qwen2.5:14b",
         alias="LLM_MODEL",
     )
+    # Modelo chico para charla simple (saludos, respuestas cortas). Siempre
+    # keep_alive en VRAM → respuesta ~1-2s sin invocar el pipeline completo.
+    llm_model_fast: str = Field(
+        default="qwen3:1.7b",
+        alias="LLM_MODEL_FAST",
+    )
     llm_vision_model: str = Field(
         default="qwen2.5-vl:7b",
         alias="LLM_VISION_MODEL",

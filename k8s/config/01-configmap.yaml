@@ -8,6 +8,8 @@ data:
   # Valores válidos: ollama | openai | groq | gemini | anthropic
   LLM_PROVIDER:    "ollama"
   LLM_MODEL:       "qwen3:14b"
+  # Modelo chico para charla simple (ruta rápida fast_chat, keep_alive en VRAM)
+  LLM_MODEL_FAST:  "qwen3:1.7b"
   # LLM_BASE_URL:  ""   # URL base opcional (OpenAI-compatible / llm-adapter)
   # LLM_API_KEY se configura en Secret, no aquí
 

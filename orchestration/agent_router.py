@@ -63,6 +63,10 @@ _KEYWORD_RULES = [
     # QA / validación
     (r"\b(validate|test|check|verify|assert|validar|verificar|probar)\b",
      "qa", ["qa"]),
+    # Charla social — DEBE ir al final: solo aplica si NINGUNA regla técnica matcheó.
+    # Saludos, agradecimientos y despedidas → ruta rápida con modelo chico.
+    (r"^\s*(hola|hey|holi|buen[oa]s?\s*(d[ií]as|tardes|noches)?|qu[eé]\s*tal|c[oó]mo\s*est[aá]s|c[oó]mo\s*va|gracias|muchas\s*gracias|ok|okay|vale|perfecto|genial|adi[oó]s|hasta\s*luego|nos\s*vemos|buen\s*d[ií]a|saludos)\b[\s!.,]*$",
+     "chat", ["chat"]),
 ]
 
 
@@ -78,6 +82,7 @@ _INTENT_TO_AGENTS = {
     "research":     ["researcher"],
     "memory":       ["memory"],
     "qa":           ["qa"],
+    "chat":         ["chat"],
     "general":      ["planner", "executor", "supervisor"],
 }
 

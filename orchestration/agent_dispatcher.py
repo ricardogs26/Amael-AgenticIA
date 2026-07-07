@@ -130,7 +130,29 @@ class AgentDispatcher:
                         "elapsed_ms":    0.0,
                     }
 
-            if intent in _DIRECT_DISPATCH:
+            if intent == "chat":
+                # Ruta rápida: charla simple → una llamada al modelo chico.
+                # Si el modelo chico falla, cae al pipeline (comportamiento seguro).
+                try:
+                    from orchestration.fast_chat import handle_fast_chat
+                    result = await handle_fast_chat(
+                        question=question,
+                        user_id=user_id,
+                        request_id=request_id,
+                        conversation_id=conversation_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"[dispatcher] fast_chat falló, fallback a pipeline: {exc}"
+                    )
+                    result = await self._dispatch_pipeline(
+                        question=question,
+                        user_id=user_id,
+                        tools_map=tools_map,
+                        request_id=request_id,
+                        conversation_id=conversation_id,
+                    )
+            elif intent in _DIRECT_DISPATCH:
                 result = await self._dispatch_direct(
                     agent_name=_DIRECT_DISPATCH[intent],
                     question=question,
