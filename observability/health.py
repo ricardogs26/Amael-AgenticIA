@@ -393,7 +393,9 @@ def build_health_router():
         router = APIRouter(tags=["health"])
 
         @router.get("/health")
-        def health_endpoint():
+        async def health_endpoint():
+            # async → corre directo en el event loop, no depende del threadpool.
+            # Si el loop está sano responde al instante (liveness robusta).
             return liveness()
 
         @router.get("/ready")

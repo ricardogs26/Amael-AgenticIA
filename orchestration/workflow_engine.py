@@ -14,6 +14,7 @@ Flujo:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -160,7 +161,11 @@ async def run_workflow(
         request_id=request_id,
         conversation_id=conversation_id,
     )
-    result = graph.invoke(state)
+    # graph.invoke() es síncrono y bloqueante (el pipeline completo puede tardar
+    # minutos). Ejecutarlo en un thread libera el event loop → la liveness /health
+    # sigue respondiendo (evita el SIGKILL que rompía el stream SSE) y permite
+    # servir requests concurrentes entre las réplicas.
+    result = await asyncio.to_thread(graph.invoke, state)
 
     try:
         from observability.metrics import PIPELINE_E2E_LATENCY_SECONDS
