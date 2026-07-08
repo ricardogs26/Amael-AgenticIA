@@ -33,7 +33,7 @@ data:
   # Valores verificados contra el env real de amael-agentic-deployment (2026-04-22).
   OLLAMA_BASE_URL:  "http://ollama-service:11434"
   LLM_PROVIDER:     "ollama"
-  LLM_MODEL:        "qwen3:14b"
+  LLM_MODEL:        "qwen3:1.7b"
   LLM_VISION_MODEL: "qwen2.5vl:3b"
   LLM_EMBED_MODEL:  "nomic-embed-text"
 
@@ -79,6 +79,10 @@ data:
   SRE_CB_THRESHOLD:            "5"
   SRE_CB_RESET_SECONDS:        "300"
   SRE_VERIFICATION_DELAY:      "600"
+  # Umbral de MEMORY_LEAK_PREDICTED (deriv 30m). El default de 1 MiB/s marcaba
+  # crecimientos normales de github-runner/tf-serving y saturaba la GPU con
+  # diagnósticos LLM continuos.
+  SRE_MEMORY_LEAK_RATE_BYTES:  "5242880"
   SRE_AUTO_HEAL_MIN_SEVERITY:  "HIGH"
   SRE_MIN_ALERT_SEVERITY:      "MEDIUM"
   SRE_ALERT_PHONE:             "5219993437008"
