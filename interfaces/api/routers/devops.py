@@ -192,21 +192,22 @@ async def handle_devops_command(body: DevOpsCommandRequest) -> dict:
         ayuda               — lista de comandos
     """
     cmd = body.command.strip().lower()
-    cmd_base = cmd.split()[0] if cmd else "ayuda"
+    cmd_base = cmd.split()[0] if cmd else "help"
     logger.info(f"[devops/command] cmd='{cmd}' phone={body.phone}")
 
     try:
-        if cmd_base in ("estado", "pipelines"):
+        # Comandos estándar en inglés; los nombres en español se aceptan como alias.
+        if cmd_base in ("pipelines", "status", "estado"):
             return {"reply": await _cmd_pipelines()}
 
         elif cmd_base == "pr":
             return {"reply": await _cmd_pr()}
 
-        elif cmd_base == "aprobar":
+        elif cmd_base in ("approve", "merge", "aprobar"):
             pr_id_arg = cmd.split()[1].lstrip("#") if len(cmd.split()) > 1 else None
             return {"reply": await _cmd_aprobar(pr_id_arg)}
 
-        elif cmd_base == "rechazar":
+        elif cmd_base in ("reject", "decline", "rechazar"):
             pr_id_arg = cmd.split()[1].lstrip("#") if len(cmd.split()) > 1 else None
             return {"reply": await _cmd_rechazar(pr_id_arg)}
 
@@ -214,11 +215,11 @@ async def handle_devops_command(body: DevOpsCommandRequest) -> dict:
             rfc_number = cmd.split()[1].upper() if len(cmd.split()) > 1 else None
             return {"reply": await _cmd_sn(rfc_number)}
 
-        elif cmd_base == "ayuda":
+        elif cmd_base in ("help", "ayuda"):
             return {"reply": _devops_help()}
 
         else:
-            return {"reply": f"Comando '{cmd_base}' no reconocido. Escribe */devops ayuda*"}
+            return {"reply": f"Unknown command '{cmd_base}'. Type */devops help*"}
 
     except Exception as exc:
         logger.error(f"[devops/command] error: {exc}", exc_info=True)
@@ -551,14 +552,14 @@ async def _cmd_sn(rfc_number: str | None = None) -> str:
 
 def _devops_help() -> str:
     return (
-        "*Comandos /devops disponibles:*\n"
-        "• `/devops estado` — últimos pipelines en Bitbucket\n"
-        "• `/devops pr` — ver PR pendiente de aprobación\n"
-        "• `/devops aprobar` — mergea el PR pendiente\n"
-        "• `/devops rechazar` — declina el PR pendiente\n"
-        "• `/devops sn` — RFC activo en ServiceNow\n"
-        "• `/devops sn CHG000X` — buscar RFC específico\n"
-        "• `/devops ayuda` — esta lista"
+        "*Available /devops commands:*\n"
+        "• `/devops status` — latest Bitbucket pipelines\n"
+        "• `/devops pr` — show the PR pending approval\n"
+        "• `/devops approve` — merge the pending PR\n"
+        "• `/devops reject` — decline the pending PR\n"
+        "• `/devops sn` — active RFC in ServiceNow\n"
+        "• `/devops sn CHG000X` — look up a specific RFC\n"
+        "• `/devops help` — this list"
     )
 
 
@@ -677,8 +678,9 @@ async def _handle_bb_pr_fulfilled(payload: dict) -> dict:
 
     # Advance RFC to Implement for the matching pending PR
     try:
-        from storage.redis import get_client as _redis_client
         import json as _json
+
+        from storage.redis import get_client as _redis_client
         _redis = _redis_client()
         for _key in (_redis.keys("bb:pending_pr:*") or []):
             _raw = _redis.get(_key)

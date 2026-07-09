@@ -144,18 +144,21 @@ def test_parse_alert_context():
 
 # ── dispatcher ────────────────────────────────────────────────────────────────
 
-def test_handle_command_ayuda_lists_all_commands(fake_redis):
+def test_handle_command_help_lists_all_commands(fake_redis):
     from agents.sre.commands import handle_command
     reply = handle_command("")
-    for expected in ("estado", "briefing", "retro", "modo", "pendiente", "rollout"):
+    for expected in ("pods", "briefing", "retro", "mode", "pending", "rollout"):
         assert expected in reply
     assert "STANDARD" in reply  # modo actual
+    # /help y /ayuda devuelven el mismo menú
+    assert handle_command("help") == reply
+    assert handle_command("ayuda") == reply
 
 
 def test_handle_command_unknown(fake_redis):
     from agents.sre.commands import handle_command
     reply = handle_command("comando-inexistente")
-    assert "desconocido" in reply.lower()
+    assert "unknown" in reply.lower()
 
 
 def test_handle_command_modo_get_and_set(fake_redis):

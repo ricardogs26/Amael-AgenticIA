@@ -130,29 +130,30 @@ def _format_incident_narrative(row: dict) -> str:
 
 
 def _help_text() -> str:
+    # Menú estándar en inglés; los comandos en español siguen aceptados como alias.
     from agents.sre.autonomy import get_agent_mode
     return (
-        "📋 *Comandos SRE disponibles:*\n"
-        "• `estado` — estado de pods en todos los namespaces\n"
-        "• `briefing` — morning briefing ahora (salud + SLO + predicciones)\n"
-        "• `retro` — retrospectiva semanal ahora\n"
-        "• `grafana` — listar dashboards de Grafana\n"
-        "• `status` — estado del loop y circuit breaker\n"
-        "• `incidents` — últimos 5 incidentes\n"
-        "• `postmortems` — últimos 3 postmortems\n"
-        "• `report` — resumen de las últimas 24h\n"
-        "• `reporte` — audit log legible de decisiones del agente\n"
-        "• `slo` — estado de SLOs\n"
-        "• `modo` — ver modo de autonomía actual\n"
-        "• `modo observe|conservative|standard|full` — cambiar modo\n"
-        "• `pendiente` — ver aprobaciones pendientes\n"
-        "• `si` — aprobar la acción pendiente\n"
-        "• `no` — cancelar la acción pendiente\n"
-        "• `rollout [deployment]` — ROLLOUT_RESTART (conservador)\n"
-        "• `silent <dur>` — silenciar alerta citada (ej. 2h)\n"
-        "• `maintenance on <min>` — activar mantenimiento\n"
-        "• `maintenance off` — desactivar mantenimiento\n"
-        f"\n🔧 Modo actual: *{get_agent_mode().upper()}*"
+        "📋 *Available SRE commands:*\n"
+        "• `pods` — pod status across all namespaces\n"
+        "• `briefing` — morning briefing now (health + SLO + predictions)\n"
+        "• `retro` — weekly retrospective now\n"
+        "• `grafana` — list Grafana dashboards\n"
+        "• `status` — loop and circuit breaker state\n"
+        "• `incidents` — last 5 incidents\n"
+        "• `postmortems` — last 3 postmortems\n"
+        "• `report` — last 24h summary\n"
+        "• `audit` — human-readable audit log of agent decisions\n"
+        "• `slo` — SLO status\n"
+        "• `mode` — show current autonomy mode\n"
+        "• `mode observe|conservative|standard|full` — change mode\n"
+        "• `pending` — list pending approvals\n"
+        "• `yes` — approve the pending action\n"
+        "• `no` — cancel the pending action\n"
+        "• `rollout [deployment]` — ROLLOUT_RESTART (conservative)\n"
+        "• `silent <dur>` — silence the quoted alert (e.g. 2h)\n"
+        "• `maintenance on <min>` — start maintenance window\n"
+        "• `maintenance off` — stop maintenance window\n"
+        f"\n🔧 Current mode: *{get_agent_mode().upper()}*"
     )
 
 
@@ -441,7 +442,7 @@ def handle_command(command: str, quoted_text: str | None = None) -> str:
     cmd = (command or "").strip().lower()
 
     try:
-        if not cmd or cmd == "ayuda":
+        if not cmd or cmd in ("help", "ayuda"):
             return _help_text()
         if cmd == "briefing":
             from agents.sre.briefing import generate_morning_briefing
@@ -472,15 +473,15 @@ def handle_command(command: str, quoted_text: str | None = None) -> str:
             return _cmd_slo()
         if cmd.startswith("maintenance") or cmd.startswith("silent"):
             return _cmd_maintenance_or_silent(cmd, quoted_text)
-        if cmd == "estado":
+        if cmd in ("pods", "estado"):
             return _cmd_estado()
         if cmd == "grafana":
             return _cmd_grafana()
         if cmd in ("reporte", "audit", "log"):
             return _cmd_audit()
-        if cmd == "modo" or cmd.startswith("modo "):
+        if cmd in ("mode", "modo") or cmd.startswith(("mode ", "modo ")):
             return _cmd_mode(cmd)
-        return f"❓ Comando desconocido: '{cmd}'. Escribe `ayuda` para ver opciones."
+        return f"❓ Unknown command: '{cmd}'. Type `help` to see the options."
     except Exception as exc:
         logger.error(f"[commands] Error procesando '{cmd}': {exc}", exc_info=True)
         return f"❌ Error procesando comando '{cmd}': {exc}"
