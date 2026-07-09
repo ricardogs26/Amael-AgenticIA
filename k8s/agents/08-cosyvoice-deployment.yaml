@@ -1,10 +1,10 @@
-# cosyvoice-service — TTS via CosyVoice2-0.5B (CPU only)
-# El modelo se descarga manualmente al PVC antes del primer despliegue:
+# cosyvoice-service — TTS via Fun-CosyVoice3-0.5B (CPU only)
+# El modelo se descarga manualmente al PVC antes del primer despliegue
+# (huggingface_hub.snapshot_download('FunAudioLLM/Fun-CosyVoice3-0.5B-2512',
+#  local_dir='/models/Fun-CosyVoice3-0.5B') desde cualquier pod con el PVC montado).
 #
-#   kubectl run model-downloader --image=python:3.11-slim --restart=Never \
-#     --overrides='{"spec":{"volumes":[{"name":"v","persistentVolumeClaim":{"claimName":"cosyvoice-models-pvc"}}],"containers":[{"name":"d","image":"python:3.11-slim","command":["sh","-c","pip install modelscope && modelscope download --model FunAudioLLM/CosyVoice2-0.5B --local_dir /models/CosyVoice2-0.5B"],"volumeMounts":[{"name":"v","mountPath":"/models"}]}]}}' \
-#     -n amael-ia
-#   kubectl delete pod model-downloader -n amael-ia
+# Rollback a CosyVoice2: COSYVOICE_MODEL_DIR=/models/CosyVoice2-0.5B
+# (el dir sigue en el PVC; AutoModel detecta la versión por el yaml del modelo).
 #
 ---
 apiVersion: v1
@@ -43,14 +43,14 @@ spec:
     spec:
       containers:
         - name: cosyvoice
-          image: registry.richardx.dev/cosyvoice-service:1.1.0
+          image: registry.richardx.dev/cosyvoice-service:2.0.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8010
 
           env:
             - name: COSYVOICE_MODEL_DIR
-              value: "/models/CosyVoice2-0.5B"
+              value: "/models/Fun-CosyVoice3-0.5B"
             - name: TTS_MAX_CHARS
               value: "500"
 
