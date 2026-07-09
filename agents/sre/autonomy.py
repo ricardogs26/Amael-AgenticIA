@@ -65,6 +65,10 @@ def apply_mode_to_action(action: str, confidence: float) -> str:
     mode = get_agent_mode()
     if mode == "observe":
         return "OBSERVE_ONLY"
+    # DELETE_STUCK_POD es limpieza segura de cadáveres (ContainerStatusUnknown):
+    # permitida en cualquier modo que actúe — no hay app viva que afectar.
+    if action == "DELETE_STUCK_POD":
+        return action
     if mode == "conservative":
         if action != "ROLLOUT_RESTART" or confidence < 0.90:
             return "OBSERVE_ONLY"

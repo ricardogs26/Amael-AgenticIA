@@ -22,6 +22,7 @@ class ActionType(StrEnum):
     ROLLOUT_UNDO          = "ROLLOUT_UNDO_DEPLOYMENT"
     NOTIFY_HUMAN          = "NOTIFY_HUMAN"
     SCALE_DEPLOYMENT      = "SCALE_DEPLOYMENT"
+    DELETE_STUCK_POD      = "DELETE_STUCK_POD"    # borra pod huérfano (ContainerStatusUnknown)
     NO_ACTION             = "NO_ACTION"
 
 
@@ -32,6 +33,7 @@ class AnomalyType(StrEnum):
     OOM_KILLED              = "OOM_KILLED"
     IMAGE_PULL_ERROR        = "IMAGE_PULL_ERROR"
     POD_FAILED              = "POD_FAILED"
+    POD_STATUS_UNKNOWN      = "POD_STATUS_UNKNOWN"  # huérfano tras reinicio del nodo
     POD_PENDING_STUCK       = "POD_PENDING_STUCK"
     HIGH_RESTARTS           = "HIGH_RESTARTS"
     NODE_NOT_READY          = "NODE_NOT_READY"

@@ -17,7 +17,7 @@ import threading
 from datetime import UTC, datetime
 
 from agents.sre.models import Anomaly
-from core.constants import ActionType, Severity
+from core.constants import ActionType, AnomalyType, Severity
 
 logger = logging.getLogger("agents.sre.healer")
 
@@ -144,6 +144,12 @@ def decide_action(anomaly: Anomaly, confidence: float) -> str:
     """
     resource = anomaly.owner_name or anomaly.resource_name
 
+    # POD_STATUS_UNKNOWN: limpieza determinística de cadáveres post-reinicio del
+    # nodo. Borrar el pod huérfano es seguro incluso en deployments protegidos —
+    # el contenedor ya no existe; el controlador reprograma uno nuevo.
+    if anomaly.issue_type == AnomalyType.POD_STATUS_UNKNOWN:
+        return ActionType.DELETE_STUCK_POD
+
     if resource in PROTECTED_DEPLOYMENTS:
         logger.info(f"[healer] '{resource}' protegido → NOTIFY_HUMAN")
         return ActionType.NOTIFY_HUMAN
@@ -195,6 +201,29 @@ def rollout_restart(deployment_name: str, namespace: str) -> str:
         return msg
     except Exception as exc:
         msg = f"❌ Error en ROLLOUT_RESTART {namespace}/{deployment_name}: {exc}"
+        logger.error(f"[healer] {msg}")
+        return msg
+
+
+def delete_stuck_pod(pod_name: str, namespace: str) -> str:
+    """
+    Borra forzado un pod huérfano en ContainerStatusUnknown (equivalente a
+    `kubectl delete pod --force --grace-period=0`). Reemplaza al CronJob
+    legacy clean-unknown-pods; el controlador reprograma el pod si aplica.
+    """
+    try:
+        from kubernetes import client, config
+        try:
+            config.load_incluster_config()
+        except Exception:
+            config.load_kube_config()
+        v1 = client.CoreV1Api()
+        v1.delete_namespaced_pod(pod_name, namespace, grace_period_seconds=0)
+        msg = f"✅ DELETE_STUCK_POD: pod huérfano {namespace}/{pod_name} eliminado."
+        logger.info(f"[healer] {msg}")
+        return msg
+    except Exception as exc:
+        msg = f"❌ Error en DELETE_STUCK_POD {namespace}/{pod_name}: {exc}"
         logger.error(f"[healer] {msg}")
         return msg
 
@@ -599,6 +628,12 @@ def execute_sre_action(
             notify_fn(msg, anomaly.severity)
         SRE_ACTIONS_TAKEN_TOTAL.labels(action=action_type, result="notified").inc()
         return f"NOTIFY_HUMAN: Alerta enviada para {anomaly.resource_name}"
+
+    if action_type == ActionType.DELETE_STUCK_POD:
+        result = delete_stuck_pod(anomaly.resource_name, anomaly.namespace)
+        status = "ok" if "✅" in result else "error"
+        SRE_ACTIONS_TAKEN_TOTAL.labels(action=action_type, result=status).inc()
+        return result
 
     if action_type == ActionType.ROLLOUT_RESTART:
         target = anomaly.owner_name or anomaly.resource_name

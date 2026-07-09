@@ -381,13 +381,21 @@ def sre_autonomous_loop(
                 logger.debug(f"[scheduler] Anomalía silenciada: {anomaly.incident_key}")
                 continue
 
-            # Diagnose
-            root_cause, confidence = diagnoser.diagnose_with_llm(
-                anomaly, vault_knowledge, metrics_knowledge
-            )
-            confidence = diagnoser.adjust_confidence_with_history(
-                anomaly, confidence, reporter.get_historical_success_rate
-            )
+            # Diagnose — POD_STATUS_UNKNOWN es determinístico: cadáver post-reinicio
+            # del nodo, no hay nada que razonar (evita gastar GPU en el LLM).
+            if anomaly.issue_type == "POD_STATUS_UNKNOWN":
+                root_cause = (
+                    "Pod huérfano en ContainerStatusUnknown tras reinicio del nodo; "
+                    "se elimina forzado para que el controlador lo reprograme."
+                )
+                confidence = 1.0
+            else:
+                root_cause, confidence = diagnoser.diagnose_with_llm(
+                    anomaly, vault_knowledge, metrics_knowledge
+                )
+                confidence = diagnoser.adjust_confidence_with_history(
+                    anomaly, confidence, reporter.get_historical_success_rate
+                )
             anomaly.confidence = confidence
             anomaly.root_cause  = root_cause
 

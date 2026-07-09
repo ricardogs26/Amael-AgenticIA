@@ -60,6 +60,34 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 
 ---
+# ── ClusterRole + Binding: limpieza de pods huérfanos ─────────────────────────
+# DELETE_STUCK_POD (POD_STATUS_UNKNOWN): borrar pods en ContainerStatusUnknown
+# en cualquier namespace observado tras un reinicio inesperado del nodo.
+# Reemplaza al CronJob legacy clean-unknown-pods (mismos permisos que su
+# ClusterRole pod-cleaner: solo get/list/delete de pods).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: raphael-pod-cleaner
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: raphael-pod-cleaner-binding
+subjects:
+- kind: ServiceAccount
+  name: raphael-sa
+  namespace: amael-ia
+roleRef:
+  kind: ClusterRole
+  name: raphael-pod-cleaner
+  apiGroup: rbac.authorization.k8s.io
+
+---
 # ── ClusterRoleBinding: ArgoCD Application reader ─────────────────────────────
 # Para argocd_discovery.py — resolver dinámicamente qué ArgoCD Application mapea
 # a cada deployment cuando Raphael detecta una anomalía (reemplaza el

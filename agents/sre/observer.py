@@ -184,8 +184,33 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                             ))
                         # else: conteo estable → pod sano, ignorar
 
+                # POD_STATUS_UNKNOWN — huérfano tras reinicio inesperado del nodo.
+                # Toma precedencia sobre POD_FAILED: no es un fallo de la app,
+                # es un cadáver que solo hay que borrar (sin diagnóstico LLM).
+                # Reemplaza al CronJob legacy clean-unknown-pods.
+                _is_status_unknown = any(
+                    (cs.state and cs.state.terminated
+                     and cs.state.terminated.reason == "ContainerStatusUnknown")
+                    or (cs.state and cs.state.waiting
+                        and cs.state.waiting.reason == "ContainerStatusUnknown")
+                    for cs in container_statuses
+                )
+                if _is_status_unknown:
+                    anomalies.append(Anomaly(
+                        issue_type=AnomalyType.POD_STATUS_UNKNOWN,
+                        severity=Severity.LOW,
+                        namespace=ns,
+                        resource_name=pod_name,
+                        resource_type="Pod",
+                        owner_name=owner_name,
+                        details=(
+                            f"Pod {pod_name} en ContainerStatusUnknown "
+                            f"(huérfano tras reinicio del nodo). Limpieza automática."
+                        ),
+                    ))
+
                 # POD_FAILED
-                if phase == "Failed":
+                elif phase == "Failed":
                     anomalies.append(Anomaly(
                         issue_type=AnomalyType.POD_FAILED,
                         severity=Severity.HIGH,
