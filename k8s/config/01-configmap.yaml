@@ -25,7 +25,9 @@ data:
   LLM_VISION_MODEL: "qwen2.5vl:3b"
 
   # ── Servicios internos ────────────────────────────────────────────────────
-  K8S_AGENT_URL:              "http://k8s-agent-service:8002"
+  # Fase B agents-split: raphael-service absorbió el endpoint conversacional
+  # /api/k8s-agent del legacy k8s-agent (mismo puerto 8002).
+  K8S_AGENT_URL:              "http://raphael-service:8002"
   PRODUCTIVITY_SERVICE_URL:   "http://productivity-service:8001"
   WHATSAPP_BRIDGE_URL:        "http://whatsapp-bridge-service:3000"
   WHATSAPP_PERSONAL_URL:      "http://whatsapp-personal-service:3001"

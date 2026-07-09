@@ -25,7 +25,6 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException
 from prometheus_client import make_asgi_app
@@ -142,7 +141,7 @@ def create_app() -> FastAPI:
             "Expone /api/sre/* (loop, incidents, postmortems, SLO, comandos) "
             "y /api/k8s-agent (conversational fallback)."
         ),
-        version="1.1.0",
+        version="1.1.1",
         docs_url="/docs" if settings.is_development else None,
         redoc_url="/redoc" if settings.is_development else None,
         lifespan=lifespan,
@@ -207,11 +206,12 @@ def _register_legacy_endpoints(app: FastAPI) -> None:
     """
     from interfaces.api.auth import require_internal_secret
 
-    @app.post("/api/k8s-agent", tags=["legacy"])
-    def k8s_agent_query(
-        payload: K8sAgentQueryRequest,
-        _: Annotated[None, Depends(require_internal_secret)],
-    ) -> dict[str, str]:
+    @app.post(
+        "/api/k8s-agent",
+        tags=["legacy"],
+        dependencies=[Depends(require_internal_secret)],
+    )
+    def k8s_agent_query(payload: K8sAgentQueryRequest) -> dict[str, str]:
         """
         Entrypoint conversacional heredado del legacy k8s-agent.
         Reenvía la consulta al `query_agent()` de agents.sre (LangGraph ReAct
@@ -234,11 +234,12 @@ def _register_legacy_endpoints(app: FastAPI) -> None:
             logger.error(f"[legacy.k8s-agent] query FALLÓ: {exc}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"agent_error: {exc}") from exc
 
-    @app.post("/api/sre/deploy-hook", tags=["sre"])
-    def deploy_hook(
-        payload: DeployHookRequest,
-        _: Annotated[None, Depends(require_internal_secret)],
-    ) -> dict[str, str]:
+    @app.post(
+        "/api/sre/deploy-hook",
+        tags=["sre"],
+        dependencies=[Depends(require_internal_secret)],
+    )
+    def deploy_hook(payload: DeployHookRequest) -> dict[str, str]:
         """
         Notificación de CI cuando un servicio termina de desplegarse.
         Graba en Redis `sre:recent_deploy:{service}` (TTL 1800s) para que
