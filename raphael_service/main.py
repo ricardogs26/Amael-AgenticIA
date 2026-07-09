@@ -142,7 +142,7 @@ def create_app() -> FastAPI:
             "Expone /api/sre/* (loop, incidents, postmortems, SLO, comandos) "
             "y /api/k8s-agent (conversational fallback)."
         ),
-        version="1.0.0",
+        version="1.1.0",
         docs_url="/docs" if settings.is_development else None,
         redoc_url="/redoc" if settings.is_development else None,
         lifespan=lifespan,

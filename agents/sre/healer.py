@@ -199,6 +199,87 @@ def rollout_restart(deployment_name: str, namespace: str) -> str:
         return msg
 
 
+def scale_deployment_replicas(
+    deployment_name: str, namespace: str, delta: int = 1, max_replicas: int = 4
+) -> str:
+    """
+    Escala un deployment en +delta réplicas (máx max_replicas).
+    Usado por la aprobación humana SCALE_UP (P7-S3, portado del legacy k8s-agent).
+    """
+    if deployment_name in PROTECTED_DEPLOYMENTS:
+        return f"❌ Error: '{deployment_name}' está protegido."
+    try:
+        apps_v1 = _get_k8s_apps()
+        deploy  = apps_v1.read_namespaced_deployment(deployment_name, namespace)
+        current = deploy.spec.replicas or 1
+        desired = min(current + delta, max_replicas)
+        if desired <= current:
+            return f"'{deployment_name}' ya tiene {current} réplicas (máx {max_replicas})."
+        apps_v1.patch_namespaced_deployment_scale(
+            deployment_name, namespace, {"spec": {"replicas": desired}}
+        )
+        logger.info(
+            f"[healer] scale_up deployment={deployment_name!r} ns={namespace!r} "
+            f"{current}→{desired}"
+        )
+        return f"✅ Scale-up: '{deployment_name}' escalado de {current} a {desired} réplicas."
+    except Exception as exc:
+        return f"❌ Error al escalar '{deployment_name}': {exc}"
+
+
+def patch_deployment_memory_limit(
+    deployment_name: str, namespace: str, increase_pct: int = 50
+) -> str:
+    """
+    Aumenta el memory limit del container principal en increase_pct% (mínimo +256Mi).
+    Usado por la aprobación humana PATCH_RESOURCES (P7-S3, portado del legacy k8s-agent).
+    Nota: en raphael el fix permanente de recursos va vía Camael/GitOps; esto es el
+    parche inmediato aprobado por humano.
+    """
+    import re as _re
+
+    if deployment_name in PROTECTED_DEPLOYMENTS:
+        return f"❌ Error: '{deployment_name}' está protegido."
+    try:
+        apps_v1 = _get_k8s_apps()
+        deploy = apps_v1.read_namespaced_deployment(deployment_name, namespace)
+        containers = deploy.spec.template.spec.containers
+        if not containers:
+            return f"❌ Error: '{deployment_name}' no tiene containers."
+        container = containers[0]
+        old_limit_str = "no definido"
+        new_limit_mi  = 512  # default si no hay límite definido
+        if container.resources and container.resources.limits:
+            mem_limit = container.resources.limits.get("memory", "")
+            if mem_limit:
+                old_limit_str = mem_limit
+                m = _re.match(r"^(\d+(?:\.\d+)?)(Mi|Gi|Ki|M|G|K)?$", mem_limit, _re.IGNORECASE)
+                if m:
+                    val, unit = float(m.group(1)), (m.group(2) or "Mi").upper()
+                    val_mi = (
+                        int(val * 1024) if unit in ("GI", "G")
+                        else int(val / 1024) if unit in ("KI", "K")
+                        else int(val)
+                    )
+                    new_limit_mi = val_mi + max(int(val_mi * increase_pct / 100), 256)
+        new_limit_str = f"{new_limit_mi}Mi"
+        patch = {"spec": {"template": {"spec": {"containers": [{
+            "name": container.name,
+            "resources": {"limits": {"memory": new_limit_str}},
+        }]}}}}
+        apps_v1.patch_namespaced_deployment(deployment_name, namespace, patch)
+        logger.info(
+            f"[healer] patch_memory deployment={deployment_name!r} ns={namespace!r} "
+            f"{old_limit_str}→{new_limit_str}"
+        )
+        return (
+            f"✅ Memory patch: '{deployment_name}' límite aumentado "
+            f"de {old_limit_str} a {new_limit_str}."
+        )
+    except Exception as exc:
+        return f"❌ Error al patchear '{deployment_name}': {exc}"
+
+
 def _was_recently_deployed(deployment_name: str, namespace: str, window_minutes: int = 30) -> bool:
     """True si el deployment tuvo una actualización en los últimos window_minutes minutos."""
     try:
@@ -486,6 +567,26 @@ def execute_sre_action(
 
     if action_type == ActionType.NO_ACTION:
         return "NO_ACTION: No se requiere intervención."
+
+    # P8-B (portado del legacy k8s-agent): el modo de autonomía puede degradar
+    # la acción. En observe/conservative el loop notifica pero no actúa.
+    from agents.sre.autonomy import apply_mode_to_action, get_agent_mode
+    effective_action = apply_mode_to_action(
+        action_type, getattr(anomaly, "confidence", 0.0) or 0.0
+    )
+    if effective_action == "OBSERVE_ONLY":
+        mode = get_agent_mode()
+        if notify_fn:
+            notify_fn(
+                f"👁️ *[MODO {mode.upper()}]* Anomalía en "
+                f"`{anomaly.resource_name}` ({anomaly.namespace}): {anomaly.issue_type}\n"
+                f"Acción propuesta: {action_type} — *no ejecutada* (modo {mode})\n"
+                f"Diagnóstico: {(getattr(anomaly, 'root_cause', '') or anomaly.details)[:100]}",
+                "HIGH",
+            )
+        SRE_ACTIONS_TAKEN_TOTAL.labels(action="OBSERVE_ONLY", result="ok").inc()
+        return f"OBSERVE_ONLY: Anomalía registrada, sin acción ejecutada (modo {mode})"
+    action_type = effective_action
 
     if action_type == ActionType.NOTIFY_HUMAN:
         msg = (

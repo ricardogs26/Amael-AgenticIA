@@ -582,6 +582,24 @@ def start_sre_loop() -> Any | None:
             id="sre_autonomous_loop",
             replace_existing=True,
         )
+        # Reportes proactivos por WhatsApp (portados del legacy k8s-agent al
+        # apagar su loop — raphael es ahora el único que los envía).
+        from agents.sre import briefing as _briefing
+        _sre_scheduler.add_job(
+            _briefing.send_daily_report,
+            "cron", hour=20, minute=0, timezone="America/Mexico_City",
+            id="daily_report", replace_existing=True,
+        )
+        _sre_scheduler.add_job(
+            _briefing.send_morning_briefing,
+            "cron", hour=7, minute=0, timezone="America/Mexico_City",
+            id="morning_briefing", replace_existing=True,
+        )
+        _sre_scheduler.add_job(
+            _briefing.send_weekly_retrospective,
+            "cron", day_of_week="mon", hour=8, minute=0, timezone="America/Mexico_City",
+            id="weekly_retrospective", replace_existing=True,
+        )
         _sre_scheduler.start()
         # Registrar scheduler en healer para verificación post-acción (P3-A)
         from agents.sre import healer as _healer

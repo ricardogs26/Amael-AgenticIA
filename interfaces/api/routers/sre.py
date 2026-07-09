@@ -35,6 +35,11 @@ class MaintenanceRequest(BaseModel):
 class SRECommandRequest(BaseModel):
     command: str
     phone:   str | None = None
+    quoted_text: str | None = None  # texto de la alerta citada (para `silent`)
+
+
+class AgentModeRequest(BaseModel):
+    mode: str
 
 
 # ── Loop status (no requiere JWT — usado por dashboards internos) ─────────────
@@ -177,17 +182,17 @@ def _check_sre_command_rate_limit(phone: str | None) -> None:
 @router.post("/command", dependencies=[Depends(require_internal_secret)])
 async def handle_sre_command(body: SRECommandRequest) -> dict[str, Any]:
     """
-    Dispatcher de comandos /sre desde el whatsapp-bridge.
+    Dispatcher de comandos /sre desde el whatsapp-bridge (paridad con el
+    legacy k8s-agent 5.2.0). La lógica vive en agents.sre.commands; en modo
+    remote el backend proxy-ea a raphael-service.
 
-    Comandos soportados:
-        status, incidents, postmortems, slo, maintenance on <min>,
-        maintenance off, ayuda
+    Retorna la respuesta en `reply` (campo que lee el bridge); `response`
+    se mantiene por compatibilidad.
     """
     _check_sre_command_rate_limit(body.phone)
     from observability.metrics import SRE_WA_COMMANDS_TOTAL
     cmd = body.command.strip().lower()
 
-    # Extraer comando base (primera palabra)
     cmd_base = cmd.split()[0] if cmd else "ayuda"
     try:
         SRE_WA_COMMANDS_TOTAL.labels(command=cmd_base).inc()
@@ -195,97 +200,34 @@ async def handle_sre_command(body: SRECommandRequest) -> dict[str, Any]:
         pass
 
     try:
-        from clients.raphael_client import (
-            activate_maintenance,
-            deactivate_maintenance,
-            get_loop_state,
-            get_recent_incidents,
-            get_recent_postmortems,
-        )
-
-        if cmd_base == "status":
-            return {"response": _format_status(get_loop_state())}
-
-        elif cmd_base == "incidents":
-            incidents = get_recent_incidents(limit=5)
-            return {"response": _format_incidents(incidents)}
-
-        elif cmd_base == "postmortems":
-            pms = get_recent_postmortems(limit=3)
-            return {"response": _format_postmortems(pms)}
-
-        elif cmd_base == "slo":
-            from clients.raphael_client import load_slo_targets
-            targets = load_slo_targets()
-            return {"response": f"SLO targets configurados: {len(targets)}"}
-
-        elif cmd_base == "maintenance":
-            parts = cmd.split()
-            if len(parts) >= 2 and parts[1] == "on":
-                minutes = int(parts[2]) if len(parts) > 2 else 60
-                activate_maintenance(minutes=minutes)
-                return {"response": f"✅ Mantenimiento activado por {minutes} minutos"}
-            elif len(parts) >= 2 and parts[1] == "off":
-                deactivate_maintenance()
-                return {"response": "✅ Mantenimiento desactivado"}
-            else:
-                return {"response": "Uso: maintenance on <minutos> | maintenance off"}
-
-        elif cmd_base == "ayuda":
-            return {"response": _help_text()}
-
-        else:
-            return {"response": f"Comando '{cmd_base}' no reconocido. Usa 'ayuda' para ver los disponibles."}
-
+        from clients.raphael_client import dispatch_sre_command
+        reply = dispatch_sre_command(cmd, phone=body.phone, quoted_text=body.quoted_text)
     except Exception as exc:
         logger.error(f"[sre.command] error: {exc}", exc_info=True)
-        return {"response": f"❌ Error procesando comando: {exc}"}
+        reply = f"❌ Error procesando comando: {exc}"
+
+    return {"reply": reply, "response": reply}
 
 
-# ── Formatters ────────────────────────────────────────────────────────────────
+# ── Modo de autonomía (P8-B) ──────────────────────────────────────────────────
 
-def _format_status(state: dict[str, Any]) -> str:
-    cb = state.get("circuit_breaker_state", "CLOSED")
-    maint = "🔧 SÍ" if state.get("maintenance_active") else "No"
-    loop  = "✅" if state.get("loop_running") else "❌"
-    return (
-        f"*Estado SRE Agent*\n"
-        f"Loop: {loop}\n"
-        f"Circuit Breaker: {cb}\n"
-        f"Mantenimiento: {maint}\n"
-        f"SLOs configurados: {state.get('slo_count', 0)}"
-    )
+@router.get("/mode")
+def get_mode() -> dict[str, Any]:
+    """Modo de autonomía actual del agente SRE."""
+    try:
+        from clients.raphael_client import get_agent_mode_info
+        return get_agent_mode_info()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
-def _format_incidents(incidents: list[dict]) -> str:
-    if not incidents:
-        return "No hay incidentes recientes."
-    lines = ["*Últimos incidentes SRE:*"]
-    for inc in incidents:
-        lines.append(
-            f"• [{inc.get('severity','?')}] {inc.get('issue_type','?')} — "
-            f"{inc.get('pod_name','?')} ({inc.get('created_at','?')[:16]})"
-        )
-    return "\n".join(lines)
-
-
-def _format_postmortems(pms: list[dict]) -> str:
-    if not pms:
-        return "No hay postmortems recientes."
-    lines = ["*Últimos postmortems:*"]
-    for pm in pms:
-        lines.append(f"• {pm.get('title','?')} ({pm.get('created_at','?')[:16]})")
-    return "\n".join(lines)
-
-
-def _help_text() -> str:
-    return (
-        "*Comandos /sre disponibles:*\n"
-        "• `/sre status` — Estado del loop\n"
-        "• `/sre incidents` — Últimos 5 incidentes\n"
-        "• `/sre postmortems` — Últimos 3 postmortems\n"
-        "• `/sre slo` — Targets SLO\n"
-        "• `/sre maintenance on <min>` — Activar mantenimiento\n"
-        "• `/sre maintenance off` — Desactivar mantenimiento\n"
-        "• `/sre ayuda` — Este mensaje"
-    )
+@router.post("/mode", dependencies=[Depends(require_internal_secret)])
+def set_mode(body: AgentModeRequest) -> dict[str, Any]:
+    """Cambia el modo de autonomía: observe | conservative | standard | full."""
+    try:
+        from clients.raphael_client import set_agent_mode_remote
+        return set_agent_mode_remote(body.mode)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))

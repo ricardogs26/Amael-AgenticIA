@@ -250,6 +250,26 @@ def _dedup_ttl_for(key: str) -> int:
     return _DEDUP_TTL_BY_TYPE.get(issue_type, _DEDUP_TTL_DEFAULT)
 
 
+def is_anomaly_silenced(anomaly) -> bool:
+    """
+    True si el usuario silenció esta anomalía específica vía WhatsApp
+    (`/sre silent <dur>` citando la alerta). Claves: sre:silent:{ns}:{res}:{issue}.
+    """
+    try:
+        from storage.redis import get_client
+        redis = get_client()
+        keys = [
+            f"sre:silent:{anomaly.namespace}:{anomaly.resource_name}:{anomaly.issue_type}",
+        ]
+        if getattr(anomaly, "owner_name", None):
+            keys.append(
+                f"sre:silent:{anomaly.namespace}:{anomaly.owner_name}:{anomaly.issue_type}"
+            )
+        return any(redis.exists(k) for k in keys)
+    except Exception:
+        return False
+
+
 def is_duplicate_incident(key: str) -> bool:
     """Verifica si el incidente ya fue procesado recientemente."""
     try:
@@ -355,6 +375,10 @@ def sre_autonomous_loop(
         for anomaly in anomalies:
             if is_duplicate_incident(anomaly.incident_key):
                 logger.debug(f"[scheduler] Incidente duplicado: {anomaly.incident_key}")
+                continue
+
+            if is_anomaly_silenced(anomaly):
+                logger.debug(f"[scheduler] Anomalía silenciada: {anomaly.incident_key}")
                 continue
 
             # Diagnose

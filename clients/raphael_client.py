@@ -133,3 +133,53 @@ def load_slo_targets() -> list[dict[str, Any]]:
         return _local()
     # En modo remote usamos el mismo endpoint de slo/status (es superset)
     return _get("/api/sre/slo/status")
+
+
+def dispatch_sre_command(
+    command: str,
+    phone: str | None = None,
+    quoted_text: str | None = None,
+) -> str:
+    """
+    Dispatcher de comandos WhatsApp /sre. Retorna el texto de respuesta.
+    Inprocess → agents.sre.commands.handle_command; remote → raphael-service.
+    """
+    if _is_inprocess():
+        from agents.sre.commands import handle_command
+        return handle_command(command, quoted_text=quoted_text)
+    data = _post(
+        "/api/sre/command",
+        json={"command": command, "phone": phone, "quoted_text": quoted_text},
+    )
+    return data.get("reply") or data.get("response") or "(sin respuesta)"
+
+
+def get_agent_mode_info() -> dict[str, Any]:
+    """Modo de autonomía actual (P8-B) con descripción y modos válidos."""
+    if _is_inprocess():
+        from agents.sre.autonomy import MODE_DESCRIPTIONS, VALID_MODES, get_agent_mode
+        mode = get_agent_mode()
+        return {
+            "mode": mode,
+            "description": MODE_DESCRIPTIONS.get(mode, mode),
+            "valid_modes": sorted(VALID_MODES),
+        }
+    return _get("/api/sre/mode")
+
+
+def set_agent_mode_remote(mode: str) -> dict[str, Any]:
+    """Cambia el modo de autonomía. Lanza ValueError si el modo es inválido."""
+    if _is_inprocess():
+        from agents.sre.autonomy import MODE_DESCRIPTIONS, VALID_MODES, set_agent_mode
+        mode = (mode or "").lower().strip()
+        if mode not in VALID_MODES:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail=f"Modo inválido '{mode}'. Válidos: {', '.join(sorted(VALID_MODES))}",
+            )
+        if not set_agent_mode(mode):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=500, detail="No se pudo guardar el modo en Redis")
+        return {"success": True, "mode": mode, "description": MODE_DESCRIPTIONS[mode]}
+    return _post("/api/sre/mode", json={"mode": mode})
