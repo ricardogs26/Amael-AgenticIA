@@ -44,7 +44,7 @@ spec:
     spec:
       containers:
         - name: cosyvoice
-          image: registry.richardx.dev/cosyvoice-service:2.0.0
+          image: registry.richardx.dev/cosyvoice-service:2.1.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8010
@@ -52,6 +52,10 @@ spec:
           env:
             - name: COSYVOICE_MODEL_DIR
               value: "/models/Fun-CosyVoice3-0.5B"
+            # Voz por defecto de /tts: voz clonada de Ricardo (transcripción en
+            # el sidecar ricardo.wav.txt). Quitar el env → vuelve a es_MX_female.
+            - name: COSYVOICE_DEFAULT_REF_WAV
+              value: "/models/reference/ricardo.wav"
             - name: TTS_MAX_CHARS
               value: "500"
 

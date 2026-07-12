@@ -98,10 +98,14 @@ def get_voice_reference(phone: str) -> tuple[str, str] | None:
             prompt_text = resp.read().decode()
             resp.close()
             resp.release_conn()
-            get_redis_client().set(_REDIS_KEY_FMT.format(phone=safe), prompt_text)
         except Exception as exc:
             logger.warning(f"[voice_ref] WAV sin transcripción para {safe}: {exc}")
             return None
+        try:
+            # Cache best-effort: sin Redis la referencia sigue siendo válida
+            get_redis_client().set(_REDIS_KEY_FMT.format(phone=safe), prompt_text)
+        except Exception:
+            pass
 
     return base64.b64encode(wav_bytes).decode(), prompt_text
 
