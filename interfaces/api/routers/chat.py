@@ -656,11 +656,45 @@ def _is_whatsapp_user(user_id: str) -> bool:
 async def _send_voice_note(phone: str, text: str) -> None:
     """
     Sintetiza el texto y lo envía como nota de voz PTT.
-    Usa Piper como motor principal (rápido, estable, acento latinoamericano).
-    CosyVoice solo como fallback si Piper no está disponible.
+
+    Prioridad:
+      0. Voz clonada del usuario (CosyVoice3 /tts/clone) si registró referencia
+         en amael-voice-refs. Lenta en CPU (~minutos) pero es fire-and-forget.
+      1. Piper (rápido, estable, acento latinoamericano).
+      2. CosyVoice voz por defecto (último recurso).
     Fire-and-forget: nunca lanza excepción ni bloquea la respuesta de texto.
     """
     truncated = text[:500]
+
+    # 0. Voz clonada del usuario si hay referencia registrada
+    try:
+        import asyncio as _aio
+
+        from audio.voice_ref import get_voice_reference
+        ref = await _aio.to_thread(get_voice_reference, phone)
+        if ref is not None:
+            wav_b64, prompt_text = ref
+            from tools.cosyvoice.tool import (
+                CosyVoiceTool,
+                SynthesizeCloneAndSendInput,
+            )
+            result = await CosyVoiceTool().synthesize_clone_and_send(
+                SynthesizeCloneAndSendInput(
+                    text=truncated,
+                    phone=phone,
+                    reference_audio_base64=wav_b64,
+                    prompt_text=prompt_text,
+                )
+            )
+            if result.success:
+                logger.info(
+                    f"[chat] Nota de voz CLONADA enviada a {phone} "
+                    f"({result.data.get('duration_seconds', 0):.1f}s)"
+                )
+                return
+            logger.warning(f"[chat] Voz clonada falló, fallback a Piper: {result.error}")
+    except Exception as exc:
+        logger.warning(f"[chat] Voz clonada excepción, fallback a Piper: {exc}")
 
     # 1. Piper (rápido, estable, voz latina consistente)
     try:

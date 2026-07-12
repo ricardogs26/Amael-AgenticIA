@@ -3,8 +3,9 @@
 # (huggingface_hub.snapshot_download('FunAudioLLM/Fun-CosyVoice3-0.5B-2512',
 #  local_dir='/models/Fun-CosyVoice3-0.5B') desde cualquier pod con el PVC montado).
 #
-# Rollback a CosyVoice2: COSYVOICE_MODEL_DIR=/models/CosyVoice2-0.5B
-# (el dir sigue en el PVC; AutoModel detecta la versión por el yaml del modelo).
+# Rollback a CosyVoice2: re-descargar FunAudioLLM/CosyVoice2-0.5B al PVC
+# (dir eliminado 2026-07-09 para liberar 4.6GB) y apuntar COSYVOICE_MODEL_DIR.
+# AutoModel detecta la versión por el yaml del modelo.
 #
 ---
 apiVersion: v1

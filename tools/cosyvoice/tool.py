@@ -51,6 +51,13 @@ class SynthesizeCloneInput(ToolInput):
     prompt_text:            str
     language:               str = "es"
 
+class SynthesizeCloneAndSendInput(ToolInput):
+    text:                   str
+    phone:                  str
+    reference_audio_base64: str
+    prompt_text:            str
+    language:               str = "es"
+
 
 # ── Tool ──────────────────────────────────────────────────────────────────────
 
@@ -70,6 +77,8 @@ class CosyVoiceTool(BaseTool):
     async def execute(self, input: ToolInput) -> ToolOutput:
         if isinstance(input, SynthesizeAndSendInput):
             return await self.synthesize_and_send(input)
+        if isinstance(input, SynthesizeCloneAndSendInput):
+            return await self.synthesize_clone_and_send(input)
         if isinstance(input, SynthesizeCloneInput):
             return await self.synthesize_clone(input)
         if isinstance(input, SynthesizeInput):
@@ -110,27 +119,93 @@ class CosyVoiceTool(BaseTool):
             logger.error(f"[cosyvoice_tool] synthesize error: {exc}")
             return ToolOutput.fail(str(exc), source=self.name)
 
+    # CosyVoice3 en CPU tiene RTF ~12x: 300 chars ≈ 20s de audio ≈ 4 min de
+    # síntesis. Cap corto + timeout amplio; siempre llamar vía asyncio.to_thread.
+    _CLONE_MAX_CHARS = 300
+    _CLONE_TIMEOUT_S = 480
+
+    def _clone_sync(self, input: SynthesizeCloneInput) -> ToolOutput:
+        """POST /tts/clone (bloqueante — usar desde to_thread)."""
+        resp = _req.post(
+            f"{_COSYVOICE_URL}/tts/clone",
+            json={
+                "text":                   input.text[: self._CLONE_MAX_CHARS],
+                "reference_audio_base64": input.reference_audio_base64,
+                "prompt_text":            input.prompt_text,
+                "language":               input.language,
+            },
+            timeout=self._CLONE_TIMEOUT_S,
+        )
+        if resp.status_code != 200:
+            return ToolOutput.fail(
+                f"cosyvoice-service HTTP {resp.status_code}: {resp.text[:200]}",
+                source=self.name,
+            )
+        return ToolOutput.ok(data=resp.json(), source=self.name)
+
     async def synthesize_clone(self, input: SynthesizeCloneInput) -> ToolOutput:
         """Genera audio clonando la voz del audio de referencia (zero-shot)."""
+        import asyncio
         try:
-            resp = _req.post(
-                f"{_COSYVOICE_URL}/tts/clone",
-                json={
-                    "text":                   input.text[:500],
-                    "reference_audio_base64": input.reference_audio_base64,
-                    "prompt_text":            input.prompt_text,
-                    "language":               input.language,
-                },
-                timeout=90,
-            )
-            if resp.status_code != 200:
-                return ToolOutput.fail(
-                    f"cosyvoice-service HTTP {resp.status_code}: {resp.text[:200]}",
-                    source=self.name,
-                )
-            return ToolOutput.ok(data=resp.json(), source=self.name)
+            return await asyncio.to_thread(self._clone_sync, input)
         except Exception as exc:
             logger.error(f"[cosyvoice_tool] synthesize_clone error: {exc}")
+            return ToolOutput.fail(str(exc), source=self.name)
+
+    async def synthesize_clone_and_send(
+        self, input: SynthesizeCloneAndSendInput
+    ) -> ToolOutput:
+        """
+        Clona voz + envía nota de voz por WhatsApp. Pipeline completo en un
+        thread (síntesis CPU tarda minutos — no debe tocar el event loop):
+          1. POST /tts/clone → WAV base64
+          2. WAV → OGG OPUS (whatsapp-web.js truena con WAV grandes)
+          3. POST /send-audio (ptt=True)
+        """
+        import asyncio
+
+        def _pipeline() -> ToolOutput:
+            clone = self._clone_sync(
+                SynthesizeCloneInput(
+                    text=input.text,
+                    reference_audio_base64=input.reference_audio_base64,
+                    prompt_text=input.prompt_text,
+                    language=input.language,
+                )
+            )
+            if not clone.success:
+                return clone
+            duration = clone.data.get("duration_seconds", 0)
+            ogg_b64  = self._wav_to_ogg_opus(clone.data["audio_base64"])
+            resp = _req.post(
+                f"{_WA_BRIDGE_URL}/send-audio",
+                json={
+                    "phoneNumber": input.phone,
+                    "base64":      ogg_b64,
+                    "mimetype":    "audio/ogg; codecs=opus",
+                    "ptt":         True,
+                },
+                timeout=45,
+            )
+            if resp.status_code not in (200, 201):
+                return ToolOutput.fail(
+                    f"whatsapp-bridge /send-audio HTTP {resp.status_code}: {resp.text[:200]}",
+                    source=self.name,
+                )
+            logger.info(
+                f"[cosyvoice_tool] Nota de voz CLONADA enviada a {input.phone} "
+                f"({duration:.1f}s, {len(input.text)} chars)"
+            )
+            return ToolOutput.ok(
+                data={"sent": True, "phone": input.phone,
+                      "duration_seconds": duration, "cloned": True},
+                source=self.name,
+            )
+
+        try:
+            return await asyncio.to_thread(_pipeline)
+        except Exception as exc:
+            logger.error(f"[cosyvoice_tool] synthesize_clone_and_send error: {exc}")
             return ToolOutput.fail(str(exc), source=self.name)
 
     @staticmethod
