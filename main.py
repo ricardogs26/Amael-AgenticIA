@@ -116,6 +116,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.error(f"[startup] Redis FALLÓ: {exc}", exc_info=True)
 
+    # 2b. MinIO (backup de ingesta + referencias de voz)
+    try:
+        from storage.minio.client import init_client as init_minio
+        init_minio(
+            endpoint=settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            secure=settings.minio_secure,
+            bucket=settings.minio_bucket,
+        )
+        logger.info("[startup] MinIO client inicializado")
+    except Exception as exc:
+        logger.error(f"[startup] MinIO FALLÓ: {exc}", exc_info=True)
+
     # 3. Skills registry
     try:
         from skills.registry import register_all_skills
