@@ -62,15 +62,15 @@ spec:
               - name: POSTGRES_HOST
                 valueFrom:
                   configMapKeyRef:
-                    name: amael-agentic-config
+                    name: amael-agentic-configmap
                     key: POSTGRES_HOST
               - name: POSTGRES_DB
                 valueFrom:
                   configMapKeyRef:
-                    name: amael-agentic-config
+                    name: amael-agentic-configmap
                     key: POSTGRES_DB
               - name: POSTGRES_USER
                 valueFrom:
                   configMapKeyRef:
-                    name: amael-agentic-config
+                    name: amael-agentic-configmap
                     key: POSTGRES_USER

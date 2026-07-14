@@ -12,36 +12,19 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      activeDeadlineSeconds: 480
+      # CosyVoice3 en CPU es lento (RTF ~25); damos margen amplio para /api/chat + síntesis
+      activeDeadlineSeconds: 1200
+      backoffLimit: 1
       template:
         spec:
           restartPolicy: OnFailure
           containers:
           - name: morning-audio
-            image: curlimages/curl:8.6.0
-            command:
-            - sh
-            - -c
-            - |
-              echo "Calentando CosyVoice..." && \
-              curl -s -X POST http://cosyvoice-service:8010/tts \
-                -H "Content-Type: application/json" \
-                -d '{"text":"buenos días","language":"es"}' \
-                --max-time 90 > /dev/null && \
-              echo "CosyVoice listo. Generando reporte..." && \
-              curl -sf \
-                -X POST \
-                -H "Authorization: Bearer ${BOT_JWT_TOKEN}" \
-                -H "Content-Type: application/json" \
-                -d "{
-                  \"prompt\": \"Buenos días. Dame un resumen del estado del ambiente Kubernetes: pods en problemas, servicios caídos, alertas activas en Prometheus, y estado general del cluster amael-ia. Si todo está bien dímelo también. Envíame el resumen por WhatsApp como texto.\",
-                  \"user_id\": \"${ADMIN_PHONE}\",
-                  \"phone\":   \"${ADMIN_PHONE}\"
-                }" \
-                --max-time 240 \
-                http://amael-agentic-service:8000/api/chat \
-              && echo "Morning audio OK" \
-              || (echo "Morning audio FALLÓ" && exit 1)
+            # Imagen propia: python + ffmpeg + morning_audio.py
+            # Flujo: /api/chat (resumen breve) -> CosyVoice3 /tts (WAV)
+            #        -> ffmpeg WAV→OGG/opus -> bridge /send-audio (nota de voz, ptt)
+            image: registry.richardx.dev/morning-audio:1.0.1
+            imagePullPolicy: IfNotPresent
             env:
             - name: BOT_JWT_TOKEN
               valueFrom:
