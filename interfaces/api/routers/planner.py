@@ -140,7 +140,7 @@ def _send_brief_whatsapp(user_email: str, summary: str) -> None:
         wa_url = getattr(settings, "whatsapp_bridge_url", "http://whatsapp-bridge-service:3000")
         resp = httpx.post(
             f"{wa_url}/send",
-            json={"phone": phone, "message": f"📅 *Brief del día*\n\n{summary}"},
+            json={"phoneNumber": phone, "text": f"📅 *Brief del día*\n\n{summary}"},
             timeout=15.0,
         )
         if resp.status_code == 200:
