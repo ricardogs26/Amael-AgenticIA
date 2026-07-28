@@ -1,0 +1,42 @@
+# trader-service — dependencias mínimas.
+# El servicio corre el loop del trader + API REST interna. Sin langgraph.
+
+# ── FastAPI / ASGI ────────────────────────────────────────────────────────────
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
+pydantic-settings>=2.2
+
+# ── Broker ────────────────────────────────────────────────────────────────────
+alpaca-py>=0.30
+
+# ── Storage clients ───────────────────────────────────────────────────────────
+psycopg2-binary>=2.9
+redis>=5.0
+
+# ── HTTP ──────────────────────────────────────────────────────────────────────
+httpx>=0.27
+requests>=2.31
+
+# ── Prometheus ────────────────────────────────────────────────────────────────
+prometheus-client>=0.20
+
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+apscheduler>=3.10
+
+# ── LLM (ChatOllama para el analyzer) ─────────────────────────────────────────
+langchain-core>=0.3
+langchain-ollama>=0.2
+
+# ── OpenTelemetry ─────────────────────────────────────────────────────────────
+opentelemetry-api>=1.26
+opentelemetry-sdk>=1.26
+opentelemetry-instrumentation-fastapi>=0.46b0
+opentelemetry-instrumentation-httpx>=0.46b0
+opentelemetry-exporter-otlp-proto-grpc>=1.26
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+python-jose[cryptography]>=3.3
+
+# ── Env ───────────────────────────────────────────────────────────────────────
+python-dotenv>=1.0
