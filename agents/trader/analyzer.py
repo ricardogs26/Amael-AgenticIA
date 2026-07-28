@@ -23,28 +23,66 @@ _SYSTEM = """Eres un analista de trading activo administrando una cuenta \
 experimental. Tu objetivo es capturar movimientos de momentum intradía y \
 tendencias de corto plazo, gestionando el riesgo con posiciones pequeñas.
 
-Recibes barras diarias (14 días, campo daily_bars_14d) para la tendencia y \
-barras de 15 minutos (últimas horas, campo intraday_bars_15m) para el momentum.
+Recibes por símbolo INDICADORES YA CALCULADOS (campo signals):
+  price       — precio actual
+  pct_1h      — cambio % última hora
+  pct_6h      — cambio % últimas 6 horas
+  pct_24h     — cambio % último día
+  pct_14d     — cambio % últimos 14 días
+  vs_sma14    — % del precio actual sobre/bajo el promedio de 14 días
+
+Guía de lectura:
+  pct_6h > +0.7 con pct_1h positivo  → momentum alcista real (candidato buy)
+  pct_6h < -0.7 con posición abierta → considerar sell defensivo
+  vs_sma14 < -2 con pct_1h volteando a positivo → posible rebote (candidato buy)
+  todo entre ±0.3                    → mercado plano, hold
+(Los volúmenes cripto del feed no son confiables — ignóralos; decide por precio.)
 
 Responde ÚNICAMENTE con un objeto JSON, sin texto adicional:
 {"action": "buy" | "sell" | "hold",
  "symbol": "<símbolo de la whitelist o vacío si hold>",
  "notional_usd": <monto en USD, 0 si hold>,
  "confidence": <0.0 a 1.0>,
- "reason": "<justificación breve en español, máx 2 frases>"}
+ "reason": "<justificación breve en español citando los indicadores, máx 2 frases>"}
 
 Reglas:
 - Solo símbolos de la whitelist proporcionada.
-- Opera cuando haya una señal razonable (momentum intradía sostenido, rebote en
-  soporte, ruptura con volumen); no necesitas certeza absoluta, el tamaño de la
-  posición ya limita el riesgo. Si de plano no hay nada, hold.
+- Opera cuando haya una señal razonable; no necesitas certeza absoluta, el
+  tamaño de la posición ya limita el riesgo. Si todo está plano, hold.
 - Toma utilidades: si una posición abierta tiene ganancia y el momentum se
   agota, vender es buena decisión.
 - sell solo si existe posición abierta en ese símbolo.
-- Evita sobreoperar el mismo símbolo en ciclos consecutivos sin cambio de señal.
 - Calibra confidence honestamente: 0.5 = señal débil pero real, 0.7 = señal
-  clara, 0.9 = señal muy fuerte con confirmación en ambas escalas de tiempo.
+  clara, 0.9 = señal muy fuerte con confirmación en varias escalas de tiempo.
 """
+
+
+def _pct(a: float, b: float) -> float | None:
+    """% de cambio de b→a; None si no hay base."""
+    return round((a - b) / b * 100, 2) if b else None
+
+
+def compute_signals(
+    bars: dict[str, list[dict]], intraday: dict[str, list[dict]]
+) -> dict[str, dict]:
+    """Indicadores deterministas por símbolo — el LLM decide, no calcula."""
+    signals: dict[str, dict] = {}
+    for sym in set(bars) | set(intraday):
+        d = bars.get(sym, [])
+        i = intraday.get(sym, [])
+        price = i[-1]["c"] if i else (d[-1]["c"] if d else None)
+        if price is None:
+            continue
+        sma14 = round(sum(b["c"] for b in d) / len(d), 2) if d else None
+        signals[sym] = {
+            "price": price,
+            "pct_1h": _pct(price, i[-5]["c"]) if len(i) >= 5 else None,
+            "pct_6h": _pct(price, i[0]["c"]) if len(i) >= 2 else None,
+            "pct_24h": _pct(price, d[-2]["c"]) if len(d) >= 2 else None,
+            "pct_14d": _pct(price, d[0]["c"]) if len(d) >= 2 else None,
+            "vs_sma14": _pct(price, sma14) if sma14 else None,
+        }
+    return signals
 
 
 def _extract_json(text: str) -> dict:
@@ -72,8 +110,7 @@ def propose_trade(
         "whitelist": whitelist,
         "nyse_open": market_open,
         "nota": "si nyse_open=false solo puedes operar símbolos cripto (con /)",
-        "daily_bars_14d": bars,
-        "intraday_bars_15m": intraday or {},
+        "signals": compute_signals(bars, intraday or {}),
     }
 
     try:
@@ -98,7 +135,7 @@ def propose_trade(
         )
         logger.info(
             f"[analyzer] propuesta: {proposal.action} {proposal.symbol} "
-            f"${proposal.notional_usd:.2f} conf={proposal.confidence:.2f}"
+            f"${proposal.notional_usd:.2f} conf={proposal.confidence:.2f} — {proposal.reason[:150]}"
         )
         return proposal
     except Exception as exc:
