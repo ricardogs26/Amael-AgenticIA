@@ -29,6 +29,10 @@ MAX_ORDERS_PER_DAY  = int(os.environ.get("TRADER_MAX_ORDERS_PER_DAY", "5"))
 # en un solo activo). Default: 2× el máximo por orden.
 MAX_SYMBOL_EXPOSURE_USD = float(os.environ.get("TRADER_MAX_SYMBOL_EXPOSURE_USD",
                                                str(MAX_ORDER_USD * 2)))
+# Momentum mínimo (pct_6h) para buys. Cripto exige más: el round-trip en Alpaca
+# cuesta ~0.5% (taker 0.25% x2 + spread); una señal menor no cubre la fricción.
+MIN_MOMENTUM_PCT        = float(os.environ.get("TRADER_MIN_MOMENTUM_PCT", "0.7"))
+MIN_MOMENTUM_PCT_CRYPTO = float(os.environ.get("TRADER_MIN_MOMENTUM_PCT_CRYPTO", "1.2"))
 HALT_EQUITY_USD     = float(os.environ.get("TRADER_HALT_EQUITY_USD", "170"))
 SYMBOL_WHITELIST    = [s.strip().upper() for s in os.environ.get(
     "TRADER_SYMBOL_WHITELIST", "SPY,QQQ,VOO,BTC/USD,ETH/USD").split(",") if s.strip()]
@@ -103,7 +107,8 @@ def count_order() -> None:
 
 # ── Evaluación de propuestas ──────────────────────────────────────────────────
 
-def evaluate(proposal: TradeProposal, account: AccountSnapshot) -> PolicyDecision:
+def evaluate(proposal: TradeProposal, account: AccountSnapshot,
+             signals: dict | None = None) -> PolicyDecision:
     """Evalúa una propuesta del LLM contra todas las reglas. Determinista."""
     p = proposal
 
@@ -138,6 +143,19 @@ def evaluate(proposal: TradeProposal, account: AccountSnapshot) -> PolicyDecisio
     if p.notional_usd > MAX_ORDER_USD:
         return PolicyDecision(approved=False, blocked_rule="max_order_usd",
                               detail=f"${p.notional_usd:.2f} > ${MAX_ORDER_USD:.2f}")
+
+    if p.action == "buy" and signals:
+        sig = signals.get(p.symbol) or signals.get(p.symbol.upper()) or {}
+        pct6 = sig.get("pct_6h")
+        vs_sma = sig.get("vs_sma14")
+        from agents.trader.broker import is_crypto
+        threshold = MIN_MOMENTUM_PCT_CRYPTO if is_crypto(p.symbol) else MIN_MOMENTUM_PCT
+        # Excepción: estrategia de rebote (precio muy bajo el SMA14) no exige momentum 6h
+        rebound = vs_sma is not None and vs_sma < -2
+        if pct6 is not None and pct6 < threshold and not rebound:
+            return PolicyDecision(approved=False, blocked_rule="min_momentum",
+                                  detail=f"pct_6h {pct6:+.2f}% < {threshold}% "
+                                         f"({'cripto' if is_crypto(p.symbol) else 'equity'})")
 
     if p.action == "buy":
         plain = p.symbol.upper().replace("/", "")

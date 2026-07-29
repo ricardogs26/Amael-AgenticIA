@@ -83,8 +83,9 @@ def trader_cycle() -> None:
                 logger.info(f"[loop] sell sin notional — default a posición completa "
                             f"${proposal.notional_usd:.2f}")
 
-        # 4. Policy — determinista
-        decision = policy.evaluate(proposal, account)
+        # 4. Policy — determinista (signals para la regla de momentum mínimo)
+        decision = policy.evaluate(proposal, account,
+                                   signals=analyzer.compute_signals(bars, intraday or {}))
 
         if decision.requires_approval:
             storage.store_order(mode, proposal.action, proposal.symbol, proposal.notional_usd,

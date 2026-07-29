@@ -33,6 +33,8 @@ Recibes por símbolo INDICADORES YA CALCULADOS (campo signals):
 
 Guía de lectura:
   pct_6h > +0.7 con pct_1h positivo  → momentum alcista real (candidato buy)
+    · en CRIPTO exige pct_6h > +1.2: el round-trip cuesta ~0.5% (fee taker
+      0.25% x2 + spread) — una señal menor no cubre la fricción
   pct_6h < -0.7 con posición abierta → considerar sell defensivo
   vs_sma14 < -2 con pct_1h volteando a positivo → posible rebote (candidato buy)
   todo entre ±0.3                    → mercado plano, hold
