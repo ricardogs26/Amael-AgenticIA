@@ -37,3 +37,11 @@ TRADER_CONFIDENCE = Histogram(
     ["mode"],
     buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
 )
+
+# Gauge con la última confianza: el histograma con rate() queda vacío cuando
+# hay pocas muestras (1 por ciclo, 0 con cupo agotado) — el gauge siempre pinta.
+TRADER_LAST_CONFIDENCE = Gauge(
+    "amael_trader_last_confidence",
+    "Confianza de la última propuesta del LLM",
+    ["mode", "action"],
+)

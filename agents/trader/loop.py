@@ -25,7 +25,8 @@ def trader_cycle() -> None:
     """Un ciclo completo. Cualquier excepción se registra y no tumba el scheduler."""
     from agents.trader import analyzer, broker, policy, reporter, storage
     from agents.trader.metrics import (
-        TRADER_CASH, TRADER_CONFIDENCE, TRADER_EQUITY, TRADER_LOOP_RUNS,
+        TRADER_CASH, TRADER_CONFIDENCE, TRADER_EQUITY, TRADER_LAST_CONFIDENCE,
+        TRADER_LOOP_RUNS,
         TRADER_ORDERS, TRADER_POLICY_BLOCKS,
     )
 
@@ -64,6 +65,7 @@ def trader_cycle() -> None:
         proposal = analyzer.propose_trade(account, bars, policy.SYMBOL_WHITELIST, market_open,
                                           intraday=intraday)
         TRADER_CONFIDENCE.labels(mode=mode).observe(proposal.confidence)
+        TRADER_LAST_CONFIDENCE.labels(mode=mode, action=proposal.action).set(proposal.confidence)
 
         # NYSE cerrada → solo cripto puede ejecutarse
         if proposal.action in ("buy", "sell") and not broker.is_crypto(proposal.symbol) and not market_open:
