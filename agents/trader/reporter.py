@@ -32,6 +32,61 @@ def notify_whatsapp(message: str) -> bool:
     return False
 
 
+def morning_report() -> None:
+    """
+    Reporte 7:00 CDMX de la actividad nocturna (~últimas 16h, desde el reporte
+    de cierre del día anterior). Solo se envía si hubo movimientos: órdenes
+    ejecutadas/bloqueadas o cambio de equity >= 0.1%.
+    """
+    from agents.trader.broker import TRADER_MODE, get_account_snapshot
+    from agents.trader.storage import get_equity_curve, get_recent_orders
+
+    try:
+        acct = get_account_snapshot()
+
+        from datetime import datetime, timedelta, timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=16)
+        overnight = [
+            o for o in get_recent_orders(50)
+            if o["created_at"] >= cutoff and o["status"] in ("executed", "blocked", "pending_approval")
+        ]
+
+        # Equity de referencia: el snapshot más viejo dentro de la ventana de 16h
+        curve = get_equity_curve(200)
+        baseline = next(
+            (float(c["equity_usd"]) for c in reversed(curve) if c["created_at"] >= cutoff),
+            acct.equity_usd,
+        )
+        delta = acct.equity_usd - baseline
+        delta_pct = (delta / baseline * 100) if baseline else 0.0
+
+        if not overnight and abs(delta_pct) < 0.1:
+            logger.info("[reporter] morning_report: sin movimientos nocturnos — no se envía")
+            return
+
+        lines = [
+            f"🌅 *Trader ({TRADER_MODE})* — resumen nocturno",
+            f"Equity: ${acct.equity_usd:,.2f} ({'+' if delta >= 0 else ''}{delta:,.2f} / {delta_pct:+.2f}%)",
+        ]
+        if overnight:
+            lines.append(f"Movimientos de la noche ({len(overnight)}):")
+            for o in overnight[:8]:
+                mark = {"executed": "✅", "blocked": "⛔", "pending_approval": "⚠️"}[o["status"]]
+                lines.append(
+                    f"  {mark} {o['action']} {o['symbol']} ${float(o['notional_usd']):.2f}"
+                    + (f" — {o['reason'][:80]}" if o["status"] == "executed" else f" ({o['blocked_rule']})")
+                )
+        if acct.positions:
+            lines.append("Portafolio:")
+            for p in acct.positions:
+                lines.append(f"  • {p['symbol']}: ${p['market_value']:,.2f} (P&L {p['unrealized_pl']:+,.2f})")
+        else:
+            lines.append("Sin posiciones abiertas.")
+        notify_whatsapp("\n".join(lines))
+    except Exception as exc:
+        logger.error(f"[reporter] morning_report error: {exc}", exc_info=True)
+
+
 def daily_report() -> None:
     """Reporte al cierre del día (programado por loop.py tras el cierre NYSE)."""
     from agents.trader.broker import TRADER_MODE, get_account_snapshot

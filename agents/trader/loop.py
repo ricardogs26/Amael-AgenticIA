@@ -130,9 +130,12 @@ def start_trader_loop() -> None:
     _scheduler.add_job(trader_cycle, "interval", seconds=LOOP_INTERVAL,
                        id="trader_cycle", max_instances=1, coalesce=True)
     # Reporte diario 15:10 CDMX (NYSE cierra 15:00 CDMX en horario estándar)
-    from agents.trader.reporter import daily_report
+    from agents.trader.reporter import daily_report, morning_report
     _scheduler.add_job(daily_report, "cron", hour=15, minute=10,
                        timezone="America/Mexico_City", id="trader_daily_report")
+    # Resumen nocturno 7:00 CDMX — solo si hubo movimientos (órdenes o ±0.1% equity)
+    _scheduler.add_job(morning_report, "cron", hour=7, minute=0,
+                       timezone="America/Mexico_City", id="trader_morning_report")
     _scheduler.start()
     logger.info(f"[loop] Trader loop iniciado (interval={LOOP_INTERVAL}s)")
 
