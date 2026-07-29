@@ -152,7 +152,7 @@ def get_intraday_bars(symbols: list[str], hours: int = 6) -> dict[str, list[dict
 def submit_notional_order(symbol: str, side: str, notional_usd: float) -> dict:
     """
     Envía orden de mercado por monto (notional). Retorna dict con id/status.
-    ÚNICO punto del código que ejecuta órdenes — siempre tras el policy engine.
+    Usada para buys; los sells van por submit_sell_order (qty). Siempre tras el policy engine.
     """
     from alpaca.trading.enums import OrderSide, TimeInForce
     from alpaca.trading.requests import MarketOrderRequest
@@ -167,6 +167,37 @@ def submit_notional_order(symbol: str, side: str, notional_usd: float) -> dict:
     )
     order = client.submit_order(req)
     logger.info(f"[broker] Orden enviada: {side} {symbol} ${notional_usd:.2f} id={order.id}")
+    return {"id": str(order.id), "status": str(order.status.value)}
+
+
+def submit_sell_order(symbol: str, notional_usd: float, positions: list[dict]) -> dict:
+    """
+    Venta por qty de la posición real. Vender por notional falla cuando el precio
+    subió desde la compra: Alpaca convierte el monto a qty al precio actual y puede
+    exceder el balance disponible ("insufficient balance", code 40310000).
+    - notional ≥ 95% del market_value → cierra la posición completa
+    - venta parcial → orden por qty proporcional a la posición
+    """
+    from alpaca.trading.enums import OrderSide, TimeInForce
+    from alpaca.trading.requests import MarketOrderRequest
+
+    plain = symbol.replace("/", "")
+    pos = next((p for p in positions if p["symbol"] == plain), None)
+    if pos is None or pos["qty"] <= 0:
+        raise ValueError(f"sell sin posición abierta en {symbol}")
+    if pos["market_value"] <= 0 or notional_usd >= pos["market_value"] * 0.95:
+        return close_position(symbol)
+
+    qty = round(pos["qty"] * notional_usd / pos["market_value"], 9)
+    client = get_trading_client()
+    req = MarketOrderRequest(
+        symbol=symbol,
+        qty=qty,
+        side=OrderSide.SELL,
+        time_in_force=TimeInForce.GTC if is_crypto(symbol) else TimeInForce.DAY,
+    )
+    order = client.submit_order(req)
+    logger.info(f"[broker] Orden enviada: sell {symbol} qty={qty} (~${notional_usd:.2f}) id={order.id}")
     return {"id": str(order.id), "status": str(order.status.value)}
 
 

@@ -96,7 +96,12 @@ def trader_cycle() -> None:
 
         # 5. Execute — único camino hacia el broker
         try:
-            result = broker.submit_notional_order(proposal.symbol, proposal.action, proposal.notional_usd)
+            if proposal.action == "sell":
+                result = broker.submit_sell_order(proposal.symbol, proposal.notional_usd,
+                                                  account.positions)
+            else:
+                result = broker.submit_notional_order(proposal.symbol, proposal.action,
+                                                      proposal.notional_usd)
             policy.count_order()
             storage.store_order(mode, proposal.action, proposal.symbol, proposal.notional_usd,
                                 proposal.confidence, proposal.reason, "executed",
