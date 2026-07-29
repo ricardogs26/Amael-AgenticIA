@@ -42,7 +42,7 @@ data:
   # experimento live de $200: 10% máx por orden, HALT al 85% del capital.
   # Al pasar a live ($200): MAX_ORDER=20, HALT=170, APPROVAL=50.
   TRADER_MAX_ORDER_USD:          "10000"
-  TRADER_MAX_ORDERS_PER_DAY:     "10"
+  TRADER_MAX_ORDERS_PER_DAY:     "20"
   TRADER_MAX_SYMBOL_EXPOSURE_USD: "20000"   # 2x max_order; en live con $200 → 40
   TRADER_MIN_MOMENTUM_PCT:        "0.7"     # pct_6h mínimo para buys en equities
   TRADER_MIN_MOMENTUM_PCT_CRYPTO: "1.2"     # cripto: fricción ~0.5% round-trip
