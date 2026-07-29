@@ -25,6 +25,10 @@ logger = logging.getLogger("agents.trader.policy")
 
 MAX_ORDER_USD       = float(os.environ.get("TRADER_MAX_ORDER_USD", "20"))
 MAX_ORDERS_PER_DAY  = int(os.environ.get("TRADER_MAX_ORDERS_PER_DAY", "5"))
+# Tope de exposición acumulada por símbolo (evita piramidar todo el cupo diario
+# en un solo activo). Default: 2× el máximo por orden.
+MAX_SYMBOL_EXPOSURE_USD = float(os.environ.get("TRADER_MAX_SYMBOL_EXPOSURE_USD",
+                                               str(MAX_ORDER_USD * 2)))
 HALT_EQUITY_USD     = float(os.environ.get("TRADER_HALT_EQUITY_USD", "170"))
 SYMBOL_WHITELIST    = [s.strip().upper() for s in os.environ.get(
     "TRADER_SYMBOL_WHITELIST", "SPY,QQQ,VOO,BTC/USD,ETH/USD").split(",") if s.strip()]
@@ -134,6 +138,15 @@ def evaluate(proposal: TradeProposal, account: AccountSnapshot) -> PolicyDecisio
     if p.notional_usd > MAX_ORDER_USD:
         return PolicyDecision(approved=False, blocked_rule="max_order_usd",
                               detail=f"${p.notional_usd:.2f} > ${MAX_ORDER_USD:.2f}")
+
+    if p.action == "buy":
+        plain = p.symbol.upper().replace("/", "")
+        current = sum(pos["market_value"] for pos in account.positions
+                      if pos["symbol"].upper() == plain)
+        if current + p.notional_usd > MAX_SYMBOL_EXPOSURE_USD:
+            return PolicyDecision(approved=False, blocked_rule="max_symbol_exposure",
+                                  detail=f"{p.symbol}: ${current:.2f} + ${p.notional_usd:.2f} "
+                                         f"> ${MAX_SYMBOL_EXPOSURE_USD:.2f}")
 
     if p.action == "buy" and p.notional_usd > account.cash_usd:
         return PolicyDecision(approved=False, blocked_rule="insufficient_cash",

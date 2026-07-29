@@ -43,6 +43,7 @@ data:
   # Al pasar a live ($200): MAX_ORDER=20, HALT=170, APPROVAL=50.
   TRADER_MAX_ORDER_USD:          "10000"
   TRADER_MAX_ORDERS_PER_DAY:     "5"
+  TRADER_MAX_SYMBOL_EXPOSURE_USD: "20000"   # 2x max_order; en live con $200 → 40
   TRADER_HALT_EQUITY_USD:        "85000"
   TRADER_SYMBOL_WHITELIST:       "SPY,QQQ,VOO,BTC/USD,ETH/USD"
   TRADER_MIN_CONFIDENCE:         "0.5"
@@ -136,7 +137,7 @@ spec:
 
       containers:
         - name: trader
-          image: registry.richardx.dev/trader-service:1.0.6
+          image: registry.richardx.dev/trader-service:1.0.7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

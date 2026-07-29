@@ -51,6 +51,12 @@ def trader_cycle() -> None:
             TRADER_LOOP_RUNS.labels(mode=mode, result="cb_paused").inc()
             return
 
+        # Cupo diario agotado → no gastar una llamada al LLM ni guardar filas bloqueadas
+        if policy.orders_today() >= policy.MAX_ORDERS_PER_DAY:
+            logger.info(f"[loop] cupo diario agotado ({policy.MAX_ORDERS_PER_DAY}) — skip análisis")
+            TRADER_LOOP_RUNS.labels(mode=mode, result="daily_limit").inc()
+            return
+
         # 3. Analyze — el LLM propone
         market_open = broker.market_is_open()
         bars = broker.get_recent_bars(policy.SYMBOL_WHITELIST)
@@ -67,6 +73,15 @@ def trader_cycle() -> None:
             TRADER_POLICY_BLOCKS.labels(mode=mode, rule="market_closed").inc()
             TRADER_LOOP_RUNS.labels(mode=mode, result="hold").inc()
             return
+
+        # Sell sin monto (el LLM a veces manda $0) → default: toda la posición
+        if proposal.action == "sell" and proposal.notional_usd <= 0:
+            plain = proposal.symbol.upper().replace("/", "")
+            pos = next((x for x in account.positions if x["symbol"].upper() == plain), None)
+            if pos:
+                proposal.notional_usd = round(pos["market_value"], 2)
+                logger.info(f"[loop] sell sin notional — default a posición completa "
+                            f"${proposal.notional_usd:.2f}")
 
         # 4. Policy — determinista
         decision = policy.evaluate(proposal, account)
