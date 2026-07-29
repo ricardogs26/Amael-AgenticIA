@@ -124,6 +124,15 @@ def trader_cycle() -> None:
             storage.store_order(mode, proposal.action, proposal.symbol, proposal.notional_usd,
                                 proposal.confidence, proposal.reason, "executed",
                                 alpaca_order_id=result["id"], detail=result["status"])
+            # Memoria de tesis: el plan de salida vive con la posición
+            from agents.trader import thesis as thesis_mod
+            if proposal.action == "buy":
+                thesis_mod.save_thesis(proposal.symbol,
+                                       proposal.exit_thesis or proposal.reason,
+                                       proposal.target_pct or 2.0,
+                                       proposal.stop_pct or -1.5)
+            else:
+                thesis_mod.clear_thesis(proposal.symbol)
             TRADER_ORDERS.labels(mode=mode, action=proposal.action, status="executed").inc()
             reporter.notify_whatsapp(
                 f"✅ *Trader ({mode})*: {proposal.action} {proposal.symbol} "

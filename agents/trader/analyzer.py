@@ -35,17 +35,30 @@ Guía de lectura:
   pct_6h > +0.7 con pct_1h positivo  → momentum alcista real (candidato buy)
     · en CRIPTO exige pct_6h > +1.2: el round-trip cuesta ~0.5% (fee taker
       0.25% x2 + spread) — una señal menor no cubre la fricción
-  pct_6h < -0.7 con posición abierta → considerar sell defensivo
   vs_sma14 < -2 con pct_1h volteando a positivo → posible rebote (candidato buy)
   todo entre ±0.3                    → mercado plano, hold
 (Los volúmenes cripto del feed no son confiables — ignóralos; decide por precio.)
+
+MEMORIA (campos recent_trades y open_theses):
+- open_theses: tu plan declarado por posición abierta (thesis, target_pct,
+  stop_pct, pl_pct_vs_entry). Las posiciones se evalúan CONTRA SU TESIS, no
+  contra las señales genéricas: vende si pl_pct_vs_entry alcanzó target_pct,
+  si cayó a stop_pct, o si la razón de entrada ya se invalidó. Una posición
+  de rebote NACE con pct_6h negativo — eso no es razón para venderla.
+- recent_trades: tus últimas órdenes con minutos transcurridos. Si vendiste
+  un símbolo hace poco, NO reentres solo porque la misma señal sigue ahí:
+  exige que algo haya cambiado (señal más fuerte, precio mejor que tu salida).
+  Round-trips repetidos del mismo símbolo con ganancia decreciente = ruido.
 
 Responde ÚNICAMENTE con un objeto JSON, sin texto adicional:
 {"action": "buy" | "sell" | "hold",
  "symbol": "<símbolo de la whitelist o vacío si hold>",
  "notional_usd": <monto en USD, 0 si hold>,
  "confidence": <0.0 a 1.0>,
- "reason": "<justificación breve en español citando los indicadores, máx 2 frases>"}
+ "reason": "<justificación breve en español citando los indicadores, máx 2 frases>",
+ "exit_plan": {"thesis": "<solo en buy: por qué entras y qué esperas>",
+               "target_pct": <solo en buy: % de ganancia para salir, ej 2.0>,
+               "stop_pct": <solo en buy: % de pérdida para cortar, ej -1.5>}}
 
 Reglas:
 - Solo símbolos de la whitelist proporcionada.
@@ -114,6 +127,12 @@ def propose_trade(
         "nota": "si nyse_open=false solo puedes operar símbolos cripto (con /)",
         "signals": compute_signals(bars, intraday or {}),
     }
+    try:
+        from agents.trader import thesis as thesis_mod
+        context["recent_trades"] = thesis_mod.recent_trades_summary(10)
+        context["open_theses"] = thesis_mod.open_theses(account.positions)
+    except Exception as exc:
+        logger.warning(f"[analyzer] contexto de memoria no disponible: {exc}")
 
     try:
         llm = ChatOllama(
@@ -135,6 +154,17 @@ def propose_trade(
             reason=str(data.get("reason", ""))[:500],
             confidence=max(0.0, min(1.0, float(data.get("confidence", 0) or 0))),
         )
+        plan = data.get("exit_plan") or {}
+        if isinstance(plan, dict) and proposal.action == "buy":
+            proposal.exit_thesis = str(plan.get("thesis", ""))[:500]
+            try:
+                proposal.target_pct = float(plan["target_pct"])
+            except (KeyError, TypeError, ValueError):
+                proposal.target_pct = 2.0
+            try:
+                proposal.stop_pct = float(plan["stop_pct"])
+            except (KeyError, TypeError, ValueError):
+                proposal.stop_pct = -1.5
         logger.info(
             f"[analyzer] propuesta: {proposal.action} {proposal.symbol} "
             f"${proposal.notional_usd:.2f} conf={proposal.confidence:.2f} — {proposal.reason[:150]}"

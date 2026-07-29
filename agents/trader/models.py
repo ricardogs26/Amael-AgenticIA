@@ -12,6 +12,10 @@ class TradeProposal:
     notional_usd: float = 0.0   # monto en USD (fracciones permitidas)
     reason: str = ""            # justificación del LLM (se persiste para auditoría)
     confidence: float = 0.0     # 0.0–1.0
+    # Plan de salida declarado al comprar (memoria de tesis — fix del churn)
+    exit_thesis: str = ""
+    target_pct: float | None = None
+    stop_pct: float | None = None
 
 
 @dataclass
