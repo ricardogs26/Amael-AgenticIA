@@ -197,6 +197,48 @@ def _register_api(app: FastAPI) -> None:
         trader_cycle()
         return {"status": "cycle_executed"}
 
+    @app.post("/api/trader/chat", tags=["trader"], dependencies=deps)
+    def chat(payload: dict) -> dict:
+        """
+        Chat con el agente. Comandos (/halt, /resume, /cycle) se ejecutan
+        determinísticamente y requieren confirm=true; el resto va al LLM
+        con contexto en vivo.
+        """
+        from agents.trader import policy
+        from agents.trader import chat as trader_chat
+
+        message = str(payload.get("message", "")).strip()
+        confirm = bool(payload.get("confirm", False))
+        if not message:
+            raise HTTPException(status_code=422, detail="message vacío")
+
+        cmd = message.lower().split()[0]
+        commands = {"/halt": "detener el loop (HALT manual)",
+                    "/resume": "reanudar el loop (quitar HALT)",
+                    "/cycle": "forzar un ciclo de análisis ahora"}
+        if cmd in commands:
+            if not confirm:
+                return {"reply": f"Vas a {commands[cmd]}. ¿Confirmas?",
+                        "needs_confirm": True, "command": cmd}
+            if cmd == "/halt":
+                policy.set_halt("manual via chat")
+                return {"reply": "🛑 Loop detenido (HALT manual). Usa /resume para reanudar.",
+                        "needs_confirm": False}
+            if cmd == "/resume":
+                policy.clear_halt()
+                return {"reply": "▶️ Loop reanudado.", "needs_confirm": False}
+            from agents.trader.loop import trader_cycle
+            trader_cycle()
+            return {"reply": "🔄 Ciclo ejecutado — revisa las órdenes para ver qué decidió.",
+                    "needs_confirm": False}
+
+        try:
+            reply = trader_chat.answer(message, payload.get("history"))
+        except Exception as exc:
+            logger.error(f"[chat] error: {exc}", exc_info=True)
+            raise HTTPException(status_code=502, detail=f"llm_error: {exc}") from exc
+        return {"reply": reply, "needs_confirm": False}
+
 
 app = create_app()
 

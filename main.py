@@ -317,6 +317,7 @@ def create_app() -> FastAPI:
     from interfaces.api.routers.profile import router as profile_router
     from interfaces.api.routers.sre import router as sre_router
     from interfaces.api.routers.tasks import router as tasks_router
+    from interfaces.api.routers.trader import router as trader_router
 
     app.include_router(chat_router)
     app.include_router(conv_router)
@@ -333,6 +334,7 @@ def create_app() -> FastAPI:
     app.include_router(memory_router)       # GET/DELETE /api/memory — Phase 8
     app.include_router(devops_router)       # POST /api/devops/ci-hook — webhook CI
     app.include_router(observability_router)  # GET /api/slo/status — P2-006
+    app.include_router(trader_router)       # /api/trader/* — proxy a trader-service
 
     return app
 

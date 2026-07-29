@@ -32,6 +32,7 @@ data:
   WHATSAPP_BRIDGE_URL:        "http://whatsapp-bridge-service:3000"
   WHATSAPP_PERSONAL_URL:      "http://whatsapp-personal-service:3001"
   COSYVOICE_SERVICE_URL:      "http://cosyvoice-service:8010"
+  TRADER_SERVICE_URL:         "http://trader-service:8003"
   PIPER_SERVICE_URL:          "http://piper-service:8010"
 
   # ── PostgreSQL ────────────────────────────────────────────────────────────
