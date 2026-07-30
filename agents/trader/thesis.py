@@ -72,8 +72,15 @@ def open_theses(positions: list[dict]) -> list[dict]:
         entry = pos.get("avg_entry_price") or 0
         mv, qty = pos.get("market_value") or 0, pos.get("qty") or 0
         price = mv / qty if qty else None
-        t["pl_pct_vs_entry"] = round((price - entry) / entry * 100, 2) if price and entry else None
+        pl_pct = round((price - entry) / entry * 100, 2) if price and entry else None
+        t["pl_pct_vs_entry"] = pl_pct
         t["unrealized_pl_usd"] = pos.get("unrealized_pl")
+        # Comparaciones precalculadas — los LLM chicos se equivocan comparando
+        # números (leyó 0.8% como 8.0%); dárselas resueltas evita alucinaciones.
+        if pl_pct is not None and t.get("target_pct") is not None:
+            t["target_alcanzado"] = pl_pct >= t["target_pct"]
+        if pl_pct is not None and t.get("stop_pct") is not None:
+            t["stop_alcanzado"] = pl_pct <= t["stop_pct"]
         out.append(t)
     return out
 

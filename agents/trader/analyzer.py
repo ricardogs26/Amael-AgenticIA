@@ -41,10 +41,11 @@ Guía de lectura:
 
 MEMORIA (campos recent_trades y open_theses):
 - open_theses: tu plan declarado por posición abierta (thesis, target_pct,
-  stop_pct, pl_pct_vs_entry). Las posiciones se evalúan CONTRA SU TESIS, no
-  contra las señales genéricas: vende si pl_pct_vs_entry alcanzó target_pct,
-  si cayó a stop_pct, o si la razón de entrada ya se invalidó. Una posición
-  de rebote NACE con pct_6h negativo — eso no es razón para venderla.
+  stop_pct, pl_pct_vs_entry, target_alcanzado, stop_alcanzado). Las posiciones
+  se evalúan CONTRA SU TESIS, no contra las señales genéricas: vende si
+  target_alcanzado=true, si stop_alcanzado=true, o si la razón de entrada ya
+  se invalidó. USA los booleanos precalculados, no compares los números tú.
+  Una posición de rebote NACE con pct_6h negativo — no es razón para venderla.
 - recent_trades: tus últimas órdenes con minutos transcurridos. Si vendiste
   un símbolo hace poco, NO reentres solo porque la misma señal sigue ahí:
   exige que algo haya cambiado (señal más fuerte, precio mejor que tu salida).
@@ -124,7 +125,9 @@ def propose_trade(
         "positions": account.positions,
         "whitelist": whitelist,
         "nyse_open": market_open,
-        "nota": "si nyse_open=false solo puedes operar símbolos cripto (con /)",
+        "nota": ("si nyse_open=false NO propongas órdenes de equities (ni buy ni sell "
+                 "— se bloquearían); evalúalos hasta que abra NYSE. Solo cripto (con /) "
+                 "opera 24/7."),
         "signals": compute_signals(bars, intraday or {}),
     }
     try:
