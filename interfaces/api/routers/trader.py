@@ -66,6 +66,11 @@ async def equity(user_id: Annotated[str, Depends(get_current_user)], limit: int 
     return await _forward("GET", f"/equity?limit={min(limit, 2000)}")
 
 
+@router.get("/fees")
+async def fees(user_id: Annotated[str, Depends(get_current_user)], days: int = 7) -> dict:
+    return await _forward("GET", f"/fees?days={min(days, 90)}")
+
+
 @router.post("/chat")
 async def chat(payload: dict, user_id: Annotated[str, Depends(get_current_user)]) -> dict:
     logger.info(f"[trader.chat] user={user_id}")

@@ -201,6 +201,42 @@ def submit_sell_order(symbol: str, notional_usd: float, positions: list[dict]) -
     return {"id": str(order.id), "status": str(order.status.value)}
 
 
+def get_fees_summary(days: int = 7) -> dict:
+    """
+    Comisiones reales cobradas (activities CFEE/FEE de Alpaca), cacheadas 1h en
+    Redis. La fricción real es el insumo del umbral de rentabilidad del LLM.
+    """
+    import json as _json
+    import urllib.request
+    from datetime import datetime, timedelta, timezone
+
+    cache_key = f"trader:fees:{days}d"
+    try:
+        from storage.redis.client import get_client
+        cached = get_client().get(cache_key)
+        if cached:
+            return _json.loads(cached)
+    except Exception:
+        pass
+
+    after = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    base = "https://paper-api.alpaca.markets" if is_paper() else "https://api.alpaca.markets"
+    url = f"{base}/v2/account/activities?activity_types=CFEE,FEE&after={after}&page_size=100"
+    req = urllib.request.Request(url, headers={
+        "APCA-API-KEY-ID": os.environ["ALPACA_API_KEY"],
+        "APCA-API-SECRET-KEY": os.environ["ALPACA_SECRET_KEY"],
+    })
+    acts = _json.load(urllib.request.urlopen(req, timeout=15))
+    total = sum(abs(float(a.get("net_amount") or 0)) for a in acts)
+    out = {"days": days, "total_fees_usd": round(total, 2), "entries": len(acts)}
+    try:
+        from storage.redis.client import get_client
+        get_client().set(cache_key, _json.dumps(out), ex=3600)
+    except Exception:
+        pass
+    return out
+
+
 def close_position(symbol: str) -> dict:
     """Cierra una posición completa (usado por sell sin notional explícito)."""
     client = get_trading_client()

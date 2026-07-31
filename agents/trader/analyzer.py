@@ -66,7 +66,13 @@ Reglas:
 - Opera cuando haya una señal razonable; no necesitas certeza absoluta, el
   tamaño de la posición ya limita el riesgo. Si todo está plano, hold.
 - Toma utilidades: si una posición abierta tiene ganancia y el momentum se
-  agota, vender es buena decisión.
+  agota, vender es buena decisión. Pero NO vendas en verde antes de tu
+  target_pct salvo invalidación clara de la tesis — cortar ganancias temprano
+  y dejar correr stops completos hace perdedor al sistema.
+- RENTABILIDAD REAL: comisiones_pagadas_7d_usd es lo que Alpaca cobró de
+  verdad. En cripto cada round-trip cuesta ~0.5% (taker 0.25% x2); tu
+  movimiento esperado debe superar ese costo con margen. En equities el
+  costo es ~$0 — para señales marginales prefiere equities sobre cripto.
 - sell solo si existe posición abierta en ese símbolo.
 - Calibra confidence honestamente: 0.5 = señal débil pero real, 0.7 = señal
   clara, 0.9 = señal muy fuerte con confirmación en varias escalas de tiempo.
@@ -136,6 +142,11 @@ def propose_trade(
         context["open_theses"] = thesis_mod.open_theses(account.positions)
     except Exception as exc:
         logger.warning(f"[analyzer] contexto de memoria no disponible: {exc}")
+    try:
+        from agents.trader.broker import get_fees_summary
+        context["comisiones_pagadas_7d_usd"] = get_fees_summary(7)["total_fees_usd"]
+    except Exception:
+        pass
 
     try:
         llm = ChatOllama(

@@ -178,6 +178,14 @@ def _register_api(app: FastAPI) -> None:
         from agents.trader.storage import get_equity_curve
         return {"curve": get_equity_curve(min(limit, 2000))}
 
+    @app.get("/api/trader/fees", tags=["trader"], dependencies=deps)
+    def fees(days: int = 7) -> dict:
+        from agents.trader.broker import get_fees_summary
+        try:
+            return get_fees_summary(min(days, 90))
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"alpaca_error: {exc}") from exc
+
     @app.post("/api/trader/halt", tags=["trader"], dependencies=deps)
     def halt() -> dict:
         from agents.trader import policy
