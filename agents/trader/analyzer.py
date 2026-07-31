@@ -125,16 +125,22 @@ def propose_trade(
     from langchain_core.messages import HumanMessage, SystemMessage
     from langchain_ollama import ChatOllama
 
+    # Con NYSE cerrada los equities salen de la whitelist y de las señales:
+    # el LLM no puede proponer lo que no ve (determinista, no una sugerencia).
+    operable = whitelist if market_open else [s for s in whitelist if is_crypto(s)]
+    all_signals = compute_signals(bars, intraday or {})
     context = {
         "equity_usd": account.equity_usd,
         "cash_usd": account.cash_usd,
         "positions": account.positions,
-        "whitelist": whitelist,
+        "whitelist": operable,
         "nyse_open": market_open,
-        "nota": ("si nyse_open=false NO propongas órdenes de equities (ni buy ni sell "
-                 "— se bloquearían); evalúalos hasta que abra NYSE. Solo cripto (con /) "
-                 "opera 24/7."),
-        "signals": compute_signals(bars, intraday or {}),
+        "nota": ("whitelist ya contiene SOLO los símbolos operables ahora mismo. "
+                 "Posiciones de símbolos fuera de la whitelist no son operables en "
+                 "este ciclo (NYSE cerrada) — no propongas nada sobre ellas."),
+        "signals": {k: v for k, v in all_signals.items()
+                    if k in operable or k.replace("/", "") in
+                    [s.replace("/", "") for s in operable]},
     }
     try:
         from agents.trader import thesis as thesis_mod
@@ -168,6 +174,9 @@ def propose_trade(
             reason=str(data.get("reason", ""))[:500],
             confidence=max(0.0, min(1.0, float(data.get("confidence", 0) or 0))),
         )
+        if proposal.action in ("buy", "sell") and not proposal.symbol:
+            proposal = TradeProposal(action="hold",
+                                     reason=f"propuesta sin símbolo descartada: {proposal.reason[:200]}")
         plan = data.get("exit_plan") or {}
         if isinstance(plan, dict) and proposal.action == "buy":
             proposal.exit_thesis = str(plan.get("thesis", ""))[:500]
