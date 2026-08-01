@@ -156,25 +156,23 @@ spec:
               key: GRAFANA_PASSWORD
               optional: true
 
-        # ── Camael — Bitbucket / GitOps ──────────────────────────────────────
-        - name: BITBUCKET_TOKEN
+        # ── Camael — GitOps sobre GitHub ─────────────────────────────────────
+        # La POC sobre Bitbucket se retiró en ago-2026 (credenciales caducadas,
+        # ArgoCD Application eliminada, Secret bitbucket-credentials borrado).
+        # El backend delega en camael-service (CAMAEL_MODE=remote), pero se
+        # dejan estas variables para el modo inprocess de emergencia.
+        - name: SCM_PROVIDER
+          value: "github"
+        - name: SCM_OWNER
+          value: "ricardogs26"
+        - name: SCM_DEFAULT_REPO
+          value: "Amael-AgenticIA"
+        - name: GITHUB_TOKEN
           valueFrom:
             secretKeyRef:
-              name: bitbucket-credentials
-              key: token
-        - name: BITBUCKET_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: bitbucket-credentials
-              key: username
-              optional: true    # si no está, se usa Bearer puro
-        - name: BITBUCKET_WORKSPACE
-          valueFrom:
-            secretKeyRef:
-              name: bitbucket-credentials
-              key: workspace
-        - name: BITBUCKET_DEFAULT_REPO
-          value: "amael-agentic-backend"
+              name: github-runner-secret
+              key: ACCESS_TOKEN
+              optional: true
 
         # ── ServiceNow — Change Management ITIL v4 ───────────────────────────
         - name: SERVICENOW_BASE_URL

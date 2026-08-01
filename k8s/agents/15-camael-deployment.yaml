@@ -13,7 +13,7 @@
 #   - ServiceAccount `camael-sa`           (k8s/rbac/06-camael-rbac.yaml, Fase 1)
 #   - NetworkPolicies con label app=camael-service (k8s/config/03-agents-network-policies.yaml, Task 10)
 #   - Secret `amael-secrets` en amael-ia    (POSTGRES_PASSWORD, INTERNAL_API_SECRET, etc.)
-#   - Secret `bitbucket-credentials` en amael-ia (BITBUCKET_*)
+#   - Secret `github-runner-secret` en amael-ia (ACCESS_TOKEN → GITHUB_TOKEN)
 #   - Secret `servicenow-credentials` en amael-ia (SERVICENOW_*)  [verificar existe]
 
 apiVersion: v1
@@ -57,9 +57,14 @@ data:
   ENVIRONMENT: "production"
   LOG_LEVEL:   "INFO"
 
-  # Bitbucket workspace/repo son públicos (no secretos).
-  BITBUCKET_WORKSPACE: "amael_agenticia"
-  BITBUCKET_REPO:      "amael-agentic-backend"
+  # ── SCM (GitOps) ─────────────────────────────────────────────────────────
+  # La POC sobre Bitbucket se retiró en ago-2026: el workspace quedó sin acceso
+  # (401) y la ArgoCD Application que apuntaba ahí se eliminó. El flujo GitOps
+  # de Camael corre ahora sobre GitHub. Para volver atrás basta con cambiar
+  # SCM_PROVIDER a "bitbucket" y restaurar credenciales válidas.
+  SCM_PROVIDER:     "github"
+  SCM_OWNER:        "ricardogs26"
+  SCM_DEFAULT_REPO: "Amael-AgenticIA"
 
 ---
 apiVersion: apps/v1
@@ -107,7 +112,7 @@ spec:
 
       containers:
         - name: camael
-          image: registry.richardx.dev/camael-service:1.0.0
+          image: registry.richardx.dev/camael-service:1.1.1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -149,16 +154,13 @@ spec:
                   name: google-auth-secret
                   key: session_secret_key
 
-            - name: BITBUCKET_USERNAME
+            # PAT con scopes `repo` y `workflow`. Se reutiliza el del
+            # github-runner, que ya tiene acceso a ricardogs26/Amael-AgenticIA.
+            - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: bitbucket-credentials
-                  key: username
-            - name: BITBUCKET_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: bitbucket-credentials
-                  key: token
+                  name: github-runner-secret
+                  key: ACCESS_TOKEN
 
             - name: SERVICENOW_USERNAME
               valueFrom:

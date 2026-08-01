@@ -99,6 +99,12 @@ data:
   # Con el default `inprocess` el handoff moría con AgentNotFoundError.
   CAMAEL_MODE:        "remote"
   CAMAEL_SERVICE_URL: "http://camael-service:8003"
+  # Raphael consulta el proveedor SCM para decidir si un manifest descubierto
+  # vía ArgoCD es parcheable por Camael o requiere intervención manual.
+  # Debe coincidir con el de camael-service.
+  SCM_PROVIDER:       "github"
+  SCM_OWNER:          "ricardogs26"
+  SCM_DEFAULT_REPO:   "Amael-AgenticIA"
   # El Lease nombre DEBE coincidir con el que usa el backend inprocess
   # (sre-agentic-leader, NO sre-agent-leader). Durante la transición solo
   # uno de los dos gana el Lease y corre el loop; tras Fase 5 el backend
@@ -176,7 +182,7 @@ spec:
 
       containers:
         - name: raphael
-          image: registry.richardx.dev/raphael-service:1.1.6
+          image: registry.richardx.dev/raphael-service:1.1.7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

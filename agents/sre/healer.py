@@ -820,24 +820,26 @@ def handoff_to_camael(
     # abría un PR contra 05-backend-deployment.yaml — el archivo equivocado.
     fix = get_fix(anomaly.issue_type, resource_name, allow_default=False)
     if not fix:
-        # Dos causas: repo GitHub (Camael solo hace PRs en Bitbucket) o manifest
-        # sin resolver. En ambas, el fix es manual.
+        # Dos causas: el repo vive en un proveedor SCM distinto al configurado,
+        # o el manifest no se pudo resolver. En ambas, el fix es manual.
         try:
             from agents.sre.argocd_discovery import discover_manifest
             discovered = discover_manifest(resource_name)
-            if discovered and not discovered.is_bitbucket:
+            if discovered and not discovered.is_supported:
+                from agents.devops.scm import PROVIDER
                 msg = (
                     f"⚠️ *GitOps manual requerido*\n\n"
                     f"Raphael aplicó ROLLOUT_RESTART en `{resource_name}` "
-                    f"({anomaly.issue_type}) pero el manifest está en GitHub:\n"
+                    f"({anomaly.issue_type}) pero el manifest está en:\n"
                     f"`{discovered.repo_url}`\n"
                     f"Path: `{discovered.path}`\n\n"
-                    f"Camael no puede crear PRs en GitHub automáticamente. "
-                    f"Por favor aplica el fix manualmente."
+                    f"Camael está configurado para {PROVIDER} y no puede abrir el PR "
+                    f"ahí. Por favor aplica el fix manualmente."
                 )
                 logger.info(
-                    f"[healer] GitOps skip — '{resource_name}' está en GitHub "
-                    f"({discovered.repo_url}). Usuario notificado."
+                    f"[healer] GitOps skip — '{resource_name}' está en "
+                    f"{discovered.repo_url}, fuera del proveedor {PROVIDER}. "
+                    f"Usuario notificado."
                 )
             else:
                 msg = (

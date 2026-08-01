@@ -37,11 +37,29 @@ _cache_loaded_at: float = 0.0
 @dataclass
 class DiscoveredManifest:
     """Localización de un manifest descubierta desde ArgoCD."""
-    repo_url:    str   # URL completa: https://bitbucket.org/... o https://github.com/...
+    repo_url:    str   # URL completa: https://github.com/... o https://bitbucket.org/...
     path:        str   # Directorio en el repo: k8s/agents/
     branch:      str   # Rama objetivo: main
     is_bitbucket: bool
-    bb_repo_name: str = field(default="")  # Solo cuando is_bitbucket=True
+    bb_repo_name: str = field(default="")  # Nombre del repo (cualquier proveedor)
+    owner:       str = field(default="")   # workspace (Bitbucket) / owner (GitHub)
+
+    @property
+    def is_supported(self) -> bool:
+        """
+        True si Camael puede abrir PRs en este repo con el proveedor activo.
+
+        Antes esto era `is_bitbucket` a secas: Camael solo hablaba Bitbucket y
+        cualquier repo de GitHub se escalaba a intervención manual. Tras
+        retirar la POC (ago-2026) el proveedor es configurable, así que el
+        soporte se decide contra `scm.PROVIDER`, no contra un host fijo.
+        """
+        from agents.devops.scm import PROVIDER
+        host_ok = {
+            "github":    "github.com" in self.repo_url.lower(),
+            "bitbucket": self.is_bitbucket,
+        }
+        return host_ok.get(PROVIDER, False)
 
 
 def _is_bitbucket(url: str) -> bool:
@@ -49,9 +67,15 @@ def _is_bitbucket(url: str) -> bool:
 
 
 def _extract_bb_repo_name(url: str) -> str:
-    """https://bitbucket.org/workspace/repo → 'repo'"""
-    parts = url.rstrip("/").split("/")
+    """https://github.com/owner/repo(.git) → 'repo'"""
+    parts = url.rstrip("/").removesuffix(".git").split("/")
     return parts[-1] if len(parts) >= 2 else ""
+
+
+def _extract_owner(url: str) -> str:
+    """https://github.com/owner/repo(.git) → 'owner'"""
+    parts = url.rstrip("/").removesuffix(".git").split("/")
+    return parts[-2] if len(parts) >= 2 else ""
 
 
 def _load_cache() -> None:
@@ -142,14 +166,15 @@ def discover_manifest(deployment_name: str) -> DiscoveredManifest | None:
         return None
 
     repo_url = entry["repo_url"]
-    bb = _is_bitbucket(repo_url)
 
     return DiscoveredManifest(
         repo_url=repo_url,
         path=entry["path"],
         branch=entry["branch"],
-        is_bitbucket=bb,
-        bb_repo_name=_extract_bb_repo_name(repo_url) if bb else "",
+        is_bitbucket=_is_bitbucket(repo_url),
+        # El nombre del repo se extrae siempre, sea cual sea el proveedor.
+        bb_repo_name=_extract_bb_repo_name(repo_url),
+        owner=_extract_owner(repo_url),
     )
 
 

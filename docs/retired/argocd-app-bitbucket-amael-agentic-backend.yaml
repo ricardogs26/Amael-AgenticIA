@@ -1,0 +1,493 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  annotations:
+    argocd-image-updater.argoproj.io/backend.update-strategy: semver
+    argocd-image-updater.argoproj.io/git-branch: main
+    argocd-image-updater.argoproj.io/image-list: backend=registry.richardx.dev/amael-agentic-backend,
+      piper=registry.richardx.dev/piper-tts
+    argocd-image-updater.argoproj.io/piper.update-strategy: semver
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/argocd-image-updater-git-credentials
+    argocd-image-updater.argoproj.io/write-back-target: kustomization
+    argocd.argoproj.io/app-refresh: hard
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"argoproj.io/v1alpha1","kind":"Application","metadata":{"annotations":{"argocd-image-updater.argoproj.io/backend.update-strategy":"semver","argocd-image-updater.argoproj.io/git-branch":"main","argocd-image-updater.argoproj.io/image-list":"backend=registry.richardx.dev/amael-agentic-backend, piper=registry.richardx.dev/piper-tts","argocd-image-updater.argoproj.io/piper.update-strategy":"semver","argocd-image-updater.argoproj.io/write-back-method":"git:secret:argocd/argocd-image-updater-git-credentials","argocd-image-updater.argoproj.io/write-back-target":"kustomization"},"labels":{"app.kubernetes.io/part-of":"amael-ia"},"name":"amael-agentic-backend","namespace":"argocd"},"spec":{"destination":{"namespace":"amael-ia","server":"https://kubernetes.default.svc"},"ignoreDifferences":[{"group":"apps","jsonPointers":["/spec/template/metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration"],"kind":"Deployment"},{"group":"batch","jsonPointers":["/spec/jobTemplate/metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration"],"kind":"CronJob"}],"project":"default","source":{"path":"k8s/agents","repoURL":"https://github.com/ricardogs26/Amael-AgenticIA","targetRevision":"main"},"syncPolicy":{"automated":{"prune":false,"selfHeal":true},"syncOptions":["CreateNamespace=false","RespectIgnoreDifferences=true","ServerSideApply=true"]}}}
+  creationTimestamp: "2026-03-18T16:57:43Z"
+  generation: 257438
+  labels:
+    app.kubernetes.io/part-of: amael-ia
+  name: amael-agentic-backend
+  namespace: argocd
+  resourceVersion: "72910958"
+  uid: 13d21875-5922-46b8-86cc-d4376b2d7604
+spec:
+  destination:
+    namespace: amael-ia
+    server: https://kubernetes.default.svc
+  ignoreDifferences:
+  - group: apps
+    jsonPointers:
+    - /spec/template/metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration
+    kind: Deployment
+  - group: batch
+    jsonPointers:
+    - /spec/jobTemplate/metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration
+    kind: CronJob
+  project: default
+  source:
+    path: k8s/agents
+    repoURL: https://bitbucket.org/amael_agenticia/amael-agentic-backend
+    targetRevision: main
+  syncPolicy:
+    automated: {}
+    syncOptions:
+    - CreateNamespace=false
+status:
+  conditions:
+  - lastTransitionTime: "2026-08-01T01:15:16Z"
+    message: 'Failed to load target state: failed to generate manifest for source
+      1 of 1: rpc error: code = Unknown desc = authentication required'
+    type: ComparisonError
+  controllerNamespace: argocd
+  health:
+    status: Healthy
+  history:
+  - deployStartedAt: "2026-04-16T02:28:34Z"
+    deployedAt: "2026-04-16T02:28:35Z"
+    id: 134
+    initiatedBy:
+      automated: true
+    revision: 5666ec432501b41f5e5b70ba34da7b45fe71f8ea
+    source:
+      path: k8s/agents
+      repoURL: https://bitbucket.org/amael_agenticia/amael-agentic-backend
+      targetRevision: main
+  - deployStartedAt: "2026-04-16T03:07:42Z"
+    deployedAt: "2026-04-16T03:07:43Z"
+    id: 135
+    initiatedBy:
+      automated: true
+    revision: b12c14fbb54f7877df445fabd771f6bbcc205d2b
+    source:
+      path: k8s/agents
+      repoURL: https://bitbucket.org/amael_agenticia/amael-agentic-backend
+      targetRevision: main
+  - deployStartedAt: "2026-04-17T21:55:19Z"
+    deployedAt: "2026-04-17T21:55:20Z"
+    id: 136
+    initiatedBy:
+      automated: true
+    revision: ef101ccd755be215578d5c00b1bc41181dbaef02
+    source:
+      path: k8s/agents
+      repoURL: https://bitbucket.org/amael_agenticia/amael-agentic-backend
+      targetRevision: main
+  - deployStartedAt: "2026-04-17T22:01:29Z"
+    deployedAt: "2026-04-17T22:01:31Z"
+    id: 137
+    initiatedBy:
+      automated: true
+    revision: 4091138b9ca2cfec09187522fc9abba8c86bc0f4
+    source:
+      path: k8s/agents
+      repoURL: https://bitbucket.org/amael_agenticia/amael-agentic-backend
+      targetRevision: main
+  - deployStartedAt: "2026-04-17T22:02:24Z"
+    deployedAt: "2026-04-17T22:02:26Z"
+    id: 138
+    initiatedBy: {}
+    revision: 4091138b9ca2cfec09187522fc9abba8c86bc0f4
+    source:
+      path: k8s/agents
+      repoURL: https://bitbucket.org/amael_agenticia/amael-agentic-backend
+      targetRevision: main
+  - deployStartedAt: "2026-04-17T22:35:46Z"
+    deployedAt: "2026-04-17T22:35:47Z"
+    id: 139
+    initiatedBy:
+      automated: true
+    revision: 5e96bbdb79a0e718b52f5389dfa3c51525cef5e9
+    source:
+      path: k8s/agents
+      repoURL: https://bitbucket.org/amael_agenticia/amael-agentic-backend
+      targetRevision: main
+  - deployStartedAt: "2026-04-22T12:11:42Z"
+    deployedAt: "2026-04-22T12:11:44Z"
+    id: 140
+    initiatedBy:
+      automated: true
+    revision: 22c21b982e2e3e5cb0a72606cb82b9b3ba82d02b
+    source:
+      path: k8s/agents
+      repoURL: https://bitbucket.org/amael_agenticia/amael-agentic-backend
+      targetRevision: main
+  - deployStartedAt: "2026-05-20T15:08:33Z"
+    deployedAt: "2026-05-20T15:08:34Z"
+    id: 141
+    initiatedBy:
+      automated: true
+    revision: 9c37fe4a0ba98a832c25e2255a71cceb46424ce2
+    source:
+      path: k8s/agents
+      repoURL: https://bitbucket.org/amael_agenticia/amael-agentic-backend
+      targetRevision: main
+  - deployStartedAt: "2026-05-20T15:09:32Z"
+    deployedAt: "2026-05-20T15:09:33Z"
+    id: 142
+    initiatedBy:
+      automated: true
+    revision: a4e6473430cd7eafdb7d454c805c4e4db0b6da75
+    source:
+      path: k8s/agents
+      repoURL: https://bitbucket.org/amael_agenticia/amael-agentic-backend
+      targetRevision: main
+  - deployStartedAt: "2026-05-20T15:12:31Z"
+    deployedAt: "2026-05-20T15:12:33Z"
+    id: 143
+    initiatedBy: {}
+    revision: a4e6473430cd7eafdb7d454c805c4e4db0b6da75
+    source:
+      path: k8s/agents
+      repoURL: https://bitbucket.org/amael_agenticia/amael-agentic-backend
+      targetRevision: main
+  operationState:
+    finishedAt: "2026-05-20T15:12:33Z"
+    message: successfully synced (all tasks run)
+    operation:
+      initiatedBy:
+        automated: true
+      retry:
+        limit: 5
+      sync:
+        revision: HEAD
+        syncOptions:
+        - CreateNamespace=false
+        syncStrategy:
+          hook: {}
+    phase: Succeeded
+    startedAt: "2026-05-20T15:12:31Z"
+    syncResult:
+      resources:
+      - group: policy
+        hookPhase: Running
+        kind: PodDisruptionBudget
+        message: poddisruptionbudget.policy/amael-agentic-pdb configured
+        name: amael-agentic-pdb
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: ""
+        hookPhase: Running
+        kind: ServiceAccount
+        message: serviceaccount/github-runner-sa unchanged
+        name: github-runner-sa
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: ""
+        hookPhase: Running
+        kind: PersistentVolumeClaim
+        message: persistentvolumeclaim/cosyvoice-models-pvc unchanged
+        name: cosyvoice-models-pvc
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: rbac.authorization.k8s.io
+        hookPhase: Running
+        kind: Role
+        message: role.rbac.authorization.k8s.io/github-runner-deployer reconciled.
+          role.rbac.authorization.k8s.io/github-runner-deployer unchanged
+        name: github-runner-deployer
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: rbac.authorization.k8s.io
+        hookPhase: Running
+        kind: RoleBinding
+        message: rolebinding.rbac.authorization.k8s.io/github-runner-deployer-binding
+          reconciled. rolebinding.rbac.authorization.k8s.io/github-runner-deployer-binding
+          unchanged
+        name: github-runner-deployer-binding
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: ""
+        hookPhase: Running
+        kind: Service
+        message: service/amael-agentic-service unchanged
+        name: amael-agentic-service
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: ""
+        hookPhase: Running
+        kind: Service
+        message: service/cosyvoice-service unchanged
+        name: cosyvoice-service
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: ""
+        hookPhase: Running
+        kind: Service
+        message: service/piper-service unchanged
+        name: piper-service
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: apps
+        hookPhase: Running
+        kind: Deployment
+        message: deployment.apps/amael-demo-crashloop unchanged
+        name: amael-demo-crashloop
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: apps
+        hookPhase: Running
+        kind: Deployment
+        message: deployment.apps/amael-demo-degraded unchanged
+        name: amael-demo-degraded
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: apps
+        hookPhase: Running
+        kind: Deployment
+        message: deployment.apps/amael-demo-highmem unchanged
+        name: amael-demo-highmem
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: apps
+        hookPhase: Running
+        kind: Deployment
+        message: deployment.apps/amael-demo-oom unchanged
+        name: amael-demo-oom
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: apps
+        hookPhase: Running
+        kind: Deployment
+        message: deployment.apps/github-runner-deployment unchanged
+        name: github-runner-deployment
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: apps
+        hookPhase: Running
+        kind: Deployment
+        message: deployment.apps/piper-deployment unchanged
+        name: piper-deployment
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: apps
+        hookPhase: Running
+        kind: Deployment
+        message: deployment.apps/cosyvoice-deployment configured
+        name: cosyvoice-deployment
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: apps
+        hookPhase: Running
+        kind: Deployment
+        message: deployment.apps/amael-agentic-deployment configured
+        name: amael-agentic-deployment
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: autoscaling
+        hookPhase: Running
+        kind: HorizontalPodAutoscaler
+        message: horizontalpodautoscaler.autoscaling/amael-agentic-hpa unchanged
+        name: amael-agentic-hpa
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v2
+      - group: batch
+        hookPhase: Running
+        kind: CronJob
+        message: cronjob.batch/amael-conversation-pruning unchanged
+        name: amael-conversation-pruning
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: batch
+        hookPhase: Running
+        kind: CronJob
+        message: cronjob.batch/amael-agentic-day-planner unchanged
+        name: amael-agentic-day-planner
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      - group: batch
+        hookPhase: Running
+        kind: CronJob
+        message: cronjob.batch/amael-morning-audio unchanged
+        name: amael-morning-audio
+        namespace: amael-ia
+        status: Synced
+        syncPhase: Sync
+        version: v1
+      revision: a4e6473430cd7eafdb7d454c805c4e4db0b6da75
+      source:
+        path: k8s/agents
+        repoURL: https://bitbucket.org/amael_agenticia/amael-agentic-backend
+        targetRevision: main
+  reconciledAt: "2026-08-01T14:21:42Z"
+  resources:
+  - health:
+      status: Healthy
+    kind: Service
+    name: piper-service
+    namespace: amael-ia
+    requiresPruning: true
+    status: Unknown
+    version: v1
+  - kind: ServiceAccount
+    name: github-runner-sa
+    namespace: amael-ia
+    requiresPruning: true
+    status: Unknown
+    version: v1
+  - group: apps
+    health:
+      status: Healthy
+    kind: Deployment
+    name: amael-demo-crashloop
+    namespace: amael-ia
+    requiresPruning: true
+    status: Unknown
+    version: v1
+  - group: apps
+    health:
+      status: Healthy
+    kind: Deployment
+    name: amael-demo-degraded
+    namespace: amael-ia
+    requiresPruning: true
+    status: Unknown
+    version: v1
+  - group: apps
+    health:
+      status: Healthy
+    kind: Deployment
+    name: amael-demo-highmem
+    namespace: amael-ia
+    requiresPruning: true
+    status: Unknown
+    version: v1
+  - group: apps
+    health:
+      status: Healthy
+    kind: Deployment
+    name: amael-demo-oom
+    namespace: amael-ia
+    requiresPruning: true
+    status: Unknown
+    version: v1
+  - group: apps
+    health:
+      status: Healthy
+    kind: Deployment
+    name: github-runner-deployment
+    namespace: amael-ia
+    requiresPruning: true
+    status: Unknown
+    version: v1
+  - group: apps
+    health:
+      status: Healthy
+    kind: Deployment
+    name: piper-deployment
+    namespace: amael-ia
+    requiresPruning: true
+    status: Unknown
+    version: v1
+  - group: autoscaling
+    health:
+      message: recommended size matches current size
+      status: Healthy
+    kind: HorizontalPodAutoscaler
+    name: amael-agentic-hpa
+    namespace: amael-ia
+    requiresPruning: true
+    status: Unknown
+    version: v2
+  - group: batch
+    kind: CronJob
+    name: amael-agentic-day-planner
+    namespace: amael-ia
+    requiresPruning: true
+    status: Unknown
+    version: v1
+  - group: policy
+    health:
+      message: PodDisruptionBudget has SufficientPods
+      status: Healthy
+    kind: PodDisruptionBudget
+    name: amael-agentic-pdb
+    namespace: amael-ia
+    requiresPruning: true
+    status: Unknown
+    version: v1
+  - group: rbac.authorization.k8s.io
+    kind: Role
+    name: github-runner-deployer
+    namespace: amael-ia
+    requiresPruning: true
+    status: Unknown
+    version: v1
+  - group: rbac.authorization.k8s.io
+    kind: RoleBinding
+    name: github-runner-deployer-binding
+    namespace: amael-ia
+    requiresPruning: true
+    status: Unknown
+    version: v1
+  summary:
+    images:
+    - curlimages/curl:8.6.0
+    - registry.richardx.dev/github-runner:1.0.0
+    - registry.richardx.dev/piper-service:1.1.0
+  sync:
+    comparedTo:
+      destination:
+        namespace: amael-ia
+        server: https://kubernetes.default.svc
+      ignoreDifferences:
+      - group: apps
+        jsonPointers:
+        - /spec/template/metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration
+        kind: Deployment
+      - group: batch
+        jsonPointers:
+        - /spec/jobTemplate/metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration
+        kind: CronJob
+      source:
+        path: k8s/agents
+        repoURL: https://bitbucket.org/amael_agenticia/amael-agentic-backend
+        targetRevision: main
+    status: Unknown

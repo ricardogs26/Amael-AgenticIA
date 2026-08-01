@@ -278,9 +278,9 @@ async def _cmd_pr() -> str:
 async def _cmd_pipelines() -> str:
     import os
 
-    from agents.devops.bitbucket_client import list_pipelines
-    ws   = os.environ.get("BITBUCKET_WORKSPACE", "")
-    repo = os.environ.get("BITBUCKET_DEFAULT_REPO", "amael-agentic-backend")
+    from agents.devops.scm import list_pipelines
+    ws   = os.environ.get("SCM_OWNER") or os.environ.get("BITBUCKET_WORKSPACE", "")
+    repo = os.environ.get("SCM_DEFAULT_REPO") or os.environ.get("BITBUCKET_DEFAULT_REPO", "Amael-AgenticIA")
     pipes = await list_pipelines(ws, repo, limit=5)
     if not pipes:
         return "No hay pipelines recientes en Bitbucket."
@@ -305,7 +305,7 @@ async def _cmd_aprobar(pr_id_arg: str | None = None) -> str:
     import json as _json
     import os
 
-    from agents.devops.bitbucket_client import merge_pr
+    from agents.devops.scm import merge_pr
     from storage.redis.client import get_client
 
     redis = get_client()
@@ -345,8 +345,8 @@ async def _cmd_aprobar(pr_id_arg: str | None = None) -> str:
     raw     = redis.get(target_key)
     pr_info = _json.loads(raw) if raw else {}
     pr_id   = int(pr_info.get("pr_id", 0))
-    ws      = pr_info.get("workspace") or os.environ.get("BITBUCKET_WORKSPACE", "")
-    repo    = pr_info.get("repo") or os.environ.get("BITBUCKET_DEFAULT_REPO", "amael-agentic-backend")
+    ws      = pr_info.get("workspace") or os.environ.get("SCM_OWNER") or os.environ.get("BITBUCKET_WORKSPACE", "")
+    repo    = pr_info.get("repo") or os.environ.get("SCM_DEFAULT_REPO") or os.environ.get("BITBUCKET_DEFAULT_REPO", "Amael-AgenticIA")
 
     if not pr_id:
         return "❌ PR pendiente encontrado pero sin ID válido."
@@ -408,9 +408,7 @@ async def _cmd_rechazar(pr_id_arg: str | None = None) -> str:
     import json as _json
     import os
 
-    import httpx
-
-    from agents.devops.bitbucket_client import _BB_BASE, _auth, _headers
+    from agents.devops import scm
     from storage.redis.client import get_client
 
     redis = get_client()
@@ -447,21 +445,22 @@ async def _cmd_rechazar(pr_id_arg: str | None = None) -> str:
     raw     = redis.get(target_key)
     pr_info = _json.loads(raw) if raw else {}
     pr_id   = int(pr_info.get("pr_id", 0))
-    ws      = pr_info.get("workspace") or os.environ.get("BITBUCKET_WORKSPACE", "")
-    repo    = pr_info.get("repo") or os.environ.get("BITBUCKET_DEFAULT_REPO", "amael-agentic-backend")
+    ws      = pr_info.get("workspace") or os.environ.get("SCM_OWNER") or os.environ.get("BITBUCKET_WORKSPACE", "")
+    repo    = pr_info.get("repo") or os.environ.get("SCM_DEFAULT_REPO") or os.environ.get("BITBUCKET_DEFAULT_REPO", "Amael-AgenticIA")
 
     if not pr_id:
         return "❌ PR pendiente encontrado pero sin ID válido."
 
-    url = f"{_BB_BASE}/repositories/{ws}/{repo}/pullrequests/{pr_id}/decline"
-    async with httpx.AsyncClient(timeout=30, auth=_auth()) as client:
-        resp = await client.post(url, headers=_headers(), json={})
-        # 409 = ya mergeado/declinado, 404 = no existe — limpiar Redis de todas formas
-        if resp.status_code in (404, 409):
-            redis.delete(target_key)
-            return f"⚠️ PR #{pr_id} ya fue mergeado o declinado en Bitbucket. Tracking limpiado."
-        if resp.status_code >= 400:
-            return f"❌ Error al declinar PR #{pr_id}: {resp.status_code}"
+    http_status = await scm.close_pr(ws, repo, pr_id)
+    # 409 = ya mergeado/declinado, 404 = no existe — limpiar Redis de todas formas
+    if http_status in (404, 409):
+        redis.delete(target_key)
+        return (
+            f"⚠️ PR #{pr_id} ya fue mergeado o declinado en {scm.PROVIDER}. "
+            f"Tracking limpiado."
+        )
+    if http_status >= 400:
+        return f"❌ Error al declinar PR #{pr_id}: {http_status}"
 
     redis.delete(target_key)
 

@@ -530,11 +530,12 @@ def get_fix(
             from agents.sre.argocd_discovery import discover_manifest
             discovered = discover_manifest(resource_name)
             if discovered is not None:
-                if not discovered.is_bitbucket:
-                    # GitHub u otro SCM no soportado — Camael no puede crear el PR
+                if not discovered.is_supported:
+                    # El repo vive en un proveedor distinto al configurado en
+                    # SCM_PROVIDER — Camael no puede abrir el PR ahí.
                     _log.info(
-                        f"[bug_library] '{resource_name}' está en repo GitHub "
-                        f"({discovered.repo_url}) — Camael no soporta GitHub. "
+                        f"[bug_library] '{resource_name}' está en {discovered.repo_url}, "
+                        f"que no coincide con el proveedor SCM activo. "
                         f"Retornando None para escalar a NOTIFY_HUMAN."
                     )
                     return None
@@ -544,7 +545,7 @@ def get_fix(
                 )
                 _log.debug(
                     f"[bug_library] ArgoCD: '{resource_name}' → "
-                    f"bb={discovered.bb_repo_name}, path={discovered.path}"
+                    f"repo={discovered.bb_repo_name}, path={discovered.path}"
                 )
         except Exception as exc:
             _log.debug(f"[bug_library] ArgoCD discovery falló (no crítico): {exc}")

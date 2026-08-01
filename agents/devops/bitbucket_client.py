@@ -242,6 +242,19 @@ async def get_pr(workspace: str, repo: str, pr_id: int) -> dict:
     )
 
 
+async def close_pr(workspace: str, repo: str, pr_id: int) -> int:
+    """
+    Declina un PR sin mergear. Retorna el código HTTP (404/409 = ya resuelto).
+
+    Paridad con `github_client.close_pr()` para que el router de /devops no
+    tenga que hablar la API cruda de ningún proveedor.
+    """
+    url = f"{_BB_BASE}/repositories/{workspace}/{repo}/pullrequests/{pr_id}/decline"
+    async with httpx.AsyncClient(timeout=_TIMEOUT, auth=_auth()) as client:
+        resp = await client.post(url, headers=_headers(), json={})
+        return resp.status_code
+
+
 # ── Pipelines ─────────────────────────────────────────────────────────────────
 
 async def trigger_pipeline(

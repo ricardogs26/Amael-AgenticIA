@@ -42,8 +42,19 @@ from core.agent_base import AgentResult, BaseAgent
 
 logger = logging.getLogger("agents.camael")
 
-_BB_WORKSPACE = os.environ.get("BITBUCKET_WORKSPACE", "amael_agenticia")
-_BB_DEFAULT_REPO = os.environ.get("BITBUCKET_DEFAULT_REPO", "amael-agentic-backend")
+# `workspace` en Bitbucket = `owner` en GitHub. Se leen las variables neutrales
+# primero y se conservan las BITBUCKET_* como fallback para no romper despliegues
+# antiguos durante la transición (la POC de Bitbucket se retiró en ago-2026).
+_BB_WORKSPACE = (
+    os.environ.get("SCM_OWNER")
+    or os.environ.get("BITBUCKET_WORKSPACE")
+    or "ricardogs26"
+)
+_BB_DEFAULT_REPO = (
+    os.environ.get("SCM_DEFAULT_REPO")
+    or os.environ.get("BITBUCKET_DEFAULT_REPO")
+    or "Amael-AgenticIA"
+)
 _REDIS_PR_TTL = 7200  # 2 horas para aprobar (suficiente margen para demo y operación normal)
 
 # ── System prompts ────────────────────────────────────────────────────────────
@@ -262,7 +273,7 @@ class CamaelAgent(BaseAgent):
     # ── Bitbucket Pipelines ───────────────────────────────────────────────────
 
     async def _pipeline_list(self, task: dict[str, Any]) -> AgentResult:
-        from agents.devops.bitbucket_client import list_pipelines
+        from agents.devops.scm import list_pipelines
         workspace = task.get("workspace", _BB_WORKSPACE)
         repo      = task.get("repo", _BB_DEFAULT_REPO)
         try:
@@ -299,7 +310,7 @@ class CamaelAgent(BaseAgent):
                                error=str(exc))
 
     async def _pipeline_trigger(self, task: dict[str, Any]) -> AgentResult:
-        from agents.devops.bitbucket_client import trigger_pipeline
+        from agents.devops.scm import trigger_pipeline
         workspace = task.get("workspace", _BB_WORKSPACE)
         repo      = task.get("repo", _BB_DEFAULT_REPO)
         branch    = task.get("branch", "main")
@@ -331,7 +342,7 @@ class CamaelAgent(BaseAgent):
                                error=str(exc))
 
     async def _pipeline_status(self, task: dict[str, Any]) -> AgentResult:
-        from agents.devops.bitbucket_client import get_pipeline
+        from agents.devops.scm import get_pipeline
         workspace     = task.get("workspace", _BB_WORKSPACE)
         repo          = task.get("repo", _BB_DEFAULT_REPO)
         pipeline_uuid = task.get("pipeline_uuid", "")
@@ -374,7 +385,7 @@ class CamaelAgent(BaseAgent):
 
         El merge lo ejecuta gitops_approve cuando el humano responde APROBAR.
         """
-        from agents.devops import bitbucket_client as bb
+        from agents.devops import scm as bb
         from agents.sre.bug_library import get_fix, is_known_resource
 
         incident_key  = task.get("incident_key", "unknown")
@@ -756,7 +767,7 @@ class CamaelAgent(BaseAgent):
         Aprueba y mergea (APROBAR) o cancela (RECHAZAR) un PR pendiente.
         Lee la info del PR desde Redis usando el incident_key.
         """
-        from agents.devops import bitbucket_client as bb
+        from agents.devops import scm as bb
 
         incident_key = task.get("incident_key", "")
         action       = task.get("action", "").upper().strip()
