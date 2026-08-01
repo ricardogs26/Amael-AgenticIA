@@ -419,7 +419,8 @@ def sre_autonomous_loop(
             # Report
             mark_incident(anomaly.incident_key)
             reporter.store_incident(
-                incident_key=anomaly.incident_key,
+                # occurrence_key, no incident_key: una fila por episodio.
+                incident_key=anomaly.occurrence_key,
                 namespace=anomaly.namespace,
                 resource_name=anomaly.resource_name,
                 resource_type=anomaly.resource_type,
@@ -462,7 +463,10 @@ def sre_autonomous_loop(
                 # Verificación post-acción — usar nombre normalizado para que
                 # _has_pending_gitops_pr encuentre la clave Redis correcta
                 healer.schedule_verification(
+                    # incident_key → claves Redis del handoff GitOps (estables).
+                    # occurrence_key → fila insertada arriba en sre_incidents.
                     incident_key=anomaly.incident_key,
+                    occurrence_key=anomaly.occurrence_key,
                     deployment_name=_deploy_normalized,
                     namespace=anomaly.namespace,
                     update_incident_fn=reporter.update_incident_verification,
