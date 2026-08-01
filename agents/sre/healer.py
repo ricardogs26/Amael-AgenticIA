@@ -815,10 +815,13 @@ def handoff_to_camael(
 
     from agents.sre.bug_library import get_fix
     resource_name = anomaly.owner_name or anomaly.resource_name or ""
-    fix = get_fix(anomaly.issue_type, resource_name)
+    # allow_default=False: sin manifest resuelto no hay handoff. El default
+    # apuntaba al backend, así que una anomalía en un servicio no registrado
+    # abría un PR contra 05-backend-deployment.yaml — el archivo equivocado.
+    fix = get_fix(anomaly.issue_type, resource_name, allow_default=False)
     if not fix:
-        # get_fix retorna None cuando el repo es GitHub (no soportado por Camael).
-        # Notificar al usuario para intervención manual en el repo correcto.
+        # Dos causas: repo GitHub (Camael solo hace PRs en Bitbucket) o manifest
+        # sin resolver. En ambas, el fix es manual.
         try:
             from agents.sre.argocd_discovery import discover_manifest
             discovered = discover_manifest(resource_name)
@@ -832,13 +835,28 @@ def handoff_to_camael(
                     f"Camael no puede crear PRs en GitHub automáticamente. "
                     f"Por favor aplica el fix manualmente."
                 )
-                notify_fn(msg)
                 logger.info(
                     f"[healer] GitOps skip — '{resource_name}' está en GitHub "
                     f"({discovered.repo_url}). Usuario notificado."
                 )
+            else:
+                msg = (
+                    f"⚠️ *GitOps manual requerido*\n\n"
+                    f"Raphael aplicó ROLLOUT_RESTART en `{resource_name}` "
+                    f"({anomaly.issue_type}) pero no pudo resolver dónde vive su "
+                    f"manifest (ni en ArgoCD ni en APP_MANIFEST_MAP).\n\n"
+                    f"No se abrió PR para no modificar el archivo equivocado. "
+                    f"Registra `{resource_name}` en APP_MANIFEST_MAP o aplica el "
+                    f"fix a mano."
+                )
+                logger.warning(
+                    f"[healer] GitOps skip — manifest de '{resource_name}' sin "
+                    f"resolver; no se abre PR a ciegas."
+                )
+            if notify_fn:
+                notify_fn(msg)
         except Exception as exc:
-            logger.debug(f"[healer] GitHub notify error (no crítico): {exc}")
+            logger.debug(f"[healer] GitOps skip notify error (no crítico): {exc}")
         return
 
     # Dedup: un solo PR por deployment (no por issue_type) — TTL 2h.
