@@ -5,9 +5,15 @@ Migrados desde k8s-agent/main.py: dataclasses Anomaly y SREAction.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+
+# Ancho de la ventana de ocurrencia, en minutos. Dos detecciones del mismo
+# problema dentro de la misma ventana son el mismo episodio; en ventanas
+# distintas son reincidencias y cada una debe quedar registrada.
+SRE_OCCURRENCE_WINDOW_MIN = int(os.environ.get("SRE_OCCURRENCE_WINDOW_MIN", "60"))
 
 
 @dataclass
@@ -37,8 +43,33 @@ class Anomaly:
 
     @property
     def incident_key(self) -> str:
-        """Clave única para deduplicación en Redis y PostgreSQL."""
+        """
+        Clave estable del problema — deduplicación en Redis, approvals y
+        handoff GitOps. Sin componente temporal: identifica *qué* falla,
+        no *cuándo*.
+        """
         return f"{self.namespace}:{self.resource_name}:{self.issue_type}"
+
+    @property
+    def occurrence_key(self) -> str:
+        """
+        Clave del episodio concreto — es la que se persiste en PostgreSQL.
+
+        sre_incidents tiene UNIQUE(incident_key) e inserta con ON CONFLICT DO
+        NOTHING. Con una clave sin tiempo, la primera ocurrencia bloqueaba para
+        siempre el registro de todas las reincidencias: trader-service tenía una
+        sola fila del 28-jul mientras seguía siendo reiniciado en agosto. Eso
+        cegaba la auditoría y envenenaba get_historical_success_rate(), que
+        alimenta el ajuste de confianza del diagnóstico.
+
+        Derivada de self.timestamp (fijo por instancia), no del reloj actual:
+        store_incident() y update_incident_verification() ocurren con minutos de
+        diferencia y deben apuntar a la misma fila.
+        """
+        window = SRE_OCCURRENCE_WINDOW_MIN * 60
+        bucket = int(self.timestamp.timestamp() // window) * window
+        stamp  = datetime.fromtimestamp(bucket, tz=UTC).strftime("%Y%m%dT%H%M")
+        return f"{self.incident_key}:{stamp}"
 
     def __str__(self) -> str:
         return (

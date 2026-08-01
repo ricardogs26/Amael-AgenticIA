@@ -426,6 +426,7 @@ def _run_verification_job(
     update_incident_fn,
     notify_fn,
     generate_postmortem_fn,
+    occurrence_key: str = "",
 ) -> None:
     """
     Job de verificación post-acción ejecutado N minutos después del ROLLOUT_RESTART (P3-A).
@@ -435,7 +436,14 @@ def _run_verification_job(
     IMPORTANTE: si Camael tiene un PR pendiente para este incidente, NO se hace rollback.
     El PR pendiente indica que el fix GitOps está en camino (esperando merge + ArgoCD sync).
     En ese caso se reprograma la verificación para darle tiempo al flujo GitOps.
+
+    Dos claves, dos dominios:
+      incident_key   — estable; casa con lo que el handoff GitOps escribió en
+                       Redis (RFC de ServiceNow, PR pendiente, estado Camael).
+      occurrence_key — por episodio; identifica la fila en sre_incidents y el
+                       postmortem. Default: incident_key (compatibilidad).
     """
+    occurrence_key = occurrence_key or incident_key
     logger.info(
         f"[healer] Verificando {namespace}/{deployment_name} "
         f"(incident={incident_key})"
@@ -451,7 +459,7 @@ def _run_verification_job(
 
     if healthy:
         logger.info(f"[healer] ✅ {deployment_name} verificado como saludable.")
-        update_incident_fn(incident_key, "verify:ok")
+        update_incident_fn(occurrence_key, "verify:ok")
         _update_camael_gitops_status(incident_key, "CLOSED", "HEALTHY")
         # Cerrar RFC en ServiceNow → Closed
         if rfc_info:
@@ -459,7 +467,7 @@ def _run_verification_job(
         if generate_postmortem_fn:
             threading.Thread(
                 target=generate_postmortem_fn,
-                args=(incident_key,),
+                args=(occurrence_key,),
                 daemon=True,
             ).start()
     elif _has_pending_gitops_pr(incident_key, deployment_name, namespace):
@@ -469,7 +477,7 @@ def _run_verification_job(
             f"[healer] {deployment_name} unhealthy pero hay PR GitOps pendiente — "
             f"re-schedulando verificación en {_VERIFICATION_DELAY_S}s"
         )
-        update_incident_fn(incident_key, "verify:waiting_gitops")
+        update_incident_fn(occurrence_key, "verify:waiting_gitops")
         if notify_fn:
             notify_fn(
                 f"⏳ *Verificación pendiente* — `{namespace}/{deployment_name}` sigue "
@@ -481,6 +489,7 @@ def _run_verification_job(
         # Re-schedule (una sola vez — si en el siguiente ciclo sigue sin PR, sí hace rollback)
         schedule_verification(
             incident_key=incident_key,
+            occurrence_key=occurrence_key,
             deployment_name=deployment_name,
             namespace=namespace,
             update_incident_fn=update_incident_fn,
@@ -496,10 +505,10 @@ def _run_verification_job(
         rollback_result = rollout_undo_deployment(deployment_name, namespace)
         if "✅" in rollback_result:
             SRE_ROLLBACK_TOTAL.labels(result="ok").inc()
-            update_incident_fn(incident_key, "verify:rollback:ok")
+            update_incident_fn(occurrence_key, "verify:rollback:ok")
         else:
             SRE_ROLLBACK_TOTAL.labels(result="error").inc()
-            update_incident_fn(incident_key, "verify:rollback:error")
+            update_incident_fn(occurrence_key, "verify:rollback:error")
         _update_camael_gitops_status(incident_key, "FAILED", "UNHEALTHY_ROLLBACK")
         # Marcar RFC como fallido → Review
         if rfc_info:
@@ -512,7 +521,7 @@ def _run_verification_job(
             )
     else:
         logger.warning(f"[healer] {deployment_name} sigue unhealthy pero sin deploy reciente.")
-        update_incident_fn(incident_key, "verify:unresolved")
+        update_incident_fn(occurrence_key, "verify:unresolved")
         _update_camael_gitops_status(incident_key, "FAILED", "UNHEALTHY_NO_DEPLOY")
         if rfc_info:
             _close_rfc_async(rfc_info, deployment_name, namespace,
@@ -543,13 +552,18 @@ def schedule_verification(
     notify_fn,
     generate_postmortem_fn=None,
     delay_seconds: int | None = None,
+    occurrence_key: str = "",
 ) -> None:
     """
     Schedula el job de verificación post-acción con APScheduler (P3-A).
     Se ejecuta delay_seconds después de la acción (default: SRE_VERIFICATION_DELAY env, 300s).
+
+    occurrence_key identifica la fila concreta en sre_incidents; incident_key
+    (estable) es la que casa con las claves Redis del flujo GitOps.
     """
     if delay_seconds is None:
         delay_seconds = _VERIFICATION_DELAY_S
+    occurrence_key = occurrence_key or incident_key
     try:
         from datetime import datetime, timedelta
         scheduler = _aps_scheduler
@@ -564,8 +578,9 @@ def schedule_verification(
             args=[
                 incident_key, deployment_name, namespace,
                 update_incident_fn, notify_fn, generate_postmortem_fn,
+                occurrence_key,
             ],
-            id=f"verify_{incident_key}",
+            id=f"verify_{occurrence_key}",
             replace_existing=True,
         )
         logger.info(
