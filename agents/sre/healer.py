@@ -128,6 +128,33 @@ def _get_pod_logs(resource_name: str, namespace: str, lines: int = 50) -> str:
         return ""
 
 
+def _restarted_within_verification_window(deployment_name: str, namespace: str) -> bool:
+    """
+    True si el deployment fue reiniciado hace menos de SRE_VERIFICATION_DELAY.
+
+    Red de seguridad anti-bucle: si un deployment tarda en arrancar más que el
+    intervalo del loop, reiniciarlo otra vez aborta el arranque anterior y el
+    ciclo nunca converge. Mientras la verificación post-acción siga pendiente,
+    no volvemos a tocarlo.
+    """
+    try:
+        apps_v1 = _get_k8s_apps()
+        dep = apps_v1.read_namespaced_deployment(name=deployment_name, namespace=namespace)
+        annotations = (dep.spec.template.metadata.annotations or {}) if dep.spec.template.metadata else {}
+        restarted_at = annotations.get("kubectl.kubernetes.io/restartedAt")
+        if not restarted_at:
+            return False
+
+        from datetime import datetime
+        ts = datetime.fromisoformat(restarted_at.replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        return (datetime.now(UTC) - ts).total_seconds() < _VERIFICATION_DELAY_S
+    except Exception as exc:
+        logger.warning(f"[healer] _restarted_within_verification_window error: {exc}")
+        return False
+
+
 def decide_action(anomaly: Anomaly, confidence: float) -> str:
     """
     Aplica guardrails y decide la acción apropiada.
@@ -138,7 +165,8 @@ def decide_action(anomaly: Anomaly, confidence: float) -> str:
       3. Severidad insuficiente → NO_ACTION
       4. Confianza insuficiente → NOTIFY_HUMAN
       5. IMAGE_PULL_ERROR / NODE_NOT_READY / POD_PENDING_STUCK → NOTIFY_HUMAN
-      6. Cumple todos los criterios → ROLLOUT_RESTART
+      6. Reiniciado hace poco (verificación pendiente) → NO_ACTION
+      7. Cumple todos los criterios → ROLLOUT_RESTART
 
     Migrado desde k8s-agent/main.py → decide_action()
     """
@@ -167,6 +195,14 @@ def decide_action(anomaly: Anomaly, confidence: float) -> str:
             f"[healer] Confianza {confidence:.2f} < {CONFIDENCE_THRESHOLD} → NOTIFY_HUMAN"
         )
         return ActionType.NOTIFY_HUMAN
+
+    # Anti-bucle: no reiniciar algo que aún está arrancando por un restart previo.
+    if _restarted_within_verification_window(resource, anomaly.namespace):
+        logger.info(
+            f"[healer] '{resource}' reiniciado hace < {_VERIFICATION_DELAY_S}s "
+            f"— verificación pendiente → NO_ACTION"
+        )
+        return ActionType.NO_ACTION
 
     return ActionType.ROLLOUT_RESTART
 

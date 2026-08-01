@@ -29,6 +29,15 @@ logger = logging.getLogger("agents.sre.observer")
 # En el primer loop solo se establece la línea base, sin generar alertas.
 _restart_baseline: dict[str, int] = {}
 
+# Ciclos consecutivos en que un deployment se ha visto degradado.
+# Clave: "namespace/deployment" → nº de observaciones seguidas con avail < desired.
+# Un deployment arrancando baja réplicas por unos segundos; solo alertamos si la
+# degradación sobrevive SRE_DEGRADED_MIN_CYCLES loops seguidos.
+_degraded_streak: dict[str, int] = {}
+
+# Nº de ciclos consecutivos degradado antes de emitir DEPLOYMENT_DEGRADED.
+SRE_DEGRADED_MIN_CYCLES = int(os.environ.get("SRE_DEGRADED_MIN_CYCLES", "3"))
+
 # Namespaces a observar
 _OBSERVE_NAMESPACES = [
     ns.strip()
@@ -47,6 +56,31 @@ def _get_k8s_client():
     except Exception:
         config.load_kube_config()
     return client
+
+
+def _is_rollout_in_progress(dep) -> bool:
+    """
+    True si el deployment está convergiendo normalmente (no está enfermo).
+
+    Un deployment recién aplicado o reiniciado baja available_replicas mientras
+    el controlador crea el ReplicaSet nuevo. Sin este filtro, cualquier rollout
+    — incluido el que Raphael acaba de disparar — se lee como DEPLOYMENT_DEGRADED
+    y realimenta un bucle de reinicios.
+    """
+    # El controlador aún no procesa la última versión del spec.
+    gen      = (dep.metadata.generation if dep.metadata else None) or 0
+    observed = (dep.status.observed_generation if dep.status else None) or 0
+    if observed < gen:
+        return True
+
+    for cond in (dep.status.conditions or []):
+        if cond.type != "Progressing":
+            continue
+        # ReplicaSetUpdated → rollout en curso.
+        # NewReplicaSetAvailable + status True → rollout terminado y sano.
+        if cond.status == "True" and cond.reason == "ReplicaSetUpdated":
+            return True
+    return False
 
 
 def _prometheus_query(url: str, query: str) -> list[dict] | None:
@@ -627,19 +661,46 @@ def observe_infrastructure(namespaces: list[str] | None = None) -> list[Anomaly]
                 avail   = dep.status.available_replicas or 0
                 if desired == 0:
                     continue  # deployment scaled to 0 — no alert needed
-                if avail < desired:
-                    anomalies.append(Anomaly(
-                        issue_type=AnomalyType.DEPLOYMENT_DEGRADED,
-                        severity=Severity.CRITICAL if avail == 0 else Severity.HIGH,
-                        namespace=ns,
-                        resource_name=name,
-                        resource_type="Deployment",
-                        owner_name=name,
-                        details=(
-                            f"Deployment '{name}' degradado: "
-                            f"{avail}/{desired} réplicas disponibles."
-                        ),
-                    ))
+
+                dep_key = f"{ns}/{name}"
+
+                if avail >= desired:
+                    _degraded_streak.pop(dep_key, None)
+                    continue
+
+                # Rollout en curso ≠ deployment enfermo. Resetear la racha: el
+                # reloj de degradación arranca cuando el rollout termina.
+                if _is_rollout_in_progress(dep):
+                    _degraded_streak.pop(dep_key, None)
+                    logger.debug(
+                        f"[observer] {dep_key} con {avail}/{desired} réplicas pero "
+                        f"el rollout sigue en curso — no es anomalía."
+                    )
+                    continue
+
+                streak = _degraded_streak.get(dep_key, 0) + 1
+                _degraded_streak[dep_key] = streak
+
+                if streak < SRE_DEGRADED_MIN_CYCLES:
+                    logger.debug(
+                        f"[observer] {dep_key} degradado {streak}/"
+                        f"{SRE_DEGRADED_MIN_CYCLES} ciclos — aún sin alertar."
+                    )
+                    continue
+
+                anomalies.append(Anomaly(
+                    issue_type=AnomalyType.DEPLOYMENT_DEGRADED,
+                    severity=Severity.CRITICAL if avail == 0 else Severity.HIGH,
+                    namespace=ns,
+                    resource_name=name,
+                    resource_type="Deployment",
+                    owner_name=name,
+                    details=(
+                        f"Deployment '{name}' degradado: "
+                        f"{avail}/{desired} réplicas disponibles "
+                        f"durante {streak} ciclos consecutivos."
+                    ),
+                ))
         except Exception as exc:
             logger.warning(f"[observer] Deployments en {ns}: {exc}")
 
