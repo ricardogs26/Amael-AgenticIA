@@ -101,9 +101,25 @@ APP_MANIFEST_MAP: dict[str, AppManifest] = {
 
     # amael-demo-degraded (POC demo Escenario D — DEPLOYMENT_DEGRADED)
     "amael-demo-degraded":       AppManifest("amael-agentic-backend", "k8s/agents/09-demo-degraded.yaml"),
+
+    # Agentes standalone (Phase 3 agents-split)
+    "raphael-service":           AppManifest("amael-agentic-backend", "k8s/agents/13-raphael-deployment.yaml"),
+    "camael-service":            AppManifest("amael-agentic-backend", "k8s/agents/15-camael-deployment.yaml"),
+    "trader-service":            AppManifest("amael-agentic-backend", "k8s/agents/16-trader-deployment.yaml"),
+
+    # TTS
+    "cosyvoice-deployment":      AppManifest("amael-agentic-backend", "k8s/agents/08-cosyvoice-deployment.yaml"),
+    "cosyvoice-service":         AppManifest("amael-agentic-backend", "k8s/agents/08-cosyvoice-deployment.yaml"),
+    "piper-deployment":          AppManifest("amael-agentic-backend", "k8s/agents/09-piper-deployment.yaml"),
+    "piper-service":             AppManifest("amael-agentic-backend", "k8s/agents/09-piper-deployment.yaml"),
 }
 
-# App por defecto si el resource_name no está en el mapa
+# App por defecto si el resource_name no está en el mapa.
+#
+# ADVERTENCIA: adivinar aquí significa abrir un PR que modifica el manifest de
+# OTRO servicio. Solo se usa cuando el caller lo permite explícitamente
+# (allow_default=True). El handoff automático de Raphael lo desactiva: prefiere
+# no actuar a escribir en el archivo equivocado.
 _DEFAULT_APP = AppManifest("amael-agentic-backend", "k8s/agents/05-backend-deployment.yaml")
 
 
@@ -452,7 +468,11 @@ BUG_LIBRARY: dict[str, BugFixTemplate] = {
 }
 
 
-def get_fix(issue_type: str, resource_name: str = "") -> BugFix | None:
+def get_fix(
+    issue_type: str,
+    resource_name: str = "",
+    allow_default: bool = True,
+) -> BugFix | None:
     """
     Retorna un BugFix completo para (issue_type, resource_name), o None si no hay fix.
 
@@ -462,15 +482,21 @@ def get_fix(issue_type: str, resource_name: str = "") -> BugFix | None:
            caller debe escalar a NOTIFY_HUMAN)
          - Si el repo es Bitbucket → usa repo+path descubierto
       2. APP_MANIFEST_MAP estático (fallback para entradas conocidas sin ArgoCD)
-      3. _DEFAULT_APP (último recurso — loggea advertencia)
+      3. _DEFAULT_APP — solo si allow_default (loggea advertencia)
 
     Args:
         issue_type:    Tipo de anomalía (e.g. "OOM_KILLED", "CRASH_LOOP").
         resource_name: Nombre del deployment/pod reportado por K8s.
+        allow_default: Si False, retorna None en vez de adivinar el manifest.
+                       Camael lo deja en True porque hace discovery dinámico en
+                       Bitbucket y corrige el file_path; el handoff automático de
+                       Raphael lo pone en False — escribir en el manifest
+                       equivocado es peor que no actuar.
 
     Returns:
-        BugFix con repo+file_path resueltos, o None si no hay template o el repo
-        es GitHub (no soportado por Camael).
+        BugFix con repo+file_path resueltos, o None si no hay template, el repo
+        es GitHub (no soportado por Camael), o el manifest no se pudo resolver
+        con allow_default=False.
     """
     import logging
     _log = logging.getLogger("agents.sre.bug_library")
@@ -525,6 +551,13 @@ def get_fix(issue_type: str, resource_name: str = "") -> BugFix | None:
 
     # ── 3. Fallback default ──────────────────────────────────────────────────
     if manifest is None:
+        if not allow_default:
+            _log.warning(
+                f"[bug_library] '{resource_name}' no encontrado en ArgoCD ni en "
+                f"APP_MANIFEST_MAP y allow_default=False — sin fix automático. "
+                f"Registra el recurso en APP_MANIFEST_MAP para habilitarlo."
+            )
+            return None
         _log.warning(
             f"[bug_library] '{resource_name}' no encontrado en ArgoCD ni en "
             f"APP_MANIFEST_MAP — usando default ({_DEFAULT_APP.repo}/{_DEFAULT_APP.file_path})."
