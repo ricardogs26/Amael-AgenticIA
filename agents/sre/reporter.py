@@ -21,7 +21,15 @@ logger = logging.getLogger("agents.sre.reporter")
 _WHATSAPP_BRIDGE_URL = os.environ.get(
     "WHATSAPP_BRIDGE_URL", "http://whatsapp-bridge-service:3000"
 )
-_OWNER_PHONE         = os.environ.get("OWNER_PHONE", "")
+# El backend usa OWNER_PHONE; raphael-service y el ConfigMap compartido usan
+# SRE_ALERT_PHONE / ADMIN_PHONE. Aceptar los tres evita que el pod quede mudo
+# por una diferencia de nombre (incidente ollama, 31-jul-2026).
+_OWNER_PHONE         = (
+    os.environ.get("OWNER_PHONE")
+    or os.environ.get("SRE_ALERT_PHONE")
+    or os.environ.get("ADMIN_PHONE")
+    or ""
+)
 _MIN_NOTIFY_SEVERITY = os.environ.get("SRE_MIN_NOTIFY_SEVERITY", "HIGH")
 _SEVERITY_RANK       = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 

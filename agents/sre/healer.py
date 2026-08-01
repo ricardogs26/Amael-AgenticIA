@@ -630,10 +630,34 @@ def execute_sre_action(
         return f"NOTIFY_HUMAN: Alerta enviada para {anomaly.resource_name}"
 
     if action_type == ActionType.DELETE_STUCK_POD:
-        result = delete_stuck_pod(anomaly.resource_name, anomaly.namespace)
-        status = "ok" if "✅" in result else "error"
+        # Una anomalía correlacionada tiene resource_name = nombre del Deployment
+        # y los pods reales en metadata["pod_names"]. Borrar `resource_name` en
+        # ese caso da 404 eterno, así que se itera sobre los pods agrupados.
+        targets = list((anomaly.metadata or {}).get("pod_names") or [])
+        if not targets:
+            if anomaly.resource_type == "Deployment":
+                msg = (
+                    f"❌ DELETE_STUCK_POD sin pods concretos para "
+                    f"{anomaly.namespace}/{anomaly.resource_name} — se omite."
+                )
+                logger.error(f"[healer] {msg}")
+                SRE_ACTIONS_TAKEN_TOTAL.labels(action=action_type, result="error").inc()
+                return msg
+            targets = [anomaly.resource_name]
+
+        results = [delete_stuck_pod(pod, anomaly.namespace) for pod in targets]
+        failed  = [r for r in results if "✅" not in r]
+        status  = "error" if failed else "ok"
         SRE_ACTIONS_TAKEN_TOTAL.labels(action=action_type, result=status).inc()
-        return result
+        if failed:
+            return (
+                f"DELETE_STUCK_POD: {len(results) - len(failed)}/{len(results)} pods "
+                f"eliminados en {anomaly.namespace}. Fallos: {'; '.join(failed)}"
+            )
+        return (
+            f"✅ DELETE_STUCK_POD: {len(results)} pod(s) huérfano(s) eliminado(s) "
+            f"en {anomaly.namespace}/{anomaly.resource_name}."
+        )
 
     if action_type == ActionType.ROLLOUT_RESTART:
         target = anomaly.owner_name or anomaly.resource_name
@@ -826,6 +850,41 @@ def _run_gitops_fix_in_thread(anomaly: Anomaly, incident_key: str, repo: str) ->
 
     resource_name = anomaly.owner_name or anomaly.resource_name or ""
     _namespace    = anomaly.namespace or _DEFAULT_NAMESPACE
+
+    # raphael-service no importa `agents.devops` — Camael corre standalone en
+    # camael-service:8003. Si el registry local no lo tiene, delegar por HTTP en
+    # vez de reventar con AgentNotFoundError y perder el handoff.
+    if not AgentRegistry.is_registered("camael"):
+        logger.info(
+            "[healer] Camael no registrado en este proceso → handoff remoto "
+            f"(incident={incident_key})"
+        )
+        from clients._http import get_camael_client
+        try:
+            resp = get_camael_client().post(
+                "/api/camael/handoff",
+                json={
+                    "incident_key":    incident_key,
+                    "issue_type":      str(anomaly.issue_type),
+                    "severity":        str(anomaly.severity),
+                    "namespace":       _namespace,
+                    "deployment_name": resource_name,
+                    "resource_name":   anomaly.resource_name,
+                    "owner_name":      anomaly.owner_name,
+                    "reason":          (anomaly.details or "")[:400],
+                    "repo":            repo,
+                },
+            )
+            if resp.status_code in (200, 202):
+                logger.info(f"[healer] GitOps handoff remoto OK — incident={incident_key}")
+            else:
+                logger.error(
+                    f"[healer] GitOps handoff remoto HTTP {resp.status_code}: "
+                    f"{resp.text[:200]}"
+                )
+        except Exception as exc:
+            logger.error(f"[healer] GitOps handoff remoto falló: {exc}")
+        return
 
     # Recopilar contexto rico para el LLM — fallos silenciosos para no bloquear
     pod_logs = _get_pod_logs(resource_name, _namespace, lines=50)

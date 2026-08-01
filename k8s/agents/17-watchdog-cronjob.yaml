@@ -1,0 +1,114 @@
+# watchdog — vigilante externo de deployments críticos
+#
+# Origen: incidente ollama del 31-jul-2026. El nodo se reinició, dejó 5 pods de
+# ollama-deployment en ContainerStatusUnknown reteniendo la GPU, y el clúster
+# estuvo ~15 h sin LLM sin que nadie se enterara. Raphael lo detectó pero su
+# remediación fallaba y su notificación estaba mal configurada.
+#
+# Este CronJob NO depende de Raphael ni de Prometheus/Alertmanager: pod propio,
+# ServiceAccount propia, y una única responsabilidad — comprobar que los
+# deployments críticos tienen réplicas disponibles y mandar WhatsApp si no.
+#
+# Código: agents/sre/watchdog.py
+
+# ── ServiceAccount ──────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: watchdog-sa
+  namespace: amael-ia
+  labels:
+    app: watchdog
+    tier: agents
+
+---
+# ── RBAC ────────────────────────────────────────────────────────────────────
+# Reutiliza el ClusterRole read-only existente (sre-agent-observer). El
+# watchdog solo lee — nunca borra ni parchea nada.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: watchdog-observer
+  labels:
+    app: watchdog
+subjects:
+  - kind: ServiceAccount
+    name: watchdog-sa
+    namespace: amael-ia
+roleRef:
+  kind: ClusterRole
+  name: sre-agent-observer
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ── CronJob ─────────────────────────────────────────────────────────────────
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: amael-watchdog
+  namespace: amael-ia
+  labels:
+    app: watchdog
+    tier: agents
+spec:
+  schedule: "*/10 * * * *"
+  timeZone: "America/Mexico_City"
+  concurrencyPolicy: Forbid
+  # Historial corto pero suficiente para ver el patrón de fallos en
+  # `kubectl get jobs -n amael-ia`.
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 5
+  # Si el nodo estuvo caído, no reprocesar una avalancha de ejecuciones viejas.
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 180
+      template:
+        metadata:
+          labels:
+            app: watchdog
+        spec:
+          serviceAccountName: watchdog-sa
+          restartPolicy: Never
+          containers:
+            - name: watchdog
+              image: registry.richardx.dev/raphael-service:1.1.5
+              imagePullPolicy: IfNotPresent
+              command: ["python", "-m", "agents.sre.watchdog"]
+              env:
+                - name: WATCHDOG_DEPLOYMENTS
+                  value: >-
+                    amael-ia/ollama-deployment,
+                    amael-ia/postgres,
+                    amael-ia/redis,
+                    amael-ia/qdrant,
+                    amael-ia/amael-agentic-deployment,
+                    amael-ia/raphael-service,
+                    amael-ia/whatsapp-bridge-deployment
+                # Un aviso por recurso cada 60 min — suficiente para no olvidarlo,
+                # poco para no volverse ruido que se aprende a ignorar.
+                - name: WATCHDOG_REALERT_MIN
+                  value: "60"
+                - name: OWNER_PHONE
+                  value: "5219993437008"
+                - name: WHATSAPP_BRIDGE_URL
+                  value: "http://whatsapp-bridge-service:3000"
+                - name: REDIS_HOST
+                  value: "redis-service"
+                - name: REDIS_PORT
+                  value: "6379"
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "300m"
+                  memory: "256Mi"
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL

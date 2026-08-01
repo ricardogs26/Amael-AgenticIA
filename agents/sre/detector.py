@@ -142,7 +142,15 @@ def correlate_anomalies(anomalies: list[Anomaly]) -> list[Anomaly]:
                     f"{len(group)} pods de {owner} con {issue_type}. "
                     f"Pods afectados: {', '.join(a.resource_name for a in group[:5])}"
                 ),
-                metadata={"correlated_pods": len(group)},
+                # `pod_names` conserva los nombres reales de los pods agrupados.
+                # Sin esto el healer intentaba actuar sobre `resource_name`, que
+                # tras la correlación es el nombre del Deployment — un DELETE de
+                # pod contra ese nombre siempre devuelve 404 (incidente ollama,
+                # 31-jul-2026: 5 pods huérfanos sin limpiar durante ~15 h).
+                metadata={
+                    "correlated_pods": len(group),
+                    "pod_names": [a.resource_name for a in group],
+                },
             )
             result.append(correlated)
         else:

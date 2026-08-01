@@ -86,6 +86,19 @@ data:
   SRE_AUTO_HEAL_MIN_SEVERITY:  "HIGH"
   SRE_MIN_ALERT_SEVERITY:      "MEDIUM"
   SRE_ALERT_PHONE:             "5219993437008"
+  # agents/sre/reporter.py lee OWNER_PHONE. Sin esta clave el pod detectaba las
+  # anomalías pero nunca mandaba el WhatsApp ("WhatsApp no configurado"), que es
+  # lo que dejó pasar el incidente de ollama del 31-jul-2026 sin aviso.
+  OWNER_PHONE:                 "5219993437008"
+  WHATSAPP_BRIDGE_URL:         "http://whatsapp-bridge-service:3000"
+  # Umbral de envío real (distinto de SRE_MIN_ALERT_SEVERITY, que filtra antes).
+  SRE_MIN_NOTIFY_SEVERITY:     "HIGH"
+
+  # ── Camael (GitOps) ──────────────────────────────────────────────────────
+  # Camael NO se importa en este proceso: corre standalone en camael-service.
+  # Con el default `inprocess` el handoff moría con AgentNotFoundError.
+  CAMAEL_MODE:        "remote"
+  CAMAEL_SERVICE_URL: "http://camael-service:8003"
   # El Lease nombre DEBE coincidir con el que usa el backend inprocess
   # (sre-agentic-leader, NO sre-agent-leader). Durante la transición solo
   # uno de los dos gana el Lease y corre el loop; tras Fase 5 el backend
@@ -163,7 +176,7 @@ spec:
 
       containers:
         - name: raphael
-          image: registry.richardx.dev/raphael-service:1.1.3
+          image: registry.richardx.dev/raphael-service:1.1.5
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
