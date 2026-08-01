@@ -125,6 +125,8 @@ def propose_trade(
     from langchain_core.messages import HumanMessage, SystemMessage
     from langchain_ollama import ChatOllama
 
+    from agents.trader.broker import is_crypto
+
     # Con NYSE cerrada los equities salen de la whitelist y de las señales:
     # el LLM no puede proponer lo que no ve (determinista, no una sugerencia).
     operable = whitelist if market_open else [s for s in whitelist if is_crypto(s)]
