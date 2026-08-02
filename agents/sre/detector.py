@@ -148,6 +148,10 @@ def correlate_anomalies(anomalies: list[Anomaly]) -> list[Anomaly]:
                 # pod contra ese nombre siempre devuelve 404 (incidente ollama,
                 # 31-jul-2026: 5 pods huérfanos sin limpiar durante ~15 h).
                 metadata={
+                    # Hereda el metadata del primer pod del grupo: campos como
+                    # `has_owner` (POD_REJECTED) deciden si la limpieza es segura,
+                    # y se perderían al construir la anomalía de nivel Deployment.
+                    **(group[0].metadata or {}),
                     "correlated_pods": len(group),
                     "pod_names": [a.resource_name for a in group],
                 },

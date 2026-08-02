@@ -34,6 +34,7 @@ class AnomalyType(StrEnum):
     IMAGE_PULL_ERROR        = "IMAGE_PULL_ERROR"
     POD_FAILED              = "POD_FAILED"
     POD_STATUS_UNKNOWN      = "POD_STATUS_UNKNOWN"  # huérfano tras reinicio del nodo
+    POD_REJECTED            = "POD_REJECTED"        # rechazado por el kubelet (nunca corrió)
     POD_PENDING_STUCK       = "POD_PENDING_STUCK"
     HIGH_RESTARTS           = "HIGH_RESTARTS"
     NODE_NOT_READY          = "NODE_NOT_READY"

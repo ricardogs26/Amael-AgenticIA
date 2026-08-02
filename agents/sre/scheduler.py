@@ -389,6 +389,15 @@ def sre_autonomous_loop(
                     "se elimina forzado para que el controlador lo reprograme."
                 )
                 confidence = 1.0
+            elif anomaly.issue_type == "POD_REJECTED":
+                # También determinístico: el kubelet lo rechazó/desalojó y dejó la
+                # lápida. La razón exacta ya viene del propio status del pod.
+                _reason = (anomaly.metadata or {}).get("reject_reason", "desconocida")
+                root_cause = (
+                    f"El kubelet rechazó el pod ({_reason}); los contenedores nunca "
+                    f"corrieron. El objeto Pod quedó como lápida en el API server."
+                )
+                confidence = 1.0
             else:
                 root_cause, confidence = diagnoser.diagnose_with_llm(
                     anomaly, vault_knowledge, metrics_knowledge

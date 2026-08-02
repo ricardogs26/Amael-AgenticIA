@@ -178,6 +178,19 @@ def decide_action(anomaly: Anomaly, confidence: float) -> str:
     if anomaly.issue_type == AnomalyType.POD_STATUS_UNKNOWN:
         return ActionType.DELETE_STUCK_POD
 
+    # POD_REJECTED: el kubelet rechazó o desalojó el pod, los contenedores nunca
+    # corrieron. Borrar la lápida es seguro SOLO si un controlador la reprograma
+    # (ReplicaSet/StatefulSet/DaemonSet/Job). Un pod suelto creado a mano no
+    # tiene quien lo recree: borrarlo lo pierde, así que ahí avisamos al humano.
+    if anomaly.issue_type == AnomalyType.POD_REJECTED:
+        if (anomaly.metadata or {}).get("has_owner"):
+            return ActionType.DELETE_STUCK_POD
+        logger.info(
+            f"[healer] {anomaly.namespace}/{anomaly.resource_name} rechazado sin "
+            f"controlador que lo reprograme → NOTIFY_HUMAN"
+        )
+        return ActionType.NOTIFY_HUMAN
+
     if resource in PROTECTED_DEPLOYMENTS:
         logger.info(f"[healer] '{resource}' protegido → NOTIFY_HUMAN")
         return ActionType.NOTIFY_HUMAN

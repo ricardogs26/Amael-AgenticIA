@@ -38,6 +38,28 @@ _degraded_streak: dict[str, int] = {}
 # Nº de ciclos consecutivos degradado antes de emitir DEPLOYMENT_DEGRADED.
 SRE_DEGRADED_MIN_CYCLES = int(os.environ.get("SRE_DEGRADED_MIN_CYCLES", "3"))
 
+# Razones de `pod.status.reason` en fase Failed que significan "el kubelet lo
+# rechazó o lo desalojó", no "la app falló". En todas ellas los contenedores
+# nunca corrieron (o ya terminaron) y el objeto Pod queda como lápida.
+# `OutOf<recurso>` (OutOfcpu, OutOfmemory, OutOfnvidia.com/gpu) se cubre aparte
+# por prefijo, ya que el sufijo depende del recurso agotado.
+_REJECT_REASONS = frozenset({
+    "UnexpectedAdmissionError",  # admisión fallida (p.ej. GPU no saludable)
+    "Evicted",                   # desalojado por presión de recursos del nodo
+    "NodeAffinity",              # el nodo dejó de cumplir la afinidad
+    "NodeLost",                  # el nodo desapareció
+    "Shutdown",                  # nodo apagándose (graceful node shutdown)
+    "NodeShutdown",
+    "TerminationByKubelet",
+})
+
+
+def _is_reject_reason(reason: str | None) -> bool:
+    """True si `reason` indica rechazo/desalojo del kubelet (no fallo de la app)."""
+    if not reason:
+        return False
+    return reason in _REJECT_REASONS or reason.startswith("OutOf")
+
 # Namespaces a observar
 _OBSERVE_NAMESPACES = [
     ns.strip()
@@ -241,6 +263,36 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                             f"Pod {pod_name} en ContainerStatusUnknown "
                             f"(huérfano tras reinicio del nodo). Limpieza automática."
                         ),
+                    ))
+
+                # POD_REJECTED — el kubelet rechazó o desalojó el pod: los
+                # contenedores nunca llegaron a correr (o ya murieron) y el
+                # objeto queda como lápida en el API server. No es un fallo de
+                # la app; si tiene controlador, el reemplazo ya existe.
+                # Caso típico: UnexpectedAdmissionError por GPU no saludable
+                # justo tras reiniciar el nodo.
+                elif phase == "Failed" and _is_reject_reason(pod.status.reason):
+                    _reject_reason = pod.status.reason
+                    _has_owner = bool(pod.metadata.owner_references)
+                    anomalies.append(Anomaly(
+                        issue_type=AnomalyType.POD_REJECTED,
+                        # Con controlador es limpieza rutinaria y silenciosa (LOW
+                        # queda bajo SRE_MIN_NOTIFY_SEVERITY). Sin controlador nadie
+                        # recrea el pod y hace falta un humano → HIGH para que avise.
+                        severity=Severity.LOW if _has_owner else Severity.HIGH,
+                        namespace=ns,
+                        resource_name=pod_name,
+                        resource_type="Pod",
+                        owner_name=owner_name,
+                        details=(
+                            f"Pod {pod_name} rechazado por el kubelet "
+                            f"({_reject_reason}): "
+                            f"{(pod.status.message or 'sin mensaje')[:200]}"
+                        ),
+                        metadata={
+                            "reject_reason": _reject_reason,
+                            "has_owner": _has_owner,
+                        },
                     ))
 
                 # POD_FAILED
