@@ -114,6 +114,16 @@ def daily_report() -> None:
             lines.append("Órdenes recientes ejecutadas:")
             for o in orders[:5]:
                 lines.append(f"  • {o['action']} {o['symbol']} ${float(o['notional_usd']):.2f}")
+        try:
+            from agents.trader import macro_calendar
+            eventos = macro_calendar.upcoming(hours=36)
+            if eventos:
+                lines.append("Eventos macro próximos:")
+                for e in eventos[:4]:
+                    mark = "🔴" if e["impacto"] == "high" else "🟡"
+                    lines.append(f"  {mark} {e['evento']} en {e['en_horas']:.0f}h")
+        except Exception as exc:
+            logger.warning(f"[reporter] calendario macro no disponible: {exc}")
         notify_whatsapp("\n".join(lines))
     except Exception as exc:
         logger.error(f"[reporter] daily_report error: {exc}", exc_info=True)

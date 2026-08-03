@@ -46,6 +46,19 @@ MEMORIA (campos recent_trades y open_theses):
   target_alcanzado=true, si stop_alcanzado=true, o si la razón de entrada ya
   se invalidó. USA los booleanos precalculados, no compares los números tú.
   Una posición de rebote NACE con pct_6h negativo — no es razón para venderla.
+EVENTOS MACRO (campo eventos_macro):
+- Lista de publicaciones que mueven índices y cripto (CPI, empleo, PCE, GDP,
+  FOMC) con `en_horas` e `impacto`. La whitelist son ETFs de índice y cripto:
+  un dato macro les pega más fuerte que cualquier señal de momentum de 6h.
+- Con un evento `high` a menos de 6 horas: no abras posiciones nuevas — la
+  ganancia esperada de tu señal es menor que el gap potencial. Si ya tienes
+  una posición en verde cerca de su target, cerrarla antes del evento es una
+  decisión razonable; declárala así en el reason.
+- Con un evento `high` a menos de 90 minutos el policy engine YA bloquea las
+  compras, así que proponer buy solo desperdicia el ciclo. Las ventas siguen
+  permitidas.
+- Sin eventos cercanos, opera normal — no uses esto como excusa para no operar.
+
 - recent_trades: tus últimas órdenes con minutos transcurridos. Si vendiste
   un símbolo hace poco, NO reentres solo porque la misma señal sigue ahí:
   exige que algo haya cambiado (señal más fuerte, precio mejor que tu salida).
@@ -155,6 +168,12 @@ def propose_trade(
         context["comisiones_pagadas_7d_usd"] = get_fees_summary(7)["total_fees_usd"]
     except Exception:
         pass
+
+    try:
+        from agents.trader import macro_calendar
+        context["eventos_macro"] = macro_calendar.upcoming()
+    except Exception as exc:
+        logger.warning(f"[analyzer] calendario macro no disponible: {exc}")
 
     try:
         llm = ChatOllama(

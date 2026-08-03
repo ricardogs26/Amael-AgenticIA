@@ -52,6 +52,21 @@ data:
   TRADER_CB_CONSECUTIVE_LOSSES:  "3"
   TRADER_APPROVAL_THRESHOLD_USD: "50"
 
+  # ── Calendario macro (agents/trader/macro_calendar.py) ───────────────────
+  # La whitelist son ETFs de índice + cripto: no tienen earnings, los mueve
+  # el dato macro. FRED entrega las fechas de CPI/NFP/PCE/GDP; el FOMC no es
+  # un release de FRED y va estático (la Fed lo publica con 12 meses de
+  # anticipación). Dentro de la ventana el policy engine bloquea BUYS; las
+  # ventas siempre pasan.
+  TRADER_EVENT_BLACKOUT_MIN:       "90"   # minutos antes del evento
+  TRADER_EVENT_BLACKOUT_AFTER_MIN: "30"   # minutos después (peor spread del día)
+  TRADER_EVENT_LOOKAHEAD_HOURS:    "72"   # horizonte que ve el LLM
+  # FOMC 2026 — día del comunicado (2º día de cada reunión), 14:00 ET.
+  # Fuente: federalreserve.gov/monetarypolicy/fomccalendars.htm
+  # ⚠️ ACTUALIZAR EN ENERO DE CADA AÑO. Si se vacía, el trader pierde el
+  # blackout del FOMC (los releases de FRED siguen funcionando).
+  TRADER_FOMC_DATES: "2026-09-16,2026-10-28,2026-12-09"
+
   # ── LLM ──────────────────────────────────────────────────────────────────
   OLLAMA_BASE_URL:  "http://ollama-service:11434"
   TRADER_LLM_MODEL: "qwen3:14b"
@@ -92,7 +107,7 @@ metadata:
   labels:
     app: trader-service
     tier: agents
-    version: "1.0.0"
+    version: "1.0.17"
 spec:
   replicas: 1        # 1 réplica SIEMPRE — el loop no tiene leader election
   selector:
@@ -105,7 +120,7 @@ spec:
       labels:
         app: trader-service
         tier: agents
-        version: "1.0.0"
+        version: "1.0.17"
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port:   "8003"
@@ -139,7 +154,7 @@ spec:
 
       containers:
         - name: trader
-          image: registry.richardx.dev/trader-service:1.0.16
+          image: registry.richardx.dev/trader-service:1.0.17
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -160,6 +175,16 @@ spec:
                 secretKeyRef:
                   name: alpaca-credentials
                   key: ALPACA_SECRET_KEY
+            # Calendario macro. Opcional: sin key el trader solo ve el FOMC
+            # estático y sigue operando (fail-open, no arranca en error).
+            #   kubectl create secret generic fred-credentials -n amael-ia \
+            #     --from-literal=FRED_API_KEY=<key>
+            - name: FRED_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fred-credentials
+                  key: FRED_API_KEY
+                  optional: true
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
