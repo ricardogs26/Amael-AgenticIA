@@ -199,21 +199,47 @@ def init_runbooks_qdrant() -> None:
             )
             logger.info(f"[sre.agent] Colección '{_QDRANT_COLLECTION}' creada (dim={dim}).")
 
-        # Verificar si ya tiene documentos
-        count = client.count(collection_name=_QDRANT_COLLECTION).count
-        if count > 0:
-            logger.info(f"[sre.agent] Runbooks ya indexados ({count} docs). Skipping.")
-            return
-
         # Indexar archivos markdown del directorio runbooks/
         runbooks_dir = os.path.normpath(_RUNBOOKS_DIR)
         if not os.path.isdir(runbooks_dir):
             logger.warning(f"[sre.agent] Directorio runbooks no encontrado: {runbooks_dir}")
             return
 
+        # Qué runbooks estáticos ya están indexados.
+        #
+        # Antes bastaba con `count > 0` para saltarse todo el bloque, así que un
+        # runbook nuevo añadido al repo nunca llegaba a Qdrant: la colección ya
+        # tenía documentos (estáticos viejos + auto-generados) desde el primer
+        # arranque. Ahora se compara por nombre de archivo: los ya indexados se
+        # respetan y solo se suben los que faltan.
+        already: set[str] = set()
+        try:
+            offset = None
+            while True:
+                batch, offset = client.scroll(
+                    collection_name=_QDRANT_COLLECTION,
+                    limit=256,
+                    offset=offset,
+                    with_payload=["source", "auto_generated"],
+                    with_vectors=False,
+                )
+                for pt in batch:
+                    payload = pt.payload or {}
+                    if payload.get("auto_generated") is False and payload.get("source"):
+                        already.add(payload["source"])
+                if offset is None:
+                    break
+        except Exception as exc:
+            # Sin inventario fiable, no re-subir: duplicar runbooks degrada la
+            # búsqueda semántica más que omitir uno nuevo.
+            logger.warning(f"[sre.agent] No se pudo inventariar runbooks existentes: {exc}")
+            return
+
         points = []
         import glob as _glob
         for path in _glob.glob(os.path.join(runbooks_dir, "*.md")):
+            if os.path.basename(path) in already:
+                continue
             try:
                 text = open(path).read()
                 resp = _req.post(
@@ -238,7 +264,12 @@ def init_runbooks_qdrant() -> None:
 
         if points:
             client.upsert(collection_name=_QDRANT_COLLECTION, points=points)
-            logger.info(f"[sre.agent] {len(points)} runbooks indexados en Qdrant.")
+            logger.info(
+                f"[sre.agent] {len(points)} runbook(s) nuevos indexados en Qdrant "
+                f"({len(already)} ya estaban)."
+            )
+        else:
+            logger.info(f"[sre.agent] Runbooks al día ({len(already)} indexados).")
 
     except Exception as exc:
         logger.warning(f"[sre.agent] init_runbooks_qdrant error: {exc}")

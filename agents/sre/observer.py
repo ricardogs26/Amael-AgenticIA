@@ -153,12 +153,27 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                 phase = pod.status.phase or "Unknown"
                 container_statuses = pod.status.container_statuses or []
 
-                # Calcular owner (Deployment/StatefulSet)
+                # Calcular owner (Deployment/StatefulSet/Job)
+                #
+                # owner_kind importa tanto como owner_name: un pod de Job no se
+                # remedia con ROLLOUT_RESTART. Antes los pods de Job caían aquí
+                # con owner_name="" y el healer usaba el nombre del POD como si
+                # fuera un Deployment → patch 404 en bucle cada 60s (visto con
+                # los pods de amael-watchdog, que fallan por diseño).
                 owner_name = ""
+                owner_kind = ""
                 for ref in (pod.metadata.owner_references or []):
                     if ref.kind in ("ReplicaSet", "StatefulSet", "DaemonSet"):
                         owner_name = ref.name.rsplit("-", 1)[0] if ref.kind == "ReplicaSet" else ref.name
+                        owner_kind = "Deployment" if ref.kind == "ReplicaSet" else ref.kind
                         break
+                    if ref.kind == "Job":
+                        # El CronJob controller ya gestiona reintentos vía
+                        # backoffLimit; Raphael no debe interferir.
+                        owner_name = ref.name
+                        owner_kind = "Job"
+                        break
+                _owner_meta = {"owner_kind": owner_kind} if owner_kind else {}
 
                 for cs in container_statuses:
                     restarts = cs.restart_count or 0
@@ -175,6 +190,7 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                             resource_name=pod_name,
                             resource_type="Pod",
                             owner_name=owner_name,
+                            metadata=dict(_owner_meta),
                             details=(
                                 f"Pod {pod_name} en CrashLoopBackOff. "
                                 f"Reinicios: {restarts}. "
@@ -192,6 +208,7 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                             resource_name=pod_name,
                             resource_type="Pod",
                             owner_name=owner_name,
+                            metadata=dict(_owner_meta),
                             details=f"Pod {pod_name} terminado por OOMKilled. Reinicios: {restarts}",
                         ))
 
@@ -206,6 +223,7 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                             resource_name=pod_name,
                             resource_type="Pod",
                             owner_name=owner_name,
+                            metadata=dict(_owner_meta),
                             details=f"Pod {pod_name} no puede descargar la imagen: {state.waiting.reason}",
                         ))
 
@@ -233,6 +251,7 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                                 resource_name=pod_name,
                                 resource_type="Pod",
                                 owner_name=owner_name,
+                                metadata=dict(_owner_meta),
                                 details=(
                                     f"Pod {pod_name} tuvo {new_restarts} reinicio(s) nuevo(s) "
                                     f"(total acumulado: {restarts})."
@@ -259,6 +278,7 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                         resource_name=pod_name,
                         resource_type="Pod",
                         owner_name=owner_name,
+                        metadata=dict(_owner_meta),
                         details=(
                             f"Pod {pod_name} en ContainerStatusUnknown "
                             f"(huérfano tras reinicio del nodo). Limpieza automática."
@@ -290,6 +310,7 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                             f"{(pod.status.message or 'sin mensaje')[:200]}"
                         ),
                         metadata={
+                            **_owner_meta,
                             "reject_reason": _reject_reason,
                             "has_owner": _has_owner,
                         },
@@ -304,6 +325,7 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                         resource_name=pod_name,
                         resource_type="Pod",
                         owner_name=owner_name,
+                        metadata=dict(_owner_meta),
                         details=f"Pod {pod_name} en estado Failed.",
                     ))
 
@@ -321,6 +343,7 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                                 resource_name=pod_name,
                                 resource_type="Pod",
                                 owner_name=owner_name,
+                                metadata=dict(_owner_meta),
                                 details=f"Pod {pod_name} en Pending por {int(age/60)} minutos.",
                             ))
 
