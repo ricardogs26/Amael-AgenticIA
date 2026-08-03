@@ -154,7 +154,7 @@ spec:
 
       containers:
         - name: trader
-          image: registry.richardx.dev/trader-service:1.0.17
+          image: registry.richardx.dev/trader-service:1.0.18
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
