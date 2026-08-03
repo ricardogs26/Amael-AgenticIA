@@ -155,18 +155,40 @@ def _restarted_within_verification_window(deployment_name: str, namespace: str) 
         return False
 
 
+def _deployment_exists(deployment_name: str, namespace: str) -> bool:
+    """
+    True si existe un Deployment con ese nombre.
+
+    ROLLOUT_RESTART parchea `deployments/<nombre>`. Si el nombre no corresponde
+    a un Deployment real — un pod de Job, un pod suelto, un recurso ya borrado —
+    el patch devuelve 404 y el loop lo reintenta cada 60s indefinidamente.
+    Comprobar antes convierte un bucle de errores en una notificación única.
+    """
+    try:
+        _get_k8s_apps().read_namespaced_deployment(name=deployment_name, namespace=namespace)
+        return True
+    except Exception as exc:
+        if getattr(exc, "status", None) == 404:
+            return False
+        # Otro error (RBAC, API caída): no podemos afirmar que no existe.
+        logger.warning(f"[healer] _deployment_exists({deployment_name}) inconcluso: {exc}")
+        return True
+
+
 def decide_action(anomaly: Anomaly, confidence: float) -> str:
     """
     Aplica guardrails y decide la acción apropiada.
 
     Reglas (por orden de evaluación):
-      1. Recurso protegido → NOTIFY_HUMAN
-      2. Tipo no auto-healable → NOTIFY_HUMAN
-      3. Severidad insuficiente → NO_ACTION
-      4. Confianza insuficiente → NOTIFY_HUMAN
-      5. IMAGE_PULL_ERROR / NODE_NOT_READY / POD_PENDING_STUCK → NOTIFY_HUMAN
-      6. Reiniciado hace poco (verificación pendiente) → NO_ACTION
-      7. Cumple todos los criterios → ROLLOUT_RESTART
+      1. Pod de Job → NO_ACTION (lo gestiona el CronJob controller)
+      2. Recurso protegido → NOTIFY_HUMAN
+      3. Tipo no auto-healable → NOTIFY_HUMAN
+      4. Severidad insuficiente → NO_ACTION
+      5. Confianza insuficiente → NOTIFY_HUMAN
+      6. IMAGE_PULL_ERROR / NODE_NOT_READY / POD_PENDING_STUCK → NOTIFY_HUMAN
+      7. Reiniciado hace poco (verificación pendiente) → NO_ACTION
+      8. El Deployment no existe → NOTIFY_HUMAN (no parchear a ciegas)
+      9. Cumple todos los criterios → ROLLOUT_RESTART
 
     Migrado desde k8s-agent/main.py → decide_action()
     """
@@ -177,6 +199,17 @@ def decide_action(anomaly: Anomaly, confidence: float) -> str:
     # el contenedor ya no existe; el controlador reprograma uno nuevo.
     if anomaly.issue_type == AnomalyType.POD_STATUS_UNKNOWN:
         return ActionType.DELETE_STUCK_POD
+
+    # Pods de Job/CronJob: el controlador ya reintenta según backoffLimit y no
+    # existe Deployment que reiniciar. Además, algunos Jobs fallan a propósito
+    # (amael-watchdog sale con exit 1 cuando detecta un deployment caído: eso ES
+    # la alerta). Tratarlos como incidente genera un bucle de patches 404.
+    if (anomaly.metadata or {}).get("owner_kind") == "Job":
+        logger.info(
+            f"[healer] '{anomaly.resource_name}' pertenece al Job "
+            f"'{anomaly.owner_name}' → NO_ACTION (lo gestiona el CronJob controller)"
+        )
+        return ActionType.NO_ACTION
 
     # POD_REJECTED: el kubelet rechazó o desalojó el pod, los contenedores nunca
     # corrieron. Borrar la lápida es seguro SOLO si un controlador la reprograma
@@ -216,6 +249,14 @@ def decide_action(anomaly: Anomaly, confidence: float) -> str:
             f"— verificación pendiente → NO_ACTION"
         )
         return ActionType.NO_ACTION
+
+    # Último filtro antes de tocar el clúster: que el destino exista de verdad.
+    if not _deployment_exists(resource, anomaly.namespace):
+        logger.warning(
+            f"[healer] No existe Deployment '{anomaly.namespace}/{resource}' "
+            f"— no se parchea a ciegas → NOTIFY_HUMAN"
+        )
+        return ActionType.NOTIFY_HUMAN
 
     return ActionType.ROLLOUT_RESTART
 
