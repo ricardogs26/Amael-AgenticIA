@@ -12,6 +12,8 @@ Env vars (ConfigMap trader-service-config):
   TRADER_MIN_CONFIDENCE         default 0.6
   TRADER_CB_CONSECUTIVE_LOSSES  default 3     — pérdidas seguidas → pausa 24h
   TRADER_APPROVAL_THRESHOLD_USD default 50    — orden > esto → aprobación humana
+  TRADER_EVENT_BLACKOUT_MIN     default 90    — min antes de evento macro sin buys
+  TRADER_EVENT_BLACKOUT_AFTER_MIN default 30  — min después (ver macro_calendar)
 """
 from __future__ import annotations
 
@@ -143,6 +145,23 @@ def evaluate(proposal: TradeProposal, account: AccountSnapshot,
     if p.notional_usd > MAX_ORDER_USD:
         return PolicyDecision(approved=False, blocked_rule="max_order_usd",
                               detail=f"${p.notional_usd:.2f} > ${MAX_ORDER_USD:.2f}")
+
+    # Blackout macro: nada de abrir posiciones alrededor de un CPI/NFP/PCE/FOMC.
+    # Solo aplica a buys — vender siempre debe poder hacerse, si no el evento te
+    # deja atrapado en la posición que querías cortar.
+    if p.action == "buy":
+        from agents.trader import macro_calendar
+        try:
+            ev = macro_calendar.blackout()
+        except Exception as exc:
+            # Fail-open: un calendario roto deja al trader tan ciego como antes,
+            # pero no le impide operar ni tumba el ciclo.
+            logger.error(f"[policy] calendario macro falló ({exc}) — sin blackout")
+            ev = None
+        if ev:
+            return PolicyDecision(
+                approved=False, blocked_rule="event_blackout",
+                detail=f"{ev['evento']} {ev['fase']} ({abs(ev['minutos']):.0f} min)")
 
     if p.action == "buy" and signals:
         sig = signals.get(p.symbol) or signals.get(p.symbol.upper()) or {}

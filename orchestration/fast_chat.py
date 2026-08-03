@@ -42,10 +42,10 @@ def _get_fast_llm():
                     model=settings.llm_model_fast,
                     base_url=settings.ollama_base_url,
                     temperature=0.6,
-                    request_timeout=30,
+                    client_kwargs={"timeout": 30},
                     num_predict=512,
                     keep_alive=-1,   # mantener el modelo cargado en VRAM
-                    think=False,     # qwen3: sin modo thinking → respuesta directa
+                    reasoning=False, # qwen3: sin modo thinking → respuesta directa
                 )
                 logger.info(
                     f"[fast_chat] LLM rápido: model={settings.llm_model_fast} "

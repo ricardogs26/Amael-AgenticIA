@@ -186,6 +186,20 @@ def _register_api(app: FastAPI) -> None:
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"alpaca_error: {exc}") from exc
 
+    @app.get("/api/trader/calendar", tags=["trader"], dependencies=deps)
+    def calendar(hours: int | None = None, refresh: bool = False) -> dict:
+        """Eventos macro próximos + estado de blackout (diagnóstico)."""
+        from agents.trader import macro_calendar
+        if refresh:
+            macro_calendar.refresh()
+        return {
+            "fred_configured": bool(macro_calendar.FRED_API_KEY),
+            "blackout_min": macro_calendar.BLACKOUT_MIN,
+            "blackout_after_min": macro_calendar.BLACKOUT_AFTER_MIN,
+            "blackout_activo": macro_calendar.blackout(),
+            "eventos": macro_calendar.upcoming(hours=hours),
+        }
+
     @app.post("/api/trader/halt", tags=["trader"], dependencies=deps)
     def halt() -> dict:
         from agents.trader import policy
