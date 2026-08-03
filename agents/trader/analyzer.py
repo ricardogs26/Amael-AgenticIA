@@ -1,9 +1,14 @@
 """
 analyzer.py — El LLM propone una operación (o hold) con justificación.
 
-Usa ChatOllama con think=False (mismo gotcha que camael_analyzer: qwen3 en
+Usa ChatOllama con reasoning=False (mismo gotcha que camael_analyzer: qwen3 en
 modo thinking bloquea la respuesta JSON). El output es SOLO una propuesta;
 policy.py decide si se ejecuta.
+
+OJO con los nombres de los parámetros: langchain_ollama usa extra="ignore", así
+que un kwarg mal escrito se descarta en silencio y el modelo queda con su
+comportamiento por defecto. El campo es `reasoning`, no `think`; y el timeout va
+en `client_kwargs={"timeout": N}`, no en `request_timeout`.
 """
 from __future__ import annotations
 
@@ -18,6 +23,15 @@ logger = logging.getLogger("agents.trader.analyzer")
 
 TRADER_LLM_MODEL = os.environ.get("TRADER_LLM_MODEL", "qwen3:14b")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
+
+# Segundos máximos por propuesta. Un ciclo normal tarda segundos; el margen es
+# para cuando Ollama tiene que recargar el modelo (~40-60 s con qwen3:14b).
+#
+# Sin límite, ChatOllama espera indefinidamente: el 03-ago-2026 una llamada
+# quedó colgada 11 min 37 s y devolvió vacío, más de lo que dura el intervalo
+# del ciclo (600 s). Fallar rápido y reintentar en el siguiente ciclo pierde una
+# propuesta; quedarse colgado bloquea el trader y satura la GPU.
+TRADER_LLM_TIMEOUT_S = int(os.environ.get("TRADER_LLM_TIMEOUT", "180"))
 
 _SYSTEM = """Eres un analista de trading activo administrando una cuenta \
 experimental. Tu objetivo es capturar movimientos de momentum intradía y \
@@ -168,7 +182,6 @@ def propose_trade(
         context["comisiones_pagadas_7d_usd"] = get_fees_summary(7)["total_fees_usd"]
     except Exception:
         pass
-
     try:
         from agents.trader import macro_calendar
         context["eventos_macro"] = macro_calendar.upcoming()
@@ -180,8 +193,13 @@ def propose_trade(
             model=TRADER_LLM_MODEL,
             base_url=OLLAMA_BASE_URL,
             temperature=0.2,
-            think=False,   # qwen3: thinking bloquea el modo JSON directo
+            # reasoning=False, NO think=False: langchain_ollama ignora los
+            # campos desconocidos (extra="ignore"), así que think= no hacía nada
+            # y qwen3 seguía razonando dentro del contenido, rompiendo el JSON.
+            reasoning=False,
             format="json",  # Ollama fuerza salida JSON válida a nivel runtime
+            # El timeout va al cliente HTTP; request_timeout tampoco existe.
+            client_kwargs={"timeout": TRADER_LLM_TIMEOUT_S},
         )
         resp = llm.invoke([
             SystemMessage(content=_SYSTEM),
