@@ -24,6 +24,7 @@ from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
 from core.agent_base import AgentResult, BaseAgent
+from core.embedding_opts import embed_payload
 
 logger = logging.getLogger("agents.zaphkiel")
 
@@ -351,7 +352,7 @@ def _embed_text(text: str) -> list[float]:
     from config.settings import settings
     resp = _req.post(
         f"{settings.ollama_base_url}/api/embeddings",
-        json={"model": settings.llm_embed_model, "prompt": text},
+        json=embed_payload(settings.llm_embed_model, text),
         timeout=15,
     )
     resp.raise_for_status()

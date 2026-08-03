@@ -80,7 +80,7 @@ def answer(message: str, history: list[dict] | None = None) -> str:
         model=CHAT_LLM_MODEL,
         base_url=OLLAMA_BASE_URL,
         temperature=0.3,
-        think=False,
+        reasoning=False,
     )
     msgs = [
         SystemMessage(content=_SYSTEM.format(mode=ctx["mode"])),

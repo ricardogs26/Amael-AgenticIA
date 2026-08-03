@@ -103,9 +103,9 @@ def _get_analyzer_llm():
             model=settings.llm_model,
             base_url=settings.ollama_base_url,
             temperature=0,
-            request_timeout=120,
+            client_kwargs={"timeout": 120},
             num_predict=4096,   # suficiente para JSON + reasoning sin truncar
-            think=False,        # qwen3: deshabilita thinking mode (evita bloqueo)
+            reasoning=False,    # qwen3: deshabilita thinking mode (evita bloqueo)
         )
         logger.info(
             f"[camael_analyzer] LLM analyzer: model={settings.llm_model} "

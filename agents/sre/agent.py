@@ -18,6 +18,7 @@ from typing import Any
 
 from agents.base.agent_registry import AgentRegistry
 from core.agent_base import AgentResult, BaseAgent
+from core.embedding_opts import embed_payload
 
 logger = logging.getLogger("agents.sre.agent")
 
@@ -187,7 +188,7 @@ def init_runbooks_qdrant() -> None:
             # Obtener dimensión del modelo
             probe = _req.post(
                 f"{_OLLAMA_BASE_URL}/api/embeddings",
-                json={"model": _EMBED_MODEL, "prompt": "probe"},
+                json=embed_payload(_EMBED_MODEL, "probe"),
                 timeout=15,
             )
             dim = len(probe.json().get("embedding", [768] * 768))
@@ -244,7 +245,7 @@ def init_runbooks_qdrant() -> None:
                 text = open(path).read()
                 resp = _req.post(
                     f"{_OLLAMA_BASE_URL}/api/embeddings",
-                    json={"model": _EMBED_MODEL, "prompt": text[:2000]},
+                    json=embed_payload(_EMBED_MODEL, text[:2000]),
                     timeout=30,
                 )
                 embedding = resp.json().get("embedding")

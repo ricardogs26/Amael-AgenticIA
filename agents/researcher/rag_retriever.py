@@ -45,7 +45,14 @@ def _get_embeddings():
         with _embeddings_lock:
             if _embeddings is None:  # double-checked locking
                 from langchain_ollama import OllamaEmbeddings
-                _embeddings = OllamaEmbeddings(model=_EMBED_MODEL, base_url=_OLLAMA_URL)
+
+                from core.embedding_opts import embed_num_gpu
+                # num_gpu=0 → embeddings en CPU, VRAM libre para el generativo.
+                _embeddings = OllamaEmbeddings(
+                    model=_EMBED_MODEL,
+                    base_url=_OLLAMA_URL,
+                    num_gpu=embed_num_gpu(),
+                )
     return _embeddings
 
 

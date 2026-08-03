@@ -58,6 +58,17 @@ class Settings(BaseSettings):
         default="nomic-embed-text",
         alias="LLM_EMBED_MODEL",
     )
+    # Capas del modelo de embeddings a descargar a GPU. 0 = CPU puro.
+    #
+    # La RTX 5070 tiene 12 GB y qwen3:14b ocupa 9.6 GB, así que no caben a la
+    # vez: cada llamada de embeddings expulsaba el 14b y obligaba a recargarlo
+    # entero (medido: 40 de 91 cargas de modelo en 6 h eran de nomic-embed-text,
+    # 274 MB desalojando 9.6 GB). En CPU el coste por embedding es de decenas de
+    # ms y desaparece el thrashing. Subir a -1 para devolverlo a GPU.
+    embed_num_gpu: int = Field(
+        default=0,
+        alias="EMBED_NUM_GPU",
+    )
 
     # ── Agents split — Phase 1 (feature flag) ────────────────────────────────
     # Controla si agents/sre/ y agents/devops/ corren in-process dentro del

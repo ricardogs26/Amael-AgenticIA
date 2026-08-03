@@ -127,11 +127,14 @@ def _build_chat_llm(
     else:  # ollama (default)
         from langchain_ollama import ChatOllama
 
+        # El timeout va en client_kwargs: ChatOllama no tiene request_timeout y
+        # langchain_ollama descarta los kwargs desconocidos sin avisar, así que
+        # hasta ahora estas llamadas no tenían límite de tiempo.
         return ChatOllama(
             model=model,
             base_url=settings.ollama_base_url,
             temperature=temperature,
-            request_timeout=timeout,
+            client_kwargs={"timeout": timeout},
         )
 
 
@@ -178,4 +181,10 @@ def _build_embeddings(settings: Any) -> Any:
     else:  # ollama (default)
         from langchain_ollama import OllamaEmbeddings
 
-        return OllamaEmbeddings(model=model, base_url=settings.ollama_base_url)
+        # num_gpu=0 → el modelo de embeddings corre en CPU y deja la VRAM
+        # íntegra para el modelo generativo. Ver settings.embed_num_gpu.
+        return OllamaEmbeddings(
+            model=model,
+            base_url=settings.ollama_base_url,
+            num_gpu=settings.embed_num_gpu,
+        )
