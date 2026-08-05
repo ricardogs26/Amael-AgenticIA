@@ -1,0 +1,132 @@
+# ── Ollama CPU — tier profundo / batch, sin GPU ───────────────────────────────
+# Creado 5-ago-2026 (plan "C" del análisis de VRAM).
+#
+# Propósito: correr modelos MoE grandes 100% en CPU para trabajo asíncrono,
+# SIN tocar la GPU. La instancia con GPU (05-ollama.yaml) queda íntegra para la
+# ruta interactiva (qwen3:1.7b + qwen3:14b a 64 tok/s).
+#
+# Consumidores previstos (todos asíncronos, ninguno sensible a latencia):
+#   - agents/sre/reporter.py             → postmortems tras cada remediación
+#   - agents/sre/runbook_consolidator.py → consolidación diaria 03:00 UTC
+#   - agents/devops/camael_analyzer.py   → análisis de recursos para PRs
+#
+# Hoy esos trabajos usan la GPU y provocan swaps de ~4 s que golpean el tráfico
+# interactivo. Moverlos aquí elimina esa contención.
+#
+# Modelos:
+#   ollama pull qwen3:30b-a3b-instruct-2507-q4_K_M   # 17.3 GB — 30.5B tot / 3.3B act
+#
+# ⛔ nomic-embed-text NO se sirve desde aquí. Se midió (5-ago-2026, 10 cores
+#    dedicados) contra la instancia GPU y pierde por goleada:
+#      batch 1  →  29 ms (GPU) vs  158 ms (CPU)  —  5.4×
+#      batch 8  →  60 ms       vs 1132 ms        —   19×
+#      batch 32 → 176 ms       vs 4439 ms        —   25×
+#    La idea era liberar VRAM para subir OLLAMA_CONTEXT_LENGTH de 4096 a 6144
+#    en la instancia GPU (plan "D"). No compensa: +129 ms en CADA consulta RAG
+#    a cambio de +2048 tokens de contexto. El contexto se queda en 4096.
+#    (La imagen del modelo quedó descargada aquí; es inofensiva, 274 MB.)
+#
+# ⚠️  NO pedir nvidia.com/gpu. El device plugin no inyecta /dev/nvidia* en pods
+#     que no soliciten el recurso, pero CUDA_VISIBLE_DEVICES="" lo hace explícito.
+#
+# ⚠️  PVC propio a propósito: dos instancias de Ollama escribiendo el mismo
+#     directorio de modelos corrompen los blobs.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-cpu-pvc
+  namespace: amael-ia
+  labels:
+    app: ollama-cpu
+    app.kubernetes.io/part-of: amael-ia
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 25Gi   # qwen3:30b-a3b ~17.3GB + nomic-embed-text ~274MB + margen
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama-cpu-deployment
+  namespace: amael-ia
+  labels:
+    app: ollama-cpu
+    app.kubernetes.io/part-of: amael-ia
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # PVC RWO — no puede haber dos pods montándolo a la vez
+  selector:
+    matchLabels:
+      app: ollama-cpu
+  template:
+    metadata:
+      labels:
+        app: ollama-cpu
+    spec:
+      containers:
+      - name: ollama
+        image: ollama/ollama:0.32.5   # misma versión que la instancia GPU
+        ports:
+        - containerPort: 11434
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "8Gi"
+          limits:
+            cpu: "10"      # el decode MoE en CPU escala con cores
+            memory: "24Gi" # qwen3:30b-a3b residente ~19GB + KV
+        env:
+        - name: OLLAMA_HOST
+          value: "0.0.0.0"
+        - name: CUDA_VISIBLE_DEVICES
+          value: ""         # explícito: esta instancia NUNCA toca la GPU
+        - name: OLLAMA_NUM_PARALLEL
+          value: "1"        # en CPU los slots paralelos solo reparten el mismo
+                            # ancho de banda de RAM; no hay nada que ganar
+        - name: OLLAMA_CONTEXT_LENGTH
+          value: "8192"     # el KV vive en RAM, no compite por VRAM
+        volumeMounts:
+        - name: ollama-cpu-storage
+          mountPath: /root/.ollama
+        livenessProbe:
+          httpGet:
+            path: /api/tags
+            port: 11434
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/tags
+            port: 11434
+          initialDelaySeconds: 20
+          periodSeconds: 15
+          timeoutSeconds: 5
+      volumes:
+      - name: ollama-cpu-storage
+        persistentVolumeClaim:
+          claimName: ollama-cpu-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-cpu-service
+  namespace: amael-ia
+  labels:
+    app: ollama-cpu
+spec:
+  selector:
+    app: ollama-cpu
+  ports:
+  - protocol: TCP
+    port: 11434
+    targetPort: 11434
+  type: ClusterIP

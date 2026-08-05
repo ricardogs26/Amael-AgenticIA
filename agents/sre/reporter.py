@@ -45,14 +45,37 @@ _postmortem_llm = None
 
 
 def _get_postmortem_llm():
+    """
+    LLM para postmortems. Usa el tier profundo (ollama-cpu) cuando está
+    configurado: el postmortem se genera ~300 s después de una remediación, y
+    en la instancia GPU desalojaba al modelo interactivo justo cuando es más
+    probable que alguien esté preguntando qué pasó.
+
+    Sin OLLAMA_DEEP_URL / LLM_DEEP_MODEL se comporta igual que antes.
+    """
     global _postmortem_llm
     if _postmortem_llm is None:
         from langchain_ollama import OllamaLLM
 
         from config.settings import settings
+
+        if settings.ollama_deep_url and settings.llm_model_deep:
+            model, base_url, timeout = (
+                settings.llm_model_deep, settings.ollama_deep_url, 300,
+            )
+        else:
+            model, base_url, timeout = (
+                settings.llm_model, settings.ollama_base_url, 90,
+            )
+
         _postmortem_llm = OllamaLLM(
-            model=settings.llm_model,
-            base_url=settings.ollama_base_url,
+            model=model,
+            base_url=base_url,
+            client_kwargs={"timeout": timeout},
+        )
+        logger.info(
+            f"[reporter] LLM de postmortems: model={model} base_url={base_url} "
+            f"timeout={timeout}s"
         )
     return _postmortem_llm
 

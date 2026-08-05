@@ -82,11 +82,14 @@ spec:
       ports:
         - port: 6333
           protocol: TCP
-    # Ollama
+    # Ollama — instancia GPU (app: ollama) + instancia CPU del tier profundo
+    # (app: ollama-cpu, ver infrastructure/09-ollama-cpu.yaml)
     - to:
         - podSelector:
-            matchLabels:
-              app: ollama
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [ollama, ollama-cpu]
       ports:
         - port: 11434
           protocol: TCP

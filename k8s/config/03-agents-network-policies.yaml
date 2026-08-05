@@ -125,10 +125,13 @@ spec:
           protocol: TCP
 
     # Ollama — diagnose_with_llm (qwen3:14b) + nomic-embed-text para runbooks.
+    # ollama-cpu: tier profundo para postmortems y consolidación de runbooks.
     - to:
         - podSelector:
-            matchLabels:
-              app: ollama
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [ollama, ollama-cpu]
       ports:
         - port: 11434
           protocol: TCP
@@ -309,10 +312,13 @@ spec:
 
     # Ollama — camael_analyzer.py (qwen3:14b con think=False para decidir
     # multiplier + PR title).
+    # ollama-cpu: mismo análisis sobre el tier profundo.
     - to:
         - podSelector:
-            matchLabels:
-              app: ollama
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [ollama, ollama-cpu]
       ports:
         - port: 11434
           protocol: TCP

@@ -97,19 +97,36 @@ def _get_analyzer_llm():
     """
     global _analyzer_llm
     if _analyzer_llm is None:
-        from config.settings import settings
         from langchain_ollama import ChatOllama
+
+        from config.settings import settings
+
+        # Tier profundo (ollama-cpu) cuando está configurado: el análisis corre
+        # en el handoff SRE→GitOps, o sea durante un incidente — justo cuando no
+        # conviene desalojar el modelo interactivo de la VRAM.
+        # El timeout sube a 300s porque el modelo va a ~16.7 tok/s en CPU y su
+        # carga en frío toma ~28.6s. Verificado: la variante instruct acepta
+        # reasoning=False sin error.
+        if settings.ollama_deep_url and settings.llm_model_deep:
+            model, base_url, timeout = (
+                settings.llm_model_deep, settings.ollama_deep_url, 300,
+            )
+        else:
+            model, base_url, timeout = (
+                settings.llm_model, settings.ollama_base_url, 120,
+            )
+
         _analyzer_llm = ChatOllama(
-            model=settings.llm_model,
-            base_url=settings.ollama_base_url,
+            model=model,
+            base_url=base_url,
             temperature=0,
-            client_kwargs={"timeout": 120},
+            client_kwargs={"timeout": timeout},
             num_predict=4096,   # suficiente para JSON + reasoning sin truncar
             reasoning=False,    # qwen3: deshabilita thinking mode (evita bloqueo)
         )
         logger.info(
-            f"[camael_analyzer] LLM analyzer: model={settings.llm_model} "
-            f"think=False num_predict=4096"
+            f"[camael_analyzer] LLM analyzer: model={model} base_url={base_url} "
+            f"think=False num_predict=4096 timeout={timeout}s"
         )
     return _analyzer_llm
 
