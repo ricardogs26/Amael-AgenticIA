@@ -238,6 +238,8 @@ _DEDUP_TTL_BY_TYPE: dict[str, int] = {
     "PVC_CAPACITY_HIGH":     1800,   # 30 min — persiste hasta limpiar/ampliar
     # P7: certificados TLS
     "CERTIFICATE_EXPIRING":  3600,   # 1 hora — alertar una vez por hora hasta resolver
+    # Inferencia: persiste hasta recarga manual (keep_alive=-1 la vuelve permanente)
+    "LLM_MODEL_OFF_GPU":     3600,   # 1 hora
 }
 
 _dedup_cache: dict[str, float] = {}  # fallback in-memory
@@ -343,10 +345,11 @@ def sre_autonomous_loop(
         node_res     = observer.observe_node_resources(prometheus_url)
         pvc_cap      = observer.observe_pvc_capacity(prometheus_url)
         certs        = observer.observe_certificates()
+        llm_place    = observer.observe_llm_placement()
 
         # Las observaciones de P7 se agregan a infrastructure para reutilizar
         # el pipeline de detect/diagnose/decide sin cambiar la firma de detect_anomalies.
-        infra_full   = infra + node_res + pvc_cap + certs
+        infra_full   = infra + node_res + pvc_cap + certs + llm_place
 
         # ── DETECT ───────────────────────────────────────────────────────────
         raw_anomalies = detector.detect_anomalies(

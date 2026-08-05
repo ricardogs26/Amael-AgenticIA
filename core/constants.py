@@ -63,6 +63,8 @@ class AnomalyType(StrEnum):
     PVC_CAPACITY_HIGH       = "PVC_CAPACITY_HIGH"       # PVC usado > umbral (antes de llenarse)
     # TLS (observe_certificates)
     CERTIFICATE_EXPIRING    = "CERTIFICATE_EXPIRING"    # Certificado TLS vence en < N días
+    # Inferencia (observe_llm_placement)
+    LLM_MODEL_OFF_GPU       = "LLM_MODEL_OFF_GPU"       # Modelo LLM parcialmente en CPU (degradación silenciosa)
 
 
 class Severity(StrEnum):

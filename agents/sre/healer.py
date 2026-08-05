@@ -45,6 +45,8 @@ _AUTO_HEALABLE_ISSUES = {
 _NOTIFY_ONLY_ISSUES = {
     "NODE_DISK_HIGH", "NODE_MEMORY_HIGH",
     "PVC_CAPACITY_HIGH", "CERTIFICATE_EXPIRING",
+    # Descargar modelos en caliente interrumpe el tráfico → decisión humana.
+    "LLM_MODEL_OFF_GPU",
     # Los siguientes ya eran NOTIFY_HUMAN por no estar en _AUTO_HEALABLE_ISSUES,
     # se listan explícitamente para claridad en la documentación:
     "IMAGE_PULL_ERROR", "POD_PENDING_STUCK", "HIGH_CPU",

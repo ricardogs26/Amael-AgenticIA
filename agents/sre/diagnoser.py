@@ -166,6 +166,8 @@ def diagnose_with_llm(anomaly, vault_knowledge: str = "", metrics_knowledge: str
         "PVC_CAPACITY_HIGH":   ("PVC casi lleno. Limpiar datos o ampliar el PVC antes de que falle el pod por falta de espacio.", 0.90),
         # TLS (P7)
         "CERTIFICATE_EXPIRING":("Certificado TLS próximo a vencer. Verificar que cert-manager pueda renovar (desafío ACME/DNS activo).", 0.95),
+        # Inferencia
+        "LLM_MODEL_OFF_GPU":   ("Modelo LLM cargado parcialmente en CPU: al cargarlo no cabía entero en VRAM. Degrada el decode ~34% de forma silenciosa y no se corrige solo. Descargar todos los modelos y recargar el vigilado primero.", 0.95),
     }
     cause, conf = fallbacks.get(anomaly.issue_type, (anomaly.details, 0.5))
     SRE_DIAGNOSIS_CONFIDENCE.observe(conf)

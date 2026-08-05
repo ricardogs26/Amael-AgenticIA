@@ -46,6 +46,19 @@ data:
   OLLAMA_DEEP_URL:  "http://ollama-cpu-service:11434"
   LLM_DEEP_MODEL:   "qwen3:30b-a3b-instruct-2507-q4_K_M"
 
+  # ── Vigilancia de ubicación de modelos (observe_llm_placement) ───────────
+  # Ollama decide si un modelo va a VRAM o CPU AL CARGARLO, y no lo revisa
+  # después. Un qwen3:14b con 7% en CPU rinde 42 tok/s en vez de 64 (-34%),
+  # sin síntoma visible. Y como fast_chat lo ancla con keep_alive=-1, la
+  # ubicación mala se vuelve permanente.
+  #
+  # Lista EXPLÍCITA a propósito: la instancia ollama-cpu del tier profundo
+  # corre 100% en CPU por diseño y no debe alertar nunca. Solo se consulta
+  # OLLAMA_BASE_URL (la instancia con GPU).
+  # Vaciar SRE_LLM_WATCH_MODELS desactiva la comprobación.
+  SRE_LLM_WATCH_MODELS:  "qwen3:14b"
+  SRE_LLM_GPU_MIN_RATIO: "0.99"
+
   # ── PostgreSQL (user/db reales: amael_user / amael_db) ──────────────────
   POSTGRES_HOST:     "postgres-service"
   POSTGRES_PORT:     "5432"
@@ -191,7 +204,7 @@ spec:
 
       containers:
         - name: raphael
-          image: registry.richardx.dev/raphael-service:1.1.13
+          image: registry.richardx.dev/raphael-service:1.1.14
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

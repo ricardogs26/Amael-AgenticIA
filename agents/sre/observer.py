@@ -1041,6 +1041,108 @@ def observe_pvc_capacity(prometheus_url: str) -> list[Anomaly]:
     return anomalies
 
 
+def observe_llm_placement() -> list[Anomaly]:
+    """
+    Observa que los modelos LLM críticos estén 100% residentes en VRAM.
+
+    Ollama decide la ubicación de un modelo **en el instante de cargarlo** y no
+    la revisa después. Si al cargar no cabía entero en la GPU, deja una fracción
+    en CPU — y ahí se queda. Medido el 5-ago-2026: `qwen3:14b` con un 7% en CPU
+    rinde 42 tok/s en vez de 64, un **34% menos**, sin ningún síntoma visible.
+
+    Peor aún: `fast_chat` ancla el modelo con `keep_alive=-1`, así que una
+    ubicación mala se vuelve permanente hasta que alguien la detecte.
+
+    Detecta:
+      LLM_MODEL_OFF_GPU — modelo vigilado con size_vram/size < umbral
+
+    Variables de entorno:
+      SRE_LLM_WATCH_MODELS — lista separada por comas de modelos a vigilar.
+                             Vacío (default) desactiva la comprobación.
+      SRE_LLM_GPU_MIN_RATIO — fracción mínima en VRAM (default 0.99)
+      OLLAMA_BASE_URL       — instancia a consultar (la que tiene GPU)
+
+    Solo se vigila la instancia de `OLLAMA_BASE_URL`. La instancia `ollama-cpu`
+    del tier profundo corre 100% en CPU **por diseño** y no debe alertar nunca:
+    por eso la vigilancia es una lista explícita y no "todo lo que esté cargado".
+
+    Remediación: no hay acción automática segura — descargar modelos en caliente
+    interrumpe el tráfico. Va a NOTIFY_HUMAN. El arreglo manual es descargar
+    todo (`keep_alive: 0`) y volver a pedir el modelo vigilado primero.
+    """
+    import json as _json
+    import urllib.request as _urlreq
+
+    watch = [m.strip() for m in os.environ.get("SRE_LLM_WATCH_MODELS", "").split(",") if m.strip()]
+    if not watch:
+        logger.debug("[observer] observe_llm_placement: SRE_LLM_WATCH_MODELS vacío, omitiendo.")
+        return []
+
+    try:
+        min_ratio = float(os.environ.get("SRE_LLM_GPU_MIN_RATIO", "0.99"))
+    except ValueError:
+        min_ratio = 0.99
+
+    base = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434").rstrip("/")
+
+    try:
+        with _urlreq.urlopen(f"{base}/api/ps", timeout=10) as resp:  # nosec B310 — URL de env var interna
+            data = _json.loads(resp.read())
+    except Exception as exc:
+        # Ollama caído o inalcanzable ya lo cubren el watchdog y observe_cluster.
+        logger.debug(f"[observer] observe_llm_placement: /api/ps no disponible: {exc}")
+        return []
+
+    anomalies: list[Anomaly] = []
+
+    for model in data.get("models", []):
+        name = model.get("name") or model.get("model") or ""
+        if name not in watch:
+            continue
+
+        size = model.get("size") or 0
+        vram = model.get("size_vram") or 0
+        if size <= 0:
+            continue
+
+        ratio = vram / size
+        if ratio >= min_ratio:
+            continue
+
+        pct_cpu = (1 - ratio) * 100
+        anomalies.append(Anomaly(
+            issue_type=AnomalyType.LLM_MODEL_OFF_GPU,
+            severity=Severity.HIGH,
+            namespace=_OBSERVE_NAMESPACES[0] if _OBSERVE_NAMESPACES else "amael-ia",
+            resource_name=name,
+            resource_type="OllamaModel",
+            details=(
+                f"El modelo '{name}' tiene {pct_cpu:.0f}% de sus pesos en CPU "
+                f"({vram / 2**30:.1f} de {size / 2**30:.1f} GiB en VRAM). "
+                f"Esto degrada el decode de forma silenciosa (~34% medido con un 7% "
+                f"en CPU) y, si el modelo está anclado con keep_alive=-1, la "
+                f"ubicación NO se corrige sola. "
+                f"Arreglo: descargar todos los modelos (keep_alive: 0) y volver a "
+                f"cargar '{name}' primero, con la GPU despejada."
+            ),
+            metadata={
+                "model": name,
+                "vram_ratio": round(ratio, 4),
+                "size_bytes": size,
+                "size_vram_bytes": vram,
+                "min_ratio": min_ratio,
+            },
+        ))
+
+    if anomalies:
+        logger.warning(
+            f"[observer] observe_llm_placement: {len(anomalies)} modelo(s) fuera de GPU."
+        )
+    else:
+        logger.debug("[observer] observe_llm_placement: modelos vigilados 100% en VRAM.")
+    return anomalies
+
+
 def observe_certificates() -> list[Anomaly]:
     """
     Observa certificados TLS gestionados por cert-manager vía Kubernetes API (P7).
