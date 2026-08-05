@@ -231,7 +231,13 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                     # Evita falsos positivos por reinicios acumulados históricos en pods
                     # que llevan semanas corriendo sin problemas recientes.
                     elif restarts >= 5 and phase == "Running":
-                        pod_key = f"{ns}/{pod_name}"
+                        # La clave incluye el CONTENEDOR, no solo el pod: este bucle
+                        # itera container_statuses, y en un pod multi-contenedor cada
+                        # uno lleva su propio restart_count. Con una clave por pod se
+                        # pisaban entre ellos y siempre había alguno "creciendo"
+                        # respecto al anterior → HIGH_RESTARTS eterno en pods sanos
+                        # (visto en grafana: 299/303/307 y prometheus-0: 298/296).
+                        pod_key = f"{ns}/{pod_name}/{cs.name}"
                         last_count = _restart_baseline.get(pod_key)
                         _restart_baseline[pod_key] = restarts  # actualizar baseline siempre
 

@@ -63,17 +63,34 @@ COPY --chown=amael:amael . .
 
 USER amael
 
-# Puerto de la API
-EXPOSE 8000
+# Entrypoint por servicio. El repo publica varias imágenes desde este mismo
+# Dockerfile y cada una arranca un módulo y un puerto distintos:
+#
+#   amael-agentic-backend  main:app                    8000  (defaults)
+#   raphael-service        raphael_service.main:app    8002
+#   camael-service         camael_service.main:app     8003
+#   trader-service         trader_service.main:app     8003
+#
+# Antes solo existían los defaults del backend y las demás imágenes se
+# construían con un CMD override fuera de git — el repo no podía reproducirlas.
+# Se descubrió al reconstruir raphael 1.1.11, que salió arrancando `main:app`
+# en 8000 mientras el Deployment sondeaba 8002 → liveness en connection refused.
+ARG APP_MODULE=main:app
+ARG APP_PORT=8000
+ENV APP_MODULE=${APP_MODULE} \
+    APP_PORT=${APP_PORT}
+
+EXPOSE ${APP_PORT}
 
 # Health check que usa el endpoint /health de la propia app
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+    CMD python -c "import os,urllib.request; urllib.request.urlopen('http://localhost:%s/health' % os.environ['APP_PORT'])" || exit 1
 
 # 1 worker: FastAPI es async y maneja concurrencia internamente.
 # Con 2 workers, APScheduler corre en 2 procesos → doble SRE loop → RFCs duplicados.
-CMD ["uvicorn", "main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "1", \
-     "--no-access-log"]
+# Shell form + exec: uvicorn queda como PID 1 y recibe SIGTERM directo.
+CMD exec uvicorn "$APP_MODULE" \
+      --host 0.0.0.0 \
+      --port "$APP_PORT" \
+      --workers 1 \
+      --no-access-log

@@ -20,6 +20,42 @@ kubectl apply -f k8s/agents/05-backend-deployment.yaml -n amael-ia
 kubectl rollout status deployment/amael-agentic-deployment -n amael-ia
 ```
 
+### Build por servicio — `APP_MODULE` / `APP_PORT`
+
+Este repo publica **cuatro** imágenes desde el mismo `Dockerfile`. Los defaults son
+los del backend; las demás **exigen build args** o la imagen arranca `main:app` en
+8000 y el Deployment sondea un puerto donde no hay nada → liveness en
+`connection refused` → CrashLoop.
+
+| Imagen | `APP_MODULE` | `APP_PORT` |
+|--------|--------------|-----------|
+| `amael-agentic-backend` | `main:app` (default) | `8000` (default) |
+| `raphael-service` | `raphael_service.main:app` | `8002` |
+| `camael-service` | `camael_service.main:app` | `8003` |
+| `trader-service` | `trader_service.main:app` | `8003` |
+
+```bash
+docker build \
+  --build-arg APP_MODULE=raphael_service.main:app \
+  --build-arg APP_PORT=8002 \
+  -t registry.richardx.dev/raphael-service:<version> .
+
+# Verificar SIEMPRE antes de pushear:
+docker inspect registry.richardx.dev/raphael-service:<version> \
+  --format '{{.Config.Cmd}}'
+```
+
+> Hasta 1.1.11 el `Dockerfile` solo tenía los defaults del backend y las otras
+> imágenes se construían con un CMD override fuera de git — el repo **no podía
+> reproducirlas**. Se descubrió al reconstruir raphael y obtener el backend
+> completo etiquetado como raphael (arrancaba `main:app`, inicializaba MinIO —
+> que raphael no usa y su NetworkPolicy no permite — y colgaba el arranque 137s).
+
+**Nunca repushees un tag ya publicado.** Los nodos usan `imagePullPolicy:
+IfNotPresent`: si el tag ya está en el nodo no se vuelve a bajar y sigue corriendo
+la imagen vieja aunque el registry tenga otra. Sube el número de versión. (`raphael-service:1.1.11`
+quedó contaminado por esto — de ahí el salto a `1.1.12`.)
+
 ---
 
 ## Development
