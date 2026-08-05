@@ -37,6 +37,15 @@ data:
   LLM_VISION_MODEL: "qwen2.5vl:3b"
   LLM_EMBED_MODEL:  "nomic-embed-text"
 
+  # ── Tier profundo (ollama-cpu, sin GPU) ──────────────────────────────────
+  # Trabajo asíncrono que no debe desalojar el modelo interactivo de la VRAM:
+  #   - postmortems      → reporter.py, ~300 s después de cada ROLLOUT_RESTART
+  #   - retrospectiva    → briefing.py, lunes 08:00 hora de México
+  # 16.7 tok/s en CPU + 28.6 s de carga en frío (medido 5-ago-2026).
+  # Borrar ambas claves revierte al comportamiento anterior sin tocar código.
+  OLLAMA_DEEP_URL:  "http://ollama-cpu-service:11434"
+  LLM_DEEP_MODEL:   "qwen3:30b-a3b-instruct-2507-q4_K_M"
+
   # ── PostgreSQL (user/db reales: amael_user / amael_db) ──────────────────
   POSTGRES_HOST:     "postgres-service"
   POSTGRES_PORT:     "5432"
@@ -182,7 +191,7 @@ spec:
 
       containers:
         - name: raphael
-          image: registry.richardx.dev/raphael-service:1.1.12
+          image: registry.richardx.dev/raphael-service:1.1.13
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

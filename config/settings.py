@@ -58,6 +58,23 @@ class Settings(BaseSettings):
         default="nomic-embed-text",
         alias="LLM_EMBED_MODEL",
     )
+    # ── Tier profundo (instancia ollama-cpu, sin GPU) ─────────────────────────
+    # Modelo MoE grande servido 100% en CPU para trabajo asíncrono, de modo que
+    # no desaloje al modelo interactivo de la VRAM. Ver
+    # k8s/infrastructure/09-ollama-cpu.yaml y
+    # docs/benchmarks/ollama-baseline-2026-08-05.md
+    #
+    # Ambas vacías = tier desactivado → todo sigue yendo a la instancia GPU.
+    # Medido 5-ago-2026: 16.7 tok/s decode, 28.6 s de carga en frío. Por eso
+    # el timeout del tier profundo es mucho mayor que el de la ruta normal.
+    ollama_deep_url: str = Field(
+        default="",
+        alias="OLLAMA_DEEP_URL",
+    )
+    llm_model_deep: str = Field(
+        default="",
+        alias="LLM_DEEP_MODEL",
+    )
     # Capas del modelo de embeddings a descargar a GPU. 0 = CPU puro.
     #
     # La RTX 5070 tiene 12 GB y qwen3:14b ocupa 9.6 GB, así que no caben a la

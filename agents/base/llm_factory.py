@@ -46,13 +46,28 @@ _embed_instance: Any = None
 _embed_lock = threading.Lock()
 
 
-def get_chat_llm(temperature: float | None = None, timeout: int = 90) -> Any:
+# Timeout mínimo del tier profundo. El modelo corre en CPU (~16.7 tok/s) y su
+# carga en frío desde disco toma ~28.6 s, así que los 90 s de la ruta normal se
+# quedan cortos para cualquier generación mediana.
+_DEEP_TIMEOUT_S = 300
+
+
+def get_chat_llm(
+    temperature: float | None = None,
+    timeout: int = 90,
+    tier: str = "default",
+) -> Any:
     """
     Retorna una instancia de BaseChatModel cacheada según la configuración activa.
 
     Args:
         temperature: Override de temperatura. None usa el default del provider (0.7).
         timeout:     Timeout en segundos para llamadas LLM (default 90s).
+        tier:        "default" → instancia GPU (ruta interactiva).
+                     "deep"    → instancia ollama-cpu, para trabajo asíncrono que
+                                 no debe desalojar el modelo interactivo de la
+                                 VRAM. Si OLLAMA_DEEP_URL / LLM_DEEP_MODEL no
+                                 están configuradas, cae de vuelta a "default".
 
     Returns:
         Instancia de BaseChatModel compatible con LangChain.
@@ -61,17 +76,37 @@ def get_chat_llm(temperature: float | None = None, timeout: int = 90) -> Any:
 
     provider = settings.llm_provider.lower()
     model = settings.llm_model
+    base_url = settings.ollama_base_url
+
+    if tier == "deep":
+        if settings.ollama_deep_url and settings.llm_model_deep:
+            # El tier profundo es siempre Ollama local, con independencia del
+            # provider configurado para la ruta normal.
+            provider = "ollama"
+            model = settings.llm_model_deep
+            base_url = settings.ollama_deep_url
+            timeout = max(timeout, _DEEP_TIMEOUT_S)
+        else:
+            logger.debug(
+                "[llm_factory] tier='deep' pedido pero OLLAMA_DEEP_URL/"
+                "LLM_DEEP_MODEL no configuradas — usando la instancia normal."
+            )
+
     temp = temperature if temperature is not None else 0.7
 
-    key = (provider, model, temp, timeout)
+    # base_url va en la clave: dos tiers pueden compartir nombre de modelo.
+    key = (provider, model, base_url, temp, timeout)
     if key not in _chat_cache:
         with _chat_lock:
             if key not in _chat_cache:
-                instance = _build_chat_llm(provider, model, temp, timeout, settings)
+                instance = _build_chat_llm(
+                    provider, model, temp, timeout, settings, base_url
+                )
                 _chat_cache[key] = instance
                 logger.info(
-                    f"[llm_factory] Chat LLM inicializado: "
-                    f"provider={provider} model={model} temp={temp} timeout={timeout}s"
+                    f"[llm_factory] Chat LLM inicializado: provider={provider} "
+                    f"model={model} base_url={base_url} temp={temp} "
+                    f"timeout={timeout}s tier={tier}"
                 )
     return _chat_cache[key]
 
@@ -82,6 +117,7 @@ def _build_chat_llm(
     temperature: float,
     timeout: int,
     settings: Any,
+    base_url: str | None = None,
 ) -> Any:
     if provider == "openai":
         from langchain_openai import ChatOpenAI
@@ -132,7 +168,7 @@ def _build_chat_llm(
         # hasta ahora estas llamadas no tenían límite de tiempo.
         return ChatOllama(
             model=model,
-            base_url=settings.ollama_base_url,
+            base_url=base_url or settings.ollama_base_url,
             temperature=temperature,
             client_kwargs={"timeout": timeout},
         )

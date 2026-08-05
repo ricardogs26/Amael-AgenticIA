@@ -352,7 +352,11 @@ def generate_weekly_retrospective() -> str:
         )
         try:
             from agents.base.llm_factory import get_chat_llm
-            resp = get_chat_llm().invoke(prompt)
+            # tier="deep": la retrospectiva corre los lunes 08:00 (hora de
+            # México), en plena actividad. Generarla en la instancia CPU evita
+            # desalojar el modelo interactivo de la VRAM. Cae a la instancia
+            # normal si el tier profundo no está configurado.
+            resp = get_chat_llm(tier="deep").invoke(prompt)
             recs = (getattr(resp, "content", None) or str(resp)).strip()
             if recs:
                 lines.append("\n🤖 *Recomendaciones IA:*")

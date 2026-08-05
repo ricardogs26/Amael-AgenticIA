@@ -1,8 +1,8 @@
 # ── Ollama — inferencia LLM local con GPU ─────────────────────────────────────
-# Modelos requeridos (pull manual después del primer despliegue):
-#   ollama pull qwen2.5:14b         # LLM principal de chat
-#   ollama pull nomic-embed-text    # Embeddings RAG (768 dims)
-#   ollama pull qwen2.5-vl:7b      # Visión (Grafana screenshots) — opcional
+# Modelos en uso (pull manual después del primer despliegue):
+#   ollama pull qwen3:14b           # LLM de análisis (tier 2)
+#   ollama pull qwen3:1.7b          # Ruta rápida / triador (tier 1)
+#   ollama pull nomic-embed-text    # Embeddings RAG + runbooks (768 dims)
 #
 # GPU: nvidia.com/gpu: 1 — asignada exclusivamente a este pod
 # ⚠️  IMPORTANTE: Usar strategy: Recreate o kubectl delete pod (NO rollout restart)
@@ -10,6 +10,44 @@
 #
 # Restart correcto:
 #   kubectl delete pod -l app=ollama -n amael-ia
+#
+# ── Historial ────────────────────────────────────────────────────────────────
+# 5-ago-2026 — Reconciliación de drift + tuning de concurrencia.
+#
+#   Este archivo estuvo DESINCRONIZADO del cluster desde la migración de
+#   Amael-IA/: pedía `ollama/ollama:0.4.6` mientras corría `ollama/ollama`
+#   (latest, resuelto a 0.32.5), con cpu 2 / 14Gi y SIN ninguna env var.
+#   El manifest realmente aplicado se perdió al retirar Amael-IA/k8s/.
+#   Aplicarlo tal cual habría degradado a 0.4.6 (nov-2024), que no soporta qwen3.
+#
+#   Baseline medido antes del cambio: docs/benchmarks/ollama-baseline-2026-08-05.md
+#     qwen3:14b — 63.0 tok/s decode · 2,530 tok/s prefill · 9.6 GB VRAM
+#     Concurrencia: 1 solo slot → las peticiones se serializaban en cola.
+#
+#   Cambios aplicados:
+#     - imagen fijada a 0.32.5 (era un tag mutable: un restart podía cambiar
+#       la versión en caliente e invalidar cualquier comparación A/B)
+#     - strategy: Recreate (el live estaba en RollingUpdate — la trampa de la
+#       GPU única documentada arriba)
+#     - NUM_PARALLEL=2 → techo de concurrencia 44 → 75-82 tok/s agregados
+#     - FLASH_ATTENTION=1
+#
+#   Lo que NO se pudo aplicar: subir CONTEXT_LENGTH.
+#     El plan era 8192, pero solo cabe con el KV cuantizado a q8_0 — y esa
+#     variable rompe los embeddings (ver ⛔ abajo). Con KV en f16 el segundo
+#     slot de NUM_PARALLEL ya consume los ~1.9 GB libres que había, así que
+#     el contexto se queda en 4096. Subirlo exige liberar VRAM primero.
+#
+#   Coste conocido de NUM_PARALLEL=2: el KV del 14b se duplica (2 slots ×
+#   4096 × 160 KiB = 1.25 GiB), el modelo pasa de 9.6 a 10 GB y quedan
+#   ~960 MiB — insuficientes para nomic-embed-text completo, que queda al
+#   74% CPU / 26% GPU. Embeddings en batch de 32: 199 → 66 chunks/s.
+#   En batch de 1 (la ruta de consulta RAG) el impacto es de +5 ms.
+#
+#   NO se define OLLAMA_KEEP_ALIVE=24h a propósito: con 11.5 GB de VRAM
+#   utilizables, qwen3:14b (~10 GB) + qwen3:1.7b (~2.0 GB) + nomic-embed
+#   (~0.4 GB) no caben juntos. Forzar residencia de 24h provocaría thrashing
+#   de evicción. El default (5 min) deja que Ollama gestione la presión.
 # ─────────────────────────────────────────────────────────────────────────────
 
 apiVersion: v1
@@ -50,7 +88,7 @@ spec:
     spec:
       containers:
       - name: ollama
-        image: ollama/ollama:0.4.6
+        image: ollama/ollama:0.32.5   # NUNCA usar tag mutable — ver Historial
         ports:
         - containerPort: 11434
         resources:
@@ -65,8 +103,20 @@ spec:
         env:
         - name: OLLAMA_HOST
           value: "0.0.0.0"
-        - name: OLLAMA_KEEP_ALIVE
-          value: "24h"     # mantener modelos en VRAM entre requests
+        - name: OLLAMA_NUM_PARALLEL
+          value: "2"        # 1 = las peticiones se encolan (baseline 5-ago-2026)
+        - name: OLLAMA_CONTEXT_LENGTH
+          value: "4096"     # = el default. Explícito para que quede claro que
+                            # es una restricción de VRAM, no un descuido.
+        - name: OLLAMA_FLASH_ATTENTION
+          value: "1"
+        # ⛔ NO activar OLLAMA_KV_CACHE_TYPE=q8_0
+        #    Es un ajuste GLOBAL: Ollama pasa --cache-type-k/v a TODOS los
+        #    modelos, incluido nomic-embed-text (arch nomic-bert, atención no
+        #    causal, sin KV cache). El servidor lo arranca con -ngl 0 → 100% CPU
+        #    y los embeddings caen de ~29 ms a ~3,100 ms por batch.
+        #    Con KV en f16 (160 KiB/token en qwen3:14b) el presupuesto de VRAM
+        #    solo alcanza para 4096 × 2 slots dejando sitio al embedder.
         volumeMounts:
         - name: ollama-storage
           mountPath: /root/.ollama
