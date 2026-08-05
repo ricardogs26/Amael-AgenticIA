@@ -112,7 +112,7 @@ spec:
 
       containers:
         - name: camael
-          image: registry.richardx.dev/camael-service:1.1.2
+          image: registry.richardx.dev/camael-service:1.1.3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
