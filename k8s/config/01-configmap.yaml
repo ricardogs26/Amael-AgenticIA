@@ -8,8 +8,20 @@ data:
   # Valores válidos: ollama | openai | groq | gemini | anthropic
   LLM_PROVIDER:    "ollama"
   LLM_MODEL:       "qwen3:14b"
-  # Modelo chico para charla simple (ruta rápida fast_chat, keep_alive en VRAM)
-  LLM_MODEL_FAST:  "qwen3:1.7b"
+  # Modelo de la ruta rápida (fast_chat, keep_alive=-1 en VRAM).
+  #
+  # 5-ago-2026: era qwen3:1.7b. Con 12 GB de VRAM eso costaba MÁS de lo que
+  # ahorraba: qwen3:14b (10 GB) + qwen3:1.7b (2.2 GB) no caben juntos, así que
+  # cada alternancia entre charla y análisis forzaba una recarga completa.
+  # Medido — 6 peticiones de 64 tok:
+  #     homogéneo 6× qwen3:14b   ->  3.95 s, 0 recargas
+  #     alternado 1.7b <-> 14b   -> 23.68 s, 5 recargas (21.4 s solo cargando)
+  # El valor de fast_chat es saltarse el pipeline (20 s+), NO usar un modelo
+  # chico: un saludo genera ~13 tokens, y ahí el tamaño del modelo es
+  # irrelevante (0.55 s con el 14b) frente a los ~3.9 s que cuesta recargar.
+  # Además keep_alive=-1 ancla ahora un modelo que sí cabe solo.
+  # Revertir = volver a poner "qwen3:1.7b" y hacer rollout.
+  LLM_MODEL_FAST:  "qwen3:14b"
   # LLM_BASE_URL:  ""   # URL base opcional (OpenAI-compatible / llm-adapter)
   # LLM_API_KEY se configura en Secret, no aquí
 
