@@ -33,7 +33,17 @@ data:
   # Valores verificados contra el env real de amael-agentic-deployment (2026-04-22).
   OLLAMA_BASE_URL:  "http://ollama-service:11434"
   LLM_PROVIDER:     "ollama"
-  LLM_MODEL:        "qwen3:1.7b"
+  # 5-ago-2026: era qwen3:1.7b. Raphael era el ÚLTIMO consumidor del modelo
+  # chico, y cada diagnóstico del loop SRE (~cada 11 min) desalojaba al
+  # qwen3:14b de la VRAM — ni siquiera keep_alive=-1 lo protegía. Medido:
+  # el 14b se recargaba ~6 veces/hora, y ~1 de cada 5 cargas sale en 40/41
+  # capas (34% menos decode, ver LLM_MODEL_OFF_GPU).
+  # El modelo chico tampoco ahorraba tiempo: diagnose_with_llm() es UNA
+  # llamada directa sin pipeline, y el costo dominante era la carga:
+  #     qwen3:1.7b -> 0.3 s de generación + 3.3 s de carga = ~3.6 s
+  #     qwen3:14b  -> 1.6 s de generación + 0 s (ya residente) = ~1.6 s
+  # Con un solo modelo grande en la GPU no hay a quién desalojar.
+  LLM_MODEL:        "qwen3:14b"
   LLM_VISION_MODEL: "qwen2.5vl:3b"
   LLM_EMBED_MODEL:  "nomic-embed-text"
 

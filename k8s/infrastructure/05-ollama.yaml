@@ -44,10 +44,25 @@
 #   74% CPU / 26% GPU. Embeddings en batch de 32: 199 → 66 chunks/s.
 #   En batch de 1 (la ruta de consulta RAG) el impacto es de +5 ms.
 #
-#   NO se define OLLAMA_KEEP_ALIVE=24h a propósito: con 11.5 GB de VRAM
-#   utilizables, qwen3:14b (~10 GB) + qwen3:1.7b (~2.0 GB) + nomic-embed
-#   (~0.4 GB) no caben juntos. Forzar residencia de 24h provocaría thrashing
-#   de evicción. El default (5 min) deja que Ollama gestione la presión.
+#   OLLAMA_KEEP_ALIVE=24h (añadido más tarde el 5-ago-2026).
+#   Al principio se dejó fuera a propósito, porque qwen3:14b (10 GB) +
+#   qwen3:1.7b (2.2 GB) + nomic-embed (0.4 GB) no caben en 11.5 GiB y anclar
+#   habría provocado thrashing. Esa premisa dejó de ser cierta al retirar el
+#   modelo chico: raphael era su último consumidor y pasó a qwen3:14b.
+#   Ahora solo quedan 14b (10 GB) + nomic (0.4 GB) = 10.4 GB — sí caben, y
+#   anclarlos elimina las ~6 recargas/hora que exponían al modelo a la
+#   condición de frontera descrita abajo.
+#
+#   CONDICION DE FRONTERA (causa raíz de LLM_MODEL_OFF_GPU):
+#   Ollama calcula available = free - minimum(457 MiB). Medido: available
+#   oscila entre 10.2 y 10.4 GiB, y qwen3:14b con NUM_PARALLEL=2 necesita
+#   ~10.2 GiB (8.64 pesos + 1.25 KV + 0.35 buffers). Está JUSTO en el límite:
+#   de 48 cargas observadas, 39 dieron 41/41 capas y 9 dieron 40/41 — y esa
+#   única capa en CPU cuesta un 34% del decode (42 vs 64 tok/s).
+#   Con NUM_PARALLEL=1 el KV baja a 0.63 GiB y el margen sería de 0.6-0.8 GiB,
+#   pero se perdería el techo de concurrencia (75-82 -> 44 tok/s).
+#   La mitigación elegida es reducir las cargas a ~una por reinicio y vigilar
+#   el resultado con la anomalía LLM_MODEL_OFF_GPU de raphael.
 # ─────────────────────────────────────────────────────────────────────────────
 
 apiVersion: v1
@@ -110,6 +125,9 @@ spec:
                             # es una restricción de VRAM, no un descuido.
         - name: OLLAMA_FLASH_ATTENTION
           value: "1"
+        - name: OLLAMA_KEEP_ALIVE
+          value: "24h"      # ver Historial: solo es seguro desde
+                            # que se retiró qwen3:1.7b. Evita ~6 recargas/hora.
         # ⛔ NO activar OLLAMA_KV_CACHE_TYPE=q8_0
         #    Es un ajuste GLOBAL: Ollama pasa --cache-type-k/v a TODOS los
         #    modelos, incluido nomic-embed-text (arch nomic-bert, atención no
