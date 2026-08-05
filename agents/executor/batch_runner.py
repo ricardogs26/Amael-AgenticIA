@@ -232,7 +232,10 @@ def run_reasoning_step(
 
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    user_question = state.get("question", "")
+    from core.history_utils import with_history
+    # Mismo motivo que en el planner: sin historial, un paso REASONING no puede
+    # resolver referencias al turno anterior.
+    user_question = with_history(state.get("question", ""), state.get("history"))
     user_id = state.get("user_id", "")
 
     # Idioma preferido: configuración del perfil > heurística sobre la pregunta

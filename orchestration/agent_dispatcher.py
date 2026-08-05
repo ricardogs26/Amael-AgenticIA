@@ -153,6 +153,7 @@ class AgentDispatcher:
                         tools_map=tools_map,
                         request_id=request_id,
                         conversation_id=conversation_id,
+                        history=history,
                     )
             elif intent in _DIRECT_DISPATCH:
                 result = await self._dispatch_direct(
@@ -187,6 +188,7 @@ class AgentDispatcher:
                         tools_map=tools_map,
                         request_id=request_id,
                         conversation_id=conversation_id,
+                        history=history,
                     )
             else:
                 result = await self._dispatch_pipeline(
@@ -195,6 +197,7 @@ class AgentDispatcher:
                     tools_map=tools_map,
                     request_id=request_id,
                     conversation_id=conversation_id,
+                    history=history,
                 )
 
             elapsed_ms = (time.time() - start) * 1000
@@ -345,6 +348,7 @@ class AgentDispatcher:
         tools_map: dict[str, Any],
         request_id: str,
         conversation_id: str,
+        history: list[Any] | None = None,
     ) -> dict[str, Any]:
         """
         Ejecuta el pipeline LangGraph completo:
@@ -358,6 +362,7 @@ class AgentDispatcher:
             tools_map=tools_map,
             request_id=request_id,
             conversation_id=conversation_id,
+            history=history,
         )
         return {
             "final_answer":       state.get("final_answer") or "",

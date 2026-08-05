@@ -121,9 +121,16 @@ def planner_node(state: dict[str, Any], llm=None) -> dict[str, Any]:
         span.set_attribute("agent.question_length", len(question))
         span.set_attribute("agent.user_id", state.get("user_id", "unknown"))
 
+        # El historial permite planificar seguimientos ("tradúcelo", "y el
+        # anterior?"). Sin él, el planner los interpretaba como preguntas
+        # sueltas. Si no hay historial, with_history() devuelve la pregunta
+        # intacta y el prompt es idéntico al de antes.
+        from core.history_utils import with_history
+        planner_input = with_history(question, state.get("history"))
+
         messages = [
             SystemMessage(content=PLANNER_SYSTEM_PROMPT),
-            HumanMessage(content=question),
+            HumanMessage(content=planner_input),
         ]
 
         t0 = time.time()

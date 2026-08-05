@@ -35,6 +35,9 @@ class AgentState(TypedDict):
     Campos extendidos para la nueva arquitectura:
       request_id       — UUID del request (para correlación/tracing)
       conversation_id  — ID de conversación activa
+      history          — turnos previos [{"role","content"}] para que el planner
+                         y los pasos REASONING entiendan referencias como
+                         "tradúcelo" o "y el anterior?"
       routing_intent   — intent detectado por el router ("kubernetes", "sre", etc.)
       agents_invoked   — agentes que participaron en resolver la request
     """
@@ -49,6 +52,7 @@ class AgentState(TypedDict):
     tool_results: list[dict[str, Any]]
     final_answer: str | None
     user_id: str
+    history: list[dict[str, Any]]
 
     # ── Supervisor (P3) ───────────────────────────────────────────────────────
     retry_count: int
@@ -72,6 +76,7 @@ def initial_state(
     tools_map: dict[str, Any],
     request_id: str = "",
     conversation_id: str = "",
+    history: list[dict[str, Any]] | None = None,
 ) -> AgentState:
     """
     Crea un AgentState inicial con valores por defecto.
@@ -89,6 +94,7 @@ def initial_state(
         tool_results=[],
         final_answer=None,
         user_id=user_id,
+        history=history or [],
         retry_count=0,
         supervisor_score=0,
         supervisor_reason="",

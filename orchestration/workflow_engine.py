@@ -132,6 +132,7 @@ async def run_workflow(
     request_id: str = "",
     conversation_id: str = "",
     intent: str = "general",
+    history: list[Any] | None = None,
 ) -> dict[str, Any]:
     """
     Ejecuta el workflow completo para un request.
@@ -144,6 +145,7 @@ async def run_workflow(
         request_id:      UUID del request (tracing).
         conversation_id: ID de la conversación activa.
         intent:          Intent detectado (para métricas E2E).
+        history:         Turnos previos de la conversación.
 
     Returns:
         AgentState final con final_answer, supervisor_score, etc.
@@ -160,6 +162,11 @@ async def run_workflow(
         tools_map=tools_map,
         request_id=request_id,
         conversation_id=conversation_id,
+        history=[
+            h if isinstance(h, dict) else {"role": getattr(h, "role", ""),
+                                           "content": getattr(h, "content", "")}
+            for h in (history or [])
+        ],
     )
     # graph.invoke() es síncrono y bloqueante (el pipeline completo puede tardar
     # minutos). Ejecutarlo en un thread libera el event loop → la liveness /health
