@@ -28,11 +28,22 @@ router = APIRouter(prefix="/api", tags=["chat"])
 
 # ── Modelos ───────────────────────────────────────────────────────────────────
 
+class HistoryMessage(BaseModel):
+    """Un turno previo de la conversación. role: 'user' | 'assistant'."""
+    role:    str
+    content: str
+
+
 class ChatRequest(BaseModel):
     # Acepta tanto 'question' (nuevo) como 'prompt' (whatsapp-bridge legacy)
     question:        str | None = Field(default=None, max_length=4000)
     prompt:          str | None = Field(default=None, max_length=4000)
     conversation_id: str | None = None
+    # history: turnos previos de la conversación. El whatsapp-bridge SIEMPRE los
+    # envía (loadHistory, últimos 10), pero hasta el 5-ago-2026 este modelo no
+    # declaraba el campo y Pydantic lo descartaba en silencio — el chat respondía
+    # cada mensaje sin memoria del anterior. Ver orchestration/fast_chat.py.
+    history:         list[HistoryMessage] = Field(default_factory=list)
     # user_id opcional: usado por whatsapp-bridge para indicar el usuario real
     # cuando el JWT pertenece al bot de servicio (bot-amael@richardx.dev)
     user_id:         str | None = None
@@ -209,6 +220,7 @@ async def chat(
             request_id=request_id,
             conversation_id=conversation_id,
             user_role=user_role,
+            history=[m.model_dump() for m in (body.history or [])],
         )
     except Exception as exc:
         logger.error(f"[chat] dispatch error: {exc}", exc_info=True)
@@ -275,10 +287,6 @@ async def chat(
 
 
 # ── Streaming endpoint ────────────────────────────────────────────────────────
-
-class HistoryMessage(BaseModel):
-    role:    str
-    content: str
 
 class ChatStreamRequest(BaseModel):
     prompt:          str                  = Field(..., min_length=1, max_length=4000)

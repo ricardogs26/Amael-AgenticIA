@@ -84,6 +84,7 @@ class AgentDispatcher:
         conversation_id: str = "",
         extra_metadata: dict[str, Any] | None = None,
         user_role: str = "user",
+        history: list[Any] | None = None,
     ) -> dict[str, Any]:
         """
         Ejecuta el request según el routing_decision.
@@ -140,6 +141,7 @@ class AgentDispatcher:
                         user_id=user_id,
                         request_id=request_id,
                         conversation_id=conversation_id,
+                        history=history,
                     )
                 except Exception as exc:
                     logger.warning(
@@ -174,6 +176,7 @@ class AgentDispatcher:
                         user_id=user_id,
                         request_id=request_id,
                         conversation_id=conversation_id,
+                        history=history,
                     )
                 except Exception as exc:
                     logger.warning(f"[dispatcher] fast_triage falló, escala a pipeline: {exc}")
@@ -398,6 +401,7 @@ async def dispatch(
     request_id: str = "",
     conversation_id: str = "",
     user_role: str = "user",
+    history: list[Any] | None = None,
 ) -> dict[str, Any]:
     """
     Shortcut funcional que usa la instancia global del dispatcher.
@@ -413,4 +417,5 @@ async def dispatch(
         request_id=request_id,
         conversation_id=conversation_id,
         user_role=user_role,
+        history=history,
     )

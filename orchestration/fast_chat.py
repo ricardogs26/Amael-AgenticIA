@@ -35,8 +35,9 @@ def _get_fast_llm():
     if _fast_llm is None:
         with _lock:
             if _fast_llm is None:
-                from config.settings import settings
                 from langchain_ollama import ChatOllama
+
+                from config.settings import settings
 
                 _fast_llm = ChatOllama(
                     model=settings.llm_model_fast,
@@ -54,21 +55,66 @@ def _get_fast_llm():
     return _fast_llm
 
 
+# Turnos de historial que se anteponen al mensaje actual. 10 mensajes (~5
+# intercambios) caben de sobra en los 4096 tokens de contexto: el prompt medido
+# sin historial es de ~330 tokens.
+_MAX_HISTORY_MSGS  = 10
+# Corte por mensaje para que un turno largo (p.ej. un volcado de logs pegado por
+# el usuario) no se coma la ventana entero.
+_MAX_HISTORY_CHARS = 1200
+
+
+def _build_messages(system_prompt: str, question: str, history: list | None) -> list:
+    """
+    Arma la lista de mensajes para el LLM: system → historial → pregunta actual.
+
+    `history` viene del cliente como [{"role": "user"|"assistant", "content": str}].
+    El bridge de WhatsApp ya lo envía (últimos 10 mensajes), pero hasta el
+    5-ago-2026 `ChatRequest` no lo declaraba y Pydantic lo descartaba en
+    silencio: la charla se respondía siempre sin memoria del turno anterior.
+
+    Entradas malformadas se ignoran en vez de fallar — perder contexto degrada
+    la respuesta, pero romper la petición deja al usuario sin nada.
+    """
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    messages: list = [SystemMessage(content=system_prompt)]
+
+    for item in (history or [])[-_MAX_HISTORY_MSGS:]:
+        if isinstance(item, dict):
+            role, content = item.get("role"), item.get("content")
+        else:  # objeto Pydantic u otro con atributos
+            role, content = getattr(item, "role", None), getattr(item, "content", None)
+        if not content:
+            continue
+        content = str(content).strip()[:_MAX_HISTORY_CHARS]
+        if not content:
+            continue
+        role = str(role or "").lower()
+        if role == "user":
+            messages.append(HumanMessage(content=content))
+        elif role in ("assistant", "ai", "bot"):
+            messages.append(AIMessage(content=content))
+        # cualquier otro rol (system, tool…) se omite a propósito
+
+    messages.append(HumanMessage(content=question))
+    return messages
+
+
 async def handle_fast_chat(
     question: str,
     user_id: str,
     request_id: str = "",
     conversation_id: str = "",
+    history: list | None = None,
 ) -> dict:
     """
     Resuelve un mensaje de charla simple con una sola llamada al modelo chico.
     Retorna el mismo contrato que el dispatcher (final_answer, dispatch_mode, ...).
     """
-    from langchain_core.messages import HumanMessage, SystemMessage
-
     t0 = time.monotonic()
     llm = _get_fast_llm()
-    messages = [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=question)]
+    messages = _build_messages(_SYSTEM_PROMPT, question, history)
 
     try:
         resp = await asyncio.to_thread(llm.invoke, messages)
@@ -86,7 +132,7 @@ async def handle_fast_chat(
     )
     try:
         from observability.metrics import PIPELINE_E2E_LATENCY_SECONDS
-        PIPELINE_E2E_LATENCY_SECONDS.labels(intent="chat").observe((time.monotonic() - t0))
+        PIPELINE_E2E_LATENCY_SECONDS.labels(intent="chat").observe(time.monotonic() - t0)
     except Exception:
         pass
 
@@ -120,17 +166,20 @@ async def handle_fast_triage(
     user_id: str,
     request_id: str = "",
     conversation_id: str = "",
+    history: list | None = None,
 ) -> dict | None:
     """
     Triage con el modelo chico para intents 'general': si es conocimiento general
     lo responde (1 llamada, ~rápido); si necesita datos/herramientas devuelve None
     para que el dispatcher escale al pipeline con qwen3:14b.
-    """
-    from langchain_core.messages import HumanMessage, SystemMessage
 
+    El historial importa aquí tanto como en fast_chat: sin él, un "y el
+    anterior?" o un "traducelo" se evalúan a ciegas y el triador escala o
+    responde mal.
+    """
     t0 = time.monotonic()
     llm = _get_fast_llm()
-    messages = [SystemMessage(content=_TRIAGE_SYSTEM), HumanMessage(content=question)]
+    messages = _build_messages(_TRIAGE_SYSTEM, question, history)
 
     resp = await asyncio.to_thread(llm.invoke, messages)  # excepción → el dispatcher escala
     answer = (resp.content if hasattr(resp, "content") else str(resp) or "").strip()
@@ -138,7 +187,7 @@ async def handle_fast_triage(
     # ¿El modelo pidió escalar? (token en la respuesta corta = decisión de escalar)
     if _ESCALATE_TOKEN in answer.upper():
         logger.info(
-            f"[fast_triage] escala a pipeline (14b)",
+            "[fast_triage] escala a pipeline (14b)",
             extra={"request_id": request_id, "user_id": user_id},
         )
         return None
@@ -151,7 +200,7 @@ async def handle_fast_triage(
     )
     try:
         from observability.metrics import PIPELINE_E2E_LATENCY_SECONDS
-        PIPELINE_E2E_LATENCY_SECONDS.labels(intent="chat").observe((time.monotonic() - t0))
+        PIPELINE_E2E_LATENCY_SECONDS.labels(intent="chat").observe(time.monotonic() - t0)
     except Exception:
         pass
 
