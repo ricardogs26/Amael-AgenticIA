@@ -57,8 +57,15 @@ async def account(user_id: Annotated[str, Depends(get_current_user)]) -> dict:
 
 
 @router.get("/orders")
-async def orders(user_id: Annotated[str, Depends(get_current_user)], limit: int = 50) -> dict:
-    return await _forward("GET", f"/orders?limit={min(limit, 200)}")
+async def orders(user_id: Annotated[str, Depends(get_current_user)], limit: int = 50,
+                 include_hold: bool = False) -> dict:
+    return await _forward("GET", f"/orders?limit={min(limit, 200)}"
+                                 f"&include_hold={str(include_hold).lower()}")
+
+
+@router.get("/holds")
+async def holds(user_id: Annotated[str, Depends(get_current_user)], hours: int = 24) -> dict:
+    return await _forward("GET", f"/holds?hours={min(hours, 720)}")
 
 
 @router.get("/equity")
