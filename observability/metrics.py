@@ -340,6 +340,19 @@ AGENT_LATENCY_SECONDS = Histogram(
     ["agent_name"],
     buckets=(0.1, 0.5, 1, 2, 5, 10, 30, 60, 120),
 )
+# Aristas del grafo de agentes: quién invocó a quién. Las dos métricas de arriba
+# dicen QUÉ agente corrió, nunca QUIÉN lo llamó — sin eso no hay grafo posible,
+# solo una lista. `source` es "user" cuando la invocación entra por el
+# dispatcher y no por otro agente.
+#
+# Cardinalidad acotada a propósito: source/target salen del AgentRegistry (~15
+# nombres) y `via` de un conjunto cerrado, así que el producto se queda en
+# cientos de series, no en miles.
+AGENT_EDGE_TOTAL = Counter(
+    "amael_agent_edge_total",
+    "Invocaciones entre nodos del grafo de agentes",
+    ["source", "target", "via"],   # via: dispatch | pipeline | handoff | memory
+)
 
 # ── Dispatcher / Router ───────────────────────────────────────────────────────
 AGENT_REQUESTS_TOTAL = Counter(

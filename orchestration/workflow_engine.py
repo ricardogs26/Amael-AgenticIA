@@ -25,13 +25,35 @@ from agents.planner.agent import grouper_node, planner_node
 from agents.supervisor.agent import supervisor_node
 from agents.supervisor.quality_scorer import MAX_RETRIES
 from core.constants import MAX_GRAPH_ITERATIONS
-from observability.metrics import ORCHESTRATOR_MAX_STEPS_HIT_TOTAL
+from observability.metrics import AGENT_EDGE_TOTAL, ORCHESTRATOR_MAX_STEPS_HIT_TOTAL
 from orchestration.state import AgentState
 
 logger = logging.getLogger("orchestration.workflow")
 
 # Cache global del grafo compilado — un grafo por configuración de redis_client
 _WORKFLOW_CACHE: Any | None = None
+
+
+def _edge(source: str, target: str) -> None:
+    """
+    Registra una arista recorrida del pipeline.
+
+    Los nodos del grafo son funciones sueltas, no subclases de BaseAgent, así
+    que no pasan por `BaseAgent.run()` ni por su instrumentación. Best-effort:
+    un fallo aquí nunca debe romper el workflow.
+    """
+    try:
+        AGENT_EDGE_TOTAL.labels(source=source, target=target, via="pipeline").inc()
+    except Exception as exc:
+        logger.debug(f"[workflow] arista {source}→{target} no registrada: {exc}")
+
+
+def _instrumented(name: str, fn, source: str):
+    """Envuelve un nodo para registrar la arista `source → name` al entrar."""
+    def wrapped(state: AgentState):
+        _edge(source, name)
+        return fn(state)
+    return wrapped
 
 
 def _compile_graph(redis_client=None):
@@ -52,13 +74,30 @@ def _compile_graph(redis_client=None):
     """
     workflow = StateGraph(AgentState)
 
-    workflow.add_node("planner",        planner_node)
-    workflow.add_node("grouper",        grouper_node)
-    workflow.add_node("batch_executor", batch_executor_node)
-    workflow.add_node(
-        "supervisor",
-        lambda state: supervisor_node(state, redis_client=redis_client),
-    )
+    def _planner(state: AgentState):
+        # El planner tiene dos orígenes posibles: la entrada del usuario, o el
+        # supervisor cuando pide REPLAN. Distinguirlos aquí es lo que hace que
+        # el ciclo de reintento se vea como tal en el grafo.
+        _edge("supervisor" if state.get("retry_count", 0) else "user", "planner")
+        return planner_node(state)
+
+    def _batch_executor(state: AgentState):
+        # El nodo tiene self-loop: una arista fija "grouper → batch_executor"
+        # contaría cada vuelta del ciclo como si viniera del grouper. La
+        # primera entrada es la del grouper (current_batch == 0); el resto son
+        # el ciclo consigo mismo.
+        source = "grouper" if state.get("current_batch", 0) == 0 else "batch_executor"
+        _edge(source, "batch_executor")
+        return batch_executor_node(state)
+
+    def _supervisor(state: AgentState):
+        _edge("batch_executor", "supervisor")
+        return supervisor_node(state, redis_client=redis_client)
+
+    workflow.add_node("planner",        _planner)
+    workflow.add_node("grouper",        _instrumented("grouper", grouper_node, "planner"))
+    workflow.add_node("batch_executor", _batch_executor)
+    workflow.add_node("supervisor",     _supervisor)
 
     workflow.set_entry_point("planner")
     workflow.add_edge("planner", "grouper")
@@ -87,7 +126,8 @@ def _compile_graph(redis_client=None):
         retry_count = state.get("retry_count", 0)
         if decision == "REPLAN" and retry_count <= MAX_RETRIES:
             logger.info(f"[workflow] Supervisor solicitó REPLAN (retry #{retry_count}).")
-            return "planner"
+            return "planner"   # la arista la registra _planner, que ve retry_count
+        _edge("supervisor", "end")
         return END
 
     workflow.add_conditional_edges(

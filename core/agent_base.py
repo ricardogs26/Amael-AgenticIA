@@ -36,6 +36,12 @@ class AgentContext:
     tools: dict[str, Any] = field(default_factory=dict)    # name → BaseTool
     memory: Any | None = None        # MemoryStore (Qdrant + Redis + Postgres)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Quién origina la invocación. None = entró por el dispatcher, o sea el
+    # usuario. Cuando un agente instancia a otro (Raphael → Camael, chat →
+    # Zaphkiel) debe pasar su propio `name` aquí: es lo único que convierte la
+    # lista de ejecuciones en un grafo.
+    caller: str | None = None
+    via: str = "dispatch"            # dispatch | pipeline | handoff | memory
 
 
 # ── Resultado estandarizado ───────────────────────────────────────────────────
@@ -197,7 +203,12 @@ class BaseAgent(ABC):
           3. after_execute  (hook)
           → en caso de excepción: on_error (hook)
 
-        El duration_ms se calcula automáticamente aquí.
+        El duration_ms se calcula automáticamente aquí, igual que las métricas:
+        éste es el único punto por el que pasan todos los agentes de dispatch
+        directo, así que instrumentarlo aquí evita tener que tocar cada agente.
+        Los nodos del pipeline LangGraph (planner/grouper/executor/supervisor)
+        NO pasan por aquí — son funciones sueltas y se instrumentan en
+        `orchestration/workflow_engine.py`.
         """
         start = datetime.now(UTC)
         try:
@@ -209,12 +220,37 @@ class BaseAgent(ABC):
         elapsed = (datetime.now(UTC) - start).total_seconds() * 1000
         result.duration_ms = elapsed
 
+        self._record_metrics(result, elapsed)
+
         try:
             await self.after_execute(task, result)
         except Exception as exc:
             logger.warning(f"[{self.name}] after_execute falló: {exc}")
 
         return result
+
+    def _record_metrics(self, result: AgentResult, elapsed_ms: float) -> None:
+        """
+        Emite ejecución, latencia y arista del grafo. Best-effort: un fallo de
+        instrumentación jamás debe tumbar la respuesta al usuario.
+        """
+        try:
+            from observability.metrics import (
+                AGENT_EDGE_TOTAL,
+                AGENT_EXECUTIONS_TOTAL,
+                AGENT_LATENCY_SECONDS,
+            )
+            AGENT_EXECUTIONS_TOTAL.labels(
+                agent_name=self.name, success=str(result.success).lower()
+            ).inc()
+            AGENT_LATENCY_SECONDS.labels(agent_name=self.name).observe(elapsed_ms / 1000)
+            AGENT_EDGE_TOTAL.labels(
+                source=self.context.caller or "user",
+                target=self.name,
+                via=self.context.via,
+            ).inc()
+        except Exception as exc:
+            logger.debug(f"[{self.name}] métricas no emitidas: {exc}")
 
     # ── Utilidades ────────────────────────────────────────────────────────────
 
