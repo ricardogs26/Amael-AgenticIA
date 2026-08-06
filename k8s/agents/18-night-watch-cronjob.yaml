@@ -93,11 +93,22 @@ data:
                 config.load_kube_config()
             pods = client.CoreV1Api().list_namespaced_pod(namespace=NS)
             rs = []
+            out["jobs_failed"] = 0
             for p in pods.items:
                 out["total"] += 1
                 phase = p.status.phase or "?"
+                # Los pods de Job/CronJob terminan por diseño (Succeeded o Failed
+                # cuando señalan con código != 0, como hace el watchdog) y su
+                # estado persiste para siempre. Contarlos como "fuera de Running"
+                # generaba la MISMA alerta cada 15 min indefinidamente: el
+                # 6-ago-2026 fueron 14 avisos idénticos por 4 pods de watchdog.
+                # Se cuentan aparte para no perder la señal, sin alertar.
+                es_job = any(r.kind == "Job" for r in (p.metadata.owner_references or []))
                 if phase == "Running":
                     out["running"] += 1
+                elif es_job:
+                    if phase == "Failed":
+                        out["jobs_failed"] += 1
                 elif phase not in ("Succeeded",):
                     out["no_running"].append(f"{p.metadata.name}:{phase}")
                 n = sum(cs.restart_count or 0 for cs in (p.status.container_statuses or []))
@@ -105,8 +116,10 @@ data:
                     rs.append((n, p.metadata.name))
             rs.sort(reverse=True)
             out["top_restarts"] = [{"pod": n, "restarts": c} for c, n in rs[:5]]
+            # Solo alertan los pods gestionados por Deployment/StatefulSet/DaemonSet:
+            # esos SÍ deberían estar Running y su ausencia es un problema real.
             if out["no_running"]:
-                warns.append(f"{len(out['no_running'])} pod(s) fuera de Running: {out['no_running'][:3]}")
+                warns.append(f"{len(out['no_running'])} pod(s) de deployment fuera de Running: {out['no_running'][:3]}")
         except Exception as exc:
             out["error"] = str(exc)[:120]
         return out
@@ -118,7 +131,9 @@ data:
                       {"Authorization": "Bearer " + SECRET})
             s = st.get("state", st)
             res = s.get("last_run_result")
-            if res and res not in ("ok", "ok_clean"):
+            # "pending" es el estado antes del primer ciclo tras arrancar
+            # raphael, no un fallo. Solo "error" merece alerta.
+            if res and res not in ("ok", "ok_clean", "pending"):
                 warns.append(f"loop SRE last_run_result={res}")
             return {"last_run_result": res,
                     "anomalies_last_run": s.get("anomalies_in_last_run"),
@@ -173,6 +188,7 @@ data:
     g = snap["ollama_gpu"]
     modelos = " ".join(f"{m['name']}={m['vram_ratio']:.0%}" for m in g.get("models", [])) or "(ninguno)"
     print(f"SUMMARY {snap['ts']} pods={snap['pods'].get('running')}/{snap['pods'].get('total')} "
+          f"jobsFailed={snap['pods'].get('jobs_failed', 0)} "
           f"sre={snap['sre'].get('last_run_result')} runbooks={snap['runbooks'].get('total')} "
           f"vram[{modelos}] warns={len(warns)}")
 

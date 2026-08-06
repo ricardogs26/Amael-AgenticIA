@@ -324,16 +324,33 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
 
                 # POD_FAILED
                 elif phase == "Failed":
-                    anomalies.append(Anomaly(
-                        issue_type=AnomalyType.POD_FAILED,
-                        severity=Severity.HIGH,
-                        namespace=ns,
-                        resource_name=pod_name,
-                        resource_type="Pod",
-                        owner_name=owner_name,
-                        metadata=dict(_owner_meta),
-                        details=f"Pod {pod_name} en estado Failed.",
-                    ))
+                    # Los pods de Job en Failed NO son una anomalía: terminar con
+                    # código ≠ 0 es su forma de señalar. El watchdog sale así a
+                    # propósito cuando detecta un deployment sin réplicas, y el
+                    # CronJob controller ya gestiona reintentos vía backoffLimit.
+                    #
+                    # Sin este filtro, cada pod Failed generaba un POD_FAILED por
+                    # ciclo horario con NO_ACTION: el 6-ago-2026 había 4 pods de
+                    # amael-watchdog produciendo ~4 incidentes/hora indefinidamente,
+                    # ensuciando sre_incidents y disparando falsas alertas en el
+                    # night-watch. El estado Failed de un pod de Job persiste para
+                    # siempre, así que el ruido nunca cesa por sí solo.
+                    if owner_kind == "Job":
+                        logger.debug(
+                            f"[observer] Pod de Job {pod_name} en Failed — ignorado "
+                            f"(terminar con error es su señal, no una anomalía)."
+                        )
+                    else:
+                        anomalies.append(Anomaly(
+                            issue_type=AnomalyType.POD_FAILED,
+                            severity=Severity.HIGH,
+                            namespace=ns,
+                            resource_name=pod_name,
+                            resource_type="Pod",
+                            owner_name=owner_name,
+                            metadata=dict(_owner_meta),
+                            details=f"Pod {pod_name} en estado Failed.",
+                        ))
 
                 # POD_PENDING_STUCK (pending > 5 min sin scheduling)
                 elif phase == "Pending":

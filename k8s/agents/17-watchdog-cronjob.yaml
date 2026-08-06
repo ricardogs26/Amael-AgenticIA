@@ -57,11 +57,19 @@ spec:
   # Historial corto pero suficiente para ver el patrón de fallos en
   # `kubectl get jobs -n amael-ia`.
   successfulJobsHistoryLimit: 2
-  failedJobsHistoryLimit: 5
+  # El watchdog sale con código != 0 A PROPÓSITO cuando detecta un deployment
+  # sin réplicas: es su forma de señalar. Eso deja pods en Failed, y el estado
+  # Failed de un pod de Job persiste PARA SIEMPRE — no se recupera solo.
+  # El 6-ago-2026 se acumularon 4 (del incidente de red de las 09:39) y cada uno
+  # generaba un POD_FAILED por hora en raphael + una falsa alerta en night-watch.
+  # Con 2 basta para diagnosticar el último fallo sin dejar rastro perpetuo.
+  failedJobsHistoryLimit: 2
   # Si el nodo estuvo caído, no reprocesar una avalancha de ejecuciones viejas.
   startingDeadlineSeconds: 300
   jobTemplate:
     spec:
+      # Recolecta el Job (y su pod) 6 h después de terminar, exitoso o no.
+      ttlSecondsAfterFinished: 21600
       backoffLimit: 1
       activeDeadlineSeconds: 180
       template:
