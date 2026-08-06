@@ -40,6 +40,29 @@ def _get_embedding(text: str) -> list[float] | None:
         return None
 
 
+def _runbook_body(result) -> str:
+    """
+    Extrae el cuerpo de un runbook tolerando los dos esquemas que conviven en
+    la colección `sre_runbooks`.
+
+    El k8s-agent legacy (retirado jul-2026) guardaba el cuerpo en `content`;
+    el código actual usa `text`. Al retirar el agente nadie migró sus puntos,
+    así que ~61% de la colección quedó con el esquema viejo. Como esta función
+    leía solo `text`, esos puntos devolvían cadena vacía: la búsqueda semántica
+    los seleccionaba entre los top-3 y el LLM recibía fragmentos en blanco.
+    Medido el 5-ago-2026: en CRASH_LOOP, 2 de 3 runbooks llegaban vacíos.
+
+    El fallback se queda aunque los datos se migren — un desajuste de esquema
+    no debe volver a degradar el diagnóstico en silencio.
+    """
+    payload = getattr(result, "payload", None) or {}
+    for key in ("text", "content"):
+        value = payload.get(key)
+        if value and str(value).strip():
+            return str(value)
+    return ""
+
+
 def search_runbooks(issue_type: str, details: str) -> str:
     """
     Busca runbooks relevantes en Qdrant para el issue_type dado.
@@ -75,7 +98,7 @@ def search_runbooks(issue_type: str, details: str) -> str:
         from observability.metrics import SRE_RUNBOOK_HITS_TOTAL
         if results:
             SRE_RUNBOOK_HITS_TOTAL.inc()
-            texts = [r.payload.get("text", "") for r in results if r.payload]
+            texts = [t for t in (_runbook_body(r) for r in results) if t]
             return "\n\n---\n\n".join(texts)
 
     except Exception as exc:

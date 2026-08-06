@@ -30,6 +30,9 @@ _OLLAMA_BASE_URL         = os.environ.get("OLLAMA_BASE_URL", "http://ollama-serv
 _EMBED_MODEL             = "nomic-embed-text"
 MIN_RUNBOOKS_TO_CONSOLIDATE = 3   # mínimo de auto-runbooks para disparar consolidación
 MAX_RUNBOOKS_PER_TYPE       = 10  # máximo a consolidar por issue_type (evitar prompts gigantes)
+# El tier profundo corre en CPU (~16 tok/s) y su carga en frío son ~26s. Los
+# 120s originales asumían GPU; una síntesis de ~800 tokens no cabía.
+_SYNTHESIS_TIMEOUT_S        = 300
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -44,8 +47,15 @@ def _get_embedding(text: str) -> list[float] | None:
 
 
 def _get_llm():
+    """
+    La consolidación corre a las 03:00 y sintetiza patrones de 10 incidentes:
+    trabajo asíncrono, pesado y sin nadie esperando. Va al tier profundo
+    (ollama-cpu) para no desalojar el modelo interactivo de la VRAM y porque el
+    modelo grande es mejor extrayendo patrones. Si OLLAMA_DEEP_URL no está
+    configurada, get_chat_llm cae al modelo normal.
+    """
     from agents.base.llm_factory import get_chat_llm
-    return get_chat_llm()
+    return get_chat_llm(tier="deep")
 
 
 # ── Scan Qdrant ───────────────────────────────────────────────────────────────
@@ -66,11 +76,27 @@ def _fetch_auto_runbooks_by_type() -> dict[str, list[dict]]:
         while True:
             result, next_offset = client.scroll(
                 collection_name=_SRE_RUNBOOKS_COLLECTION,
-                scroll_filter=Filter(must=[
-                    FieldCondition(key="auto_generated", match=MatchValue(value=True)),
-                    # Solo auto-runbooks de incidentes — no los de bootstrap
-                    FieldCondition(key="bootstrapped",   match=MatchValue(value=False)),
-                ]),
+                scroll_filter=Filter(
+                    must=[
+                        FieldCondition(key="auto_generated", match=MatchValue(value=True)),
+                    ],
+                    # Solo auto-runbooks de incidentes — no los de bootstrap.
+                    #
+                    # Esto era `must=[bootstrapped == False]`, que en Qdrant NO
+                    # equivale a "no bootstrapped": un `must` sobre un campo
+                    # ausente excluye el punto. Y `bootstrapped` no lo escribe
+                    # NADIE — grep sobre todo el repo el 5-ago-2026 solo lo
+                    # encuentra aquí. Es decir, el filtro devolvía siempre 0
+                    # puntos y la consolidación nunca pudo ejecutarse, ni
+                    # siquiera si alguien la hubiera agendado.
+                    #
+                    # Con must_not se incluyen los puntos sin el campo (el caso
+                    # real) y se seguirían excluyendo los de bootstrap si algún
+                    # día se marcan.
+                    must_not=[
+                        FieldCondition(key="bootstrapped", match=MatchValue(value=True)),
+                    ],
+                ),
                 limit=100,
                 offset=offset,
                 with_payload=True,
@@ -142,15 +168,23 @@ def _synthesize_runbooks(issue_type: str, runbooks: list[dict]) -> str:
     try:
         import concurrent.futures
 
-        from agents.base.llm_factory import llm_agent_context
+        # `llm_agent_context` NUNCA existió en llm_factory: el import fallaba y
+        # tumbaba la síntesis de TODOS los tipos con ImportError, así que este
+        # módulo jamás llegó a consolidar nada (descubierto el 5-ago-2026 al
+        # ejecutarlo a mano por primera vez). El mecanismo real para etiquetar
+        # tokens por agente es _track_tokens() de agents/base/llm_utils.py.
+        from agents.base.llm_utils import _track_tokens
+
         llm = _get_llm()
-        llm_agent_context.set("runbook_l3")
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        # Timeout amplio: en el tier profundo (CPU, ~16 tok/s) una síntesis de
+        # ~800 tokens tarda ~50s, más la carga en frío del modelo (~26s).
         future = executor.submit(llm.invoke, prompt)
         try:
-            raw = future.result(timeout=120)
+            raw = future.result(timeout=_SYNTHESIS_TIMEOUT_S)
         finally:
             executor.shutdown(wait=False)
+        _track_tokens(raw, prompt, "runbook_l3")
         if hasattr(raw, "content"):
             raw = raw.content
         return raw.strip()

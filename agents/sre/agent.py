@@ -632,6 +632,20 @@ def start_sre_loop() -> Any | None:
             "cron", day_of_week="mon", hour=8, minute=0, timezone="America/Mexico_City",
             id="weekly_retrospective", replace_existing=True,
         )
+        # Nivel 3 de runbooks — consolidación. El módulo existía desde su
+        # creación pero NINGÚN add_job lo agendaba: `run_consolidation()` no la
+        # llamaba nadie (verificado con grep sobre todo el repo el 5-ago-2026).
+        # La documentación afirmaba "diario 03:00 UTC"; era falso. Consecuencia:
+        # la colección acumuló 1.487 puntos, 602 de ellos variantes del mismo
+        # HIGH_RESTARTS, y search_runbooks() devolvía copias casi idénticas en
+        # vez de un runbook consolidado.
+        # Usa el mismo huso que los demás jobs: 03:00 hora de México.
+        from agents.sre import runbook_consolidator as _consolidator
+        _sre_scheduler.add_job(
+            _consolidator.run_consolidation,
+            "cron", hour=3, minute=0, timezone="America/Mexico_City",
+            id="runbook_consolidation", replace_existing=True,
+        )
         _sre_scheduler.start()
         # Registrar scheduler en healer para verificación post-acción (P3-A)
         from agents.sre import healer as _healer
