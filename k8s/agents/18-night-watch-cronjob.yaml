@@ -1,0 +1,239 @@
+# ── Night Watch — vigilante de observación nocturna ───────────────────────────
+# Creado 6-ago-2026.
+#
+# NO es un remplazo del watchdog (17-watchdog-cronjob.yaml). El watchdog ALERTA
+# por WhatsApp cuando un deployment crítico se queda sin réplicas. Este solo
+# OBSERVA y deja una traza: cada 15 min emite una línea JSON con el estado de
+# todo lo que se tocó el 5/6-ago-2026, para poder reconstruir por la mañana qué
+# pasó durante la noche.
+#
+# Vigila específicamente lo que puede degradarse en silencio:
+#   - ubicación de los modelos en Ollama (un 7% en CPU cuesta 34% del decode y
+#     NO se corrige solo; ver LLM_MODEL_OFF_GPU en raphael)
+#   - recargas/evicciones de modelos (antes eran ~6/hora)
+#   - reinicios de pods y fases anómalas
+#   - salud del loop SRE y del circuit breaker
+#   - si el cron de consolidación de runbooks (03:00) disparó y drenó backlog
+#   - truncaciones de contexto (el disparador para subir OLLAMA_CONTEXT_LENGTH)
+#
+# Lectura por la mañana:
+#   kubectl logs -n amael-ia -l app=night-watch --tail=-1 --prefix | grep NIGHTWATCH
+#   # o el resumen:
+#   kubectl logs -n amael-ia -l app=night-watch --tail=-1 | grep -E "^(WARN|SUMMARY)"
+#
+# Usa watchdog-sa (read-only, bound a sre-agent-observer) y la imagen de raphael
+# porque ya trae python + kubernetes + requests. No escribe NADA: solo lee.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: night-watch-script
+  namespace: amael-ia
+  labels:
+    app: night-watch
+data:
+  nightwatch.py: |
+    """Night Watch — snapshot de observación. Solo lee, nunca actúa."""
+    import json, os, time, urllib.request
+
+    OLLAMA_GPU = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
+    OLLAMA_CPU = os.environ.get("OLLAMA_DEEP_URL", "http://ollama-cpu-service:11434")
+    PROM       = os.environ.get("PROMETHEUS_URL", "")
+    QDRANT     = os.environ.get("QDRANT_URL", "http://qdrant-service:6333")
+    RAPHAEL    = os.environ.get("RAPHAEL_URL", "http://raphael-service:8002")
+    SECRET     = os.environ.get("INTERNAL_API_SECRET", "")
+    NS         = os.environ.get("SRE_NAMESPACE", "amael-ia")
+    WATCH      = [m.strip() for m in os.environ.get("NW_WATCH_MODELS", "qwen3:14b").split(",") if m.strip()]
+
+    warns = []
+
+    def _get(url, headers=None, timeout=15):
+        req = urllib.request.Request(url, headers=headers or {})
+        with urllib.request.urlopen(req, timeout=timeout) as r:  # nosec B310 — URLs de env vars internas
+            return json.loads(r.read())
+
+    def _promq(expr):
+        if not PROM:
+            return None
+        try:
+            import urllib.parse
+            u = PROM + "/api/v1/query?" + urllib.parse.urlencode({"query": expr})
+            res = _get(u)["data"]["result"]
+            return float(res[0]["value"][1]) if res else 0.0
+        except Exception:
+            return None
+
+    # ── 1. Ollama: ubicación de modelos ──────────────────────────────────────
+    def ollama_state(base, label):
+        out = {"reachable": False, "models": []}
+        try:
+            data = _get(base + "/api/ps")
+            out["reachable"] = True
+            for m in data.get("models", []):
+                size, vram = m.get("size") or 0, m.get("size_vram") or 0
+                ratio = round(vram / size, 4) if size else 0.0
+                name = m.get("name") or m.get("model") or "?"
+                out["models"].append({"name": name, "gib": round(size / 2**30, 2), "vram_ratio": ratio})
+                if label == "gpu" and name in WATCH and ratio < 0.99:
+                    warns.append(f"{name} solo {ratio:.0%} en VRAM (esperado 100%) — degrada ~34% el decode")
+        except Exception as exc:
+            out["error"] = str(exc)[:120]
+            if label == "gpu":
+                warns.append(f"ollama {label} inalcanzable: {str(exc)[:80]}")
+        return out
+
+    # ── 2. Pods: reinicios y fases ───────────────────────────────────────────
+    def pods_state():
+        out = {"total": 0, "running": 0, "no_running": [], "top_restarts": []}
+        try:
+            from kubernetes import client, config
+            try:
+                config.load_incluster_config()
+            except Exception:
+                config.load_kube_config()
+            pods = client.CoreV1Api().list_namespaced_pod(namespace=NS)
+            rs = []
+            for p in pods.items:
+                out["total"] += 1
+                phase = p.status.phase or "?"
+                if phase == "Running":
+                    out["running"] += 1
+                elif phase not in ("Succeeded",):
+                    out["no_running"].append(f"{p.metadata.name}:{phase}")
+                n = sum(cs.restart_count or 0 for cs in (p.status.container_statuses or []))
+                if n:
+                    rs.append((n, p.metadata.name))
+            rs.sort(reverse=True)
+            out["top_restarts"] = [{"pod": n, "restarts": c} for c, n in rs[:5]]
+            if out["no_running"]:
+                warns.append(f"{len(out['no_running'])} pod(s) fuera de Running: {out['no_running'][:3]}")
+        except Exception as exc:
+            out["error"] = str(exc)[:120]
+        return out
+
+    # ── 3. Loop SRE ──────────────────────────────────────────────────────────
+    def sre_state():
+        try:
+            st = _get(RAPHAEL + "/api/sre/loop/status",
+                      {"Authorization": "Bearer " + SECRET})
+            s = st.get("state", st)
+            res = s.get("last_run_result")
+            if res and res not in ("ok", "ok_clean"):
+                warns.append(f"loop SRE last_run_result={res}")
+            return {"last_run_result": res,
+                    "anomalies_last_run": s.get("anomalies_in_last_run"),
+                    "circuit_breaker": s.get("circuit_breaker_open")}
+        except Exception as exc:
+            warns.append(f"raphael /loop/status inalcanzable: {str(exc)[:70]}")
+            return {"error": str(exc)[:120]}
+
+    # ── 4. Runbooks: ¿drenó la consolidación de las 03:00? ───────────────────
+    def runbooks_state():
+        out = {}
+        try:
+            out["total"] = _get(QDRANT + "/collections/sre_runbooks")["result"]["points_count"]
+            body = json.dumps({"limit": 200, "with_payload": True, "with_vector": False,
+                               "filter": {"must": [{"key": "consolidated", "match": {"value": True}}]}}).encode()
+            req = urllib.request.Request(QDRANT + "/collections/sre_runbooks/points/scroll",
+                                         data=body, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=30) as r:  # nosec B310
+                pts = json.loads(r.read())["result"]["points"]
+            out["consolidated"] = len(pts)
+            tipos = {}
+            for p in pts:
+                t = (p.get("payload") or {}).get("issue_type", "?")
+                tipos[t] = tipos.get(t, 0) + 1
+            dup = {t: n for t, n in tipos.items() if n > 1}
+            if dup:
+                warns.append(f"consolidados duplicados por issue_type: {dup}")
+        except Exception as exc:
+            out["error"] = str(exc)[:120]
+        return out
+
+    snap = {
+        "ts":        time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "ollama_gpu": ollama_state(OLLAMA_GPU, "gpu"),
+        "ollama_cpu": ollama_state(OLLAMA_CPU, "cpu"),
+        "pods":       pods_state(),
+        "sre":        sre_state(),
+        "runbooks":   runbooks_state(),
+        "prom": {
+            "context_truncations_24h": _promq("sum(increase(amael_executor_context_truncations_total[24h]))"),
+            "auto_runbooks_24h":       _promq("sum(increase(amael_sre_auto_runbook_saved_total[24h]))"),
+            "llm_off_gpu_24h":         _promq('sum(increase(amael_sre_anomalies_detected_total{issue_type="LLM_MODEL_OFF_GPU"}[24h]))'),
+            "gpu_power_w":             _promq("avg(DCGM_FI_DEV_POWER_USAGE)"),
+            "gpu_temp_c":              _promq("avg(DCGM_FI_DEV_GPU_TEMP)"),
+        },
+        "warns": warns,
+    }
+
+    print("NIGHTWATCH " + json.dumps(snap, ensure_ascii=False))
+    for w in warns:
+        print("WARN " + w)
+    g = snap["ollama_gpu"]
+    modelos = " ".join(f"{m['name']}={m['vram_ratio']:.0%}" for m in g.get("models", [])) or "(ninguno)"
+    print(f"SUMMARY {snap['ts']} pods={snap['pods'].get('running')}/{snap['pods'].get('total')} "
+          f"sre={snap['sre'].get('last_run_result')} runbooks={snap['runbooks'].get('total')} "
+          f"vram[{modelos}] warns={len(warns)}")
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: amael-night-watch
+  namespace: amael-ia
+  labels:
+    app: night-watch
+spec:
+  schedule: "*/15 * * * *"
+  timeZone: "America/Mexico_City"
+  concurrencyPolicy: Forbid
+  # ~15 h de historia a 4 corridas/hora — suficiente para revisar la noche
+  # completa por la mañana con `kubectl logs -l app=night-watch`.
+  successfulJobsHistoryLimit: 60
+  failedJobsHistoryLimit: 10
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 90000   # ~25 h
+      template:
+        metadata:
+          labels:
+            app: night-watch
+        spec:
+          restartPolicy: Never
+          serviceAccountName: watchdog-sa   # read-only, bound a sre-agent-observer
+          containers:
+          - name: night-watch
+            image: registry.richardx.dev/raphael-service:1.1.21
+            command: ["python3", "/scripts/nightwatch.py"]
+            resources:
+              requests: {cpu: "50m",  memory: "128Mi"}
+              limits:   {cpu: "500m", memory: "512Mi"}
+            env:
+            - name: OLLAMA_BASE_URL
+              value: "http://ollama-service:11434"
+            - name: OLLAMA_DEEP_URL
+              value: "http://ollama-cpu-service:11434"
+            - name: QDRANT_URL
+              value: "http://qdrant-service:6333"
+            - name: RAPHAEL_URL
+              value: "http://raphael-service:8002"
+            - name: PROMETHEUS_URL
+              value: "http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090"
+            - name: SRE_NAMESPACE
+              value: "amael-ia"
+            - name: NW_WATCH_MODELS
+              value: "qwen3:14b"
+            - name: INTERNAL_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: google-auth-secret
+                  key: internal_api_secret
+            volumeMounts:
+            - name: script
+              mountPath: /scripts
+          volumes:
+          - name: script
+            configMap:
+              name: night-watch-script

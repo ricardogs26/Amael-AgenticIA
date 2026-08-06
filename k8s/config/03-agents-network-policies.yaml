@@ -41,6 +41,17 @@ spec:
         - port: 8002
           protocol: TCP
 
+    # Night Watch — CronJob de observación nocturna (18-night-watch-cronjob.yaml).
+    # Solo lee /api/sre/loop/status. Sin esta regla el snapshot registraba
+    # "raphael inalcanzable" cada 15 min por timeout de la NetworkPolicy.
+    - from:
+        - podSelector:
+            matchLabels:
+              app: night-watch
+      ports:
+        - port: 8002
+          protocol: TCP
+
     # Backend principal — llama a raphael vía clients/raphael_client.py
     # (proxy de /api/sre/*, /api/k8s-agent, K8S_TOOL step).
     - from:
