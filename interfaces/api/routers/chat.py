@@ -193,8 +193,13 @@ async def chat(
         logger.debug(f"[chat] cache hit user={effective_user!r}")
         _persist_message(conversation_id, effective_user, question, _cached_answer, request_id, "cached")
         asyncio.ensure_future(_store_memory_episode(effective_user, conversation_id, question, _cached_answer))
+        # `intent` y `elapsed_ms` son obligatorios en ChatResponse. Al omitirlos,
+        # CADA cache hit reventaba con ValidationError → HTTP 500. Es decir:
+        # repetir una pregunta devolvía un 500 en vez de la respuesta cacheada.
+        # Detectado el 6-ago-2026 al lanzar la misma consulta 4 veces seguidas.
         return ChatResponse(answer=_cached_answer, response=_cached_answer,
                             conversation_id=conversation_id, request_id=request_id,
+                            intent="cache", elapsed_ms=0.0,
                             dispatch_mode="cache")
 
     # Routing + dispatch

@@ -312,16 +312,36 @@ def _build_tools() -> list:
             v1 = k8s.CoreV1Api()
             ns = ns.strip()
             # Sin namespace específico → revisar todos los monitoreados
+            # Era `_SREAgent._MONITORED_NAMESPACES`: esa clase NO EXISTE, así que
+            # preguntar por pods SIN especificar namespace lanzaba NameError y
+            # devolvía "Error listando pods: name '_SREAgent' is not defined".
+            # La lista es la variable local de arriba. (ruff lo marcaba como F821
+            # y se había descartado como ruido de linter — era un bug real.)
             namespaces_to_check = (
                 [ns] if ns and ns != "default"
-                else _SREAgent._MONITORED_NAMESPACES
+                else _MONITORED_NAMESPACES
             )
             lines = []
             for namespace in namespaces_to_check:
                 try:
                     pods = v1.list_namespaced_pod(namespace=namespace)
                     if pods.items:
-                        lines.append(f"\n📦 **{namespace}**")
+                        # Resumen contado ANTES del detalle. Sin esto la
+                        # herramienta solo devolvía la lista y el LLM tenía que
+                        # contar 40 líneas a mano: medido el 6-ago-2026, a la
+                        # misma pregunta respondía 21, 20 y 8 en tres intentos.
+                        # Contar es determinista — no es trabajo para el modelo.
+                        conteo: dict[str, int] = {}
+                        for p in pods.items:
+                            fase = p.status.phase or "Unknown"
+                            conteo[fase] = conteo.get(fase, 0) + 1
+                        desglose = ", ".join(
+                            f"{n} {f}" for f, n in sorted(conteo.items(), key=lambda x: -x[1])
+                        )
+                        lines.append(
+                            f"\n📦 **{namespace}** — TOTAL: {len(pods.items)} pods "
+                            f"({desglose})"
+                        )
                         for p in pods.items:
                             phase = p.status.phase or "Unknown"
                             restarts = sum(
@@ -330,8 +350,8 @@ def _build_tools() -> list:
                             )
                             icon = "✅" if phase == "Running" and restarts < 5 else ("⚠️" if restarts >= 5 else "❌")
                             lines.append(f"  {icon} {p.metadata.name}: {phase}, restarts={restarts}")
-                except Exception:
-                    lines.append(f"\n⚠️ {namespace}: no accesible")
+                except Exception as exc:
+                    lines.append(f"\n⚠️ {namespace}: no accesible ({exc})")
             return "\n".join(lines) or "No pods encontrados en ningún namespace monitoreado."
         except Exception as exc:
             return f"Error listando pods: {exc}"
@@ -496,7 +516,14 @@ def _build_system_prompt() -> str:
         "5. Problema crítico → Notificar_WhatsApp.\n"
         "6. Memoria de pods: reportar siempre en MB.\n"
         "7. Mencionar siempre el tipo de recurso (CPU o Memoria).\n"
-        "8. Responder DIRECTAMENTE con datos técnicos, sin introducciones ni cortesías.\n\n"
+        "8. Responder DIRECTAMENTE con datos técnicos, sin introducciones ni cortesías.\n"
+        # Listar_Pods ya devuelve una línea "TOTAL: N pods (X Running, Y ...)".
+        # Sin esta regla el modelo contaba las líneas a mano y fallaba: a la
+        # misma pregunta respondía 21, 20 y 8 en tres intentos (6-ago-2026).
+        "9. NUNCA cuentes elementos a mano. Las herramientas devuelven una línea\n"
+        "   'TOTAL: N pods (X Running, Y Succeeded, ...)' — usa ESE número. Si el\n"
+        "   usuario pregunta por pods 'corriendo' o 'en ejecución', responde con el\n"
+        "   contador de Running, no con el total ni con la cantidad que listes.\n\n"
         "FORMATO:\n"
         "Thought: | Action: | Action Input: | Observation:\n"
         "Final Answer: [respuesta detallada]\n\n"
@@ -529,6 +556,50 @@ def _get_langgraph_agent():
     except Exception as exc:
         logger.error(f"[sre.agent] Error compilando LangGraph: {exc}")
     return _langgraph_agent
+
+
+_REACT_MARKERS = ("thought:", "action:", "action input:", "observation:")
+
+
+def _clean_agent_answer(content: str) -> str:
+    """
+    Limpia la salida cruda del agente ReAct antes de devolverla al usuario.
+
+    `messages[-1].content` se devolvía tal cual, y eso filtraba dos cosas
+    (medido el 6-ago-2026 sobre 5 llamadas idénticas):
+      - el prefijo "Final Answer:" en 4 de 5 respuestas
+      - el andamiaje completo del ReAct en 1 de 5:
+        `Thought: | Action: | Action Input: | Observation: {"name": "Listar_Pods"...}`
+
+    Estrategia: si hay "Final Answer:", quedarse con lo que sigue a la ÚLTIMA
+    aparición (el agente puede razonar varias vueltas). Si no la hay y el texto
+    es puro andamiaje, devolver un mensaje honesto en vez de volcar el scratchpad
+    — el usuario no debe ver el monólogo interno del agente.
+    """
+    text = (content or "").strip()
+    if not text:
+        return "Sin respuesta del agente."
+
+    lowered = text.lower()
+    if "final answer:" in lowered:
+        idx = lowered.rfind("final answer:")
+        text = text[idx + len("final answer:"):].strip()
+        if text:
+            return text
+
+    # Sin "Final Answer" — ¿es solo andamiaje?
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    utiles = [
+        ln for ln in lines
+        if not any(ln.lower().startswith(m) for m in _REACT_MARKERS)
+    ]
+    if not utiles:
+        logger.warning("[sre.agent] respuesta descartada: solo andamiaje ReAct")
+        return (
+            "No pude completar la consulta: el agente no llegó a una respuesta "
+            "final. Intenta reformular la pregunta."
+        )
+    return "\n".join(utiles).strip()
 
 
 def query_agent(query: str) -> str:
@@ -568,7 +639,7 @@ def query_agent(query: str) -> str:
             last = messages[-1]
             content = last.content if hasattr(last, "content") else str(last)
             SRE_LANGGRAPH_REQUESTS.labels(result="ok").inc()
-            return content
+            return _clean_agent_answer(content)
         SRE_LANGGRAPH_REQUESTS.labels(result="ok").inc()
         return "Sin respuesta del agente."
     except Exception as exc:

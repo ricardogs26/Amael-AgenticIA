@@ -77,7 +77,20 @@ def handle_k8s_tool(query: str, state: dict[str, Any], tools_map: dict[str, Any]
         EXECUTOR_ERRORS_TOTAL.labels(step_type="K8S_TOOL").inc()
         return "Error: Herramienta K8s no disponible."
 
-    return _retry(k8s_func, query)
+    # El paso del plan es una reescritura del planner y pierde calificadores.
+    # Medido el 6-ago-2026: "¿cuántos pods hay CORRIENDO en amael-ia?" se
+    # convertía en "Contar los pods en el namespace amael-ia", y el agente
+    # respondía 40 (todos los pods) en vez de 21 (los Running) — literalmente
+    # correcto para el paso, pero equivocado para el usuario.
+    # Se manda también la pregunta original para que el agente conserve la
+    # intención. Si por lo que sea no está en el estado, se usa solo el paso.
+    original = (state.get("question") or "").strip()
+    if original and original.lower() != query.strip().lower():
+        full_query = f"{query}\n\n[Pregunta original del usuario]\n{original}"
+    else:
+        full_query = query
+
+    return _retry(k8s_func, full_query)
 
 
 def handle_rag_retrieval(query: str, state: dict[str, Any], tools_map: dict[str, Any]) -> str:
