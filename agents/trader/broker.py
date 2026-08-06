@@ -226,7 +226,11 @@ def get_fees_summary(days: int = 7) -> dict:
         "APCA-API-KEY-ID": os.environ["ALPACA_API_KEY"],
         "APCA-API-SECRET-KEY": os.environ["ALPACA_SECRET_KEY"],
     })
-    acts = _json.load(urllib.request.urlopen(req, timeout=15))
+    # nosec B310 — el esquema es un literal https:// (constante `base`, sin
+    # interpolación de input de usuario); B310 alerta por file:/ o esquemas
+    # personalizados, imposibles aquí. Mismo patrón justificado que en
+    # interfaces/api/routers/chat.py:792.
+    acts = _json.load(urllib.request.urlopen(req, timeout=15))  # nosec B310
     total = sum(abs(float(a.get("net_amount") or 0)) for a in acts)
     out = {"days": days, "total_fees_usd": round(total, 2), "entries": len(acts)}
     try:
