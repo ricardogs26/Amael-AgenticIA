@@ -608,9 +608,16 @@ async def _retrieve_memory_context(user_id: str, question: str) -> str:
     try:
         from agents.base.agent_registry import AgentRegistry
         from core.agent_base import AgentContext
-        ctx    = AgentContext(request_id="memory-retrieve", user_id=user_id)
+        # conversation_id y llm son obligatorios en AgentContext. Omitirlos
+        # lanzaba TypeError que el `except` de abajo se tragaba en un
+        # logger.debug: la memoria llevaba caída en silencio desde siempre.
+        # Zaphkiel no usa el LLM (trabaja con embeddings), de ahí llm=None.
+        ctx    = AgentContext(
+            user_id=user_id, conversation_id="", request_id="memory-retrieve",
+            llm=None, via="memory",
+        )
         agent  = AgentRegistry.get("zaphkiel", ctx)
-        result = await agent.execute({"action": "retrieve", "user_id": user_id, "query": question, "k": 4})
+        result = await agent.run({"action": "retrieve", "user_id": user_id, "query": question, "k": 4})
         if result.success and result.output:
             return result.output.get("context", "")
     except Exception as exc:
@@ -631,9 +638,12 @@ async def _store_memory_episode(
     try:
         from agents.base.agent_registry import AgentRegistry
         from core.agent_base import AgentContext
-        ctx   = AgentContext(request_id="memory-store", user_id=user_id)
+        ctx   = AgentContext(
+            user_id=user_id, conversation_id=conversation_id or "",
+            request_id="memory-store", llm=None, via="memory",
+        )
         agent = AgentRegistry.get("zaphkiel", ctx)
-        await agent.execute({
+        await agent.run({
             "action":          "store",
             "user_id":         user_id,
             "conversation_id": conversation_id,

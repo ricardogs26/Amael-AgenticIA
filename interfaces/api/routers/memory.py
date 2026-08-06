@@ -95,9 +95,14 @@ def _get_zaphkiel(user_id: str):
     try:
         from agents.base.agent_registry import AgentRegistry
         from core.agent_base import AgentContext
+        # conversation_id y llm son obligatorios. Faltaban, así que TODO
+        # /api/memory respondía 503 con el TypeError dentro del detail.
         ctx = AgentContext(
-            request_id=f"memory-api-{user_id[:8]}",
             user_id=user_id,
+            conversation_id="",
+            request_id=f"memory-api-{user_id[:8]}",
+            llm=None,
+            via="memory",
         )
         return AgentRegistry.get("zaphkiel", ctx)
     except Exception as exc:
