@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any
 
@@ -18,6 +19,31 @@ logger = logging.getLogger("agents.productivity.planner")
 
 # Singleton LLM
 _planner_llm = None
+
+
+def _parse_plan(raw: Any) -> dict:
+    """
+    Convierte la respuesta del LLM en el dict del plan.
+
+    `_get_llm()` devuelve un ChatOllama, y `.invoke()` de un modelo de chat
+    responde un `AIMessage`, no una cadena. Pasárselo directo a `json.loads`
+    reventaba con «the JSON object must be str, bytes or bytearray, not
+    AIMessage» y el brief salía como "❌ No se pudo generar un plan válido"
+    — el plan nunca se generó por esta vía.
+
+    Se acepta también una cadena por si el factory vuelve a un LLM de
+    completado, y se extrae el objeto JSON aunque el modelo lo envuelva en
+    prosa o en un bloque ```json.
+    """
+    text = getattr(raw, "content", raw)
+    if isinstance(text, list):  # algunos modelos responden en bloques
+        text = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in text)
+    if not isinstance(text, str):
+        text = str(text)
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        raise ValueError(f"sin JSON en la respuesta del LLM: {text[:200]}")
+    return json.loads(m.group(0))
 
 
 def _get_llm():
@@ -135,7 +161,7 @@ async def organize_day_for_user(user_email: str) -> dict[str, Any]:
             future = ex.submit(_get_llm().invoke, prompt)
             raw    = future.result(timeout=60)
 
-        plan_data = json.loads(raw)
+        plan_data = _parse_plan(raw)
     except concurrent.futures.TimeoutError:
         logger.warning(f"[planner] LLM timeout para {user_email}")
         return {
