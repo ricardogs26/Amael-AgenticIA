@@ -109,7 +109,13 @@ def _fetch_auto_runbooks_by_type() -> dict[str, list[dict]]:
                 if p.get("consolidated"):
                     continue
                 groups.setdefault(issue_type, []).append({
-                    "id":            str(point.id),
+                    # NO convertir a str: los IDs de esta colección son enteros
+                    # y PointIdsList(["1","2"]) no coincide con nada. Qdrant
+                    # acepta el delete sin error y no borra nada, así que el log
+                    # decía "borrados 10 individuales" mientras el contador no
+                    # bajaba — y cada corrida creaba OTRO consolidado del mismo
+                    # issue_type (llegaron a 2 por tipo). Detectado 6-ago-2026.
+                    "id":            point.id,
                     "text":          p.get("text", ""),
                     "resource_name": p.get("resource_name", ""),
                     "namespace":     p.get("namespace", ""),
@@ -224,7 +230,41 @@ def _save_consolidated_runbook(issue_type: str, text: str, source_count: int) ->
         return False
 
 
-def _delete_runbook_points(point_ids: list[str]) -> None:
+def _delete_previous_consolidated(issue_type: str) -> int:
+    """
+    Borra los consolidados previos de un issue_type. Retorna cuántos eliminó.
+
+    La consolidación es idempotente por diseño: cada corrida produce EL runbook
+    consolidado del tipo, no uno más. Sin esto la colección acumula versiones.
+    """
+    try:
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        client = QdrantClient(url=_QDRANT_URL)
+        result, _ = client.scroll(
+            collection_name=_SRE_RUNBOOKS_COLLECTION,
+            scroll_filter=Filter(must=[
+                FieldCondition(key="consolidated", match=MatchValue(value=True)),
+                FieldCondition(key="issue_type",   match=MatchValue(value=issue_type)),
+            ]),
+            limit=100,
+            with_payload=False,
+            with_vectors=False,
+        )
+        ids = [pt.id for pt in result]
+        if ids:
+            _delete_runbook_points(ids)
+            logger.info(
+                f"[consolidator] {issue_type}: retirados {len(ids)} consolidados previos"
+            )
+        return len(ids)
+    except Exception as exc:
+        logger.warning(f"[consolidator] Error retirando consolidados previos: {exc}")
+        return 0
+
+
+def _delete_runbook_points(point_ids: list) -> None:
     try:
         from qdrant_client import QdrantClient
         from qdrant_client.models import PointIdsList
@@ -277,6 +317,12 @@ def run_consolidation() -> None:
         if not consolidated_text:
             logger.warning(f"[consolidator] LLM falló para {issue_type}. Saltando.")
             continue
+
+        # Retirar el consolidado anterior de este issue_type antes de crear el
+        # nuevo: si no, cada corrida deja uno más y search_runbooks() empieza a
+        # devolver varias versiones del mismo runbook. Llegaron a 2 por tipo
+        # mientras el borrado estuvo roto (ver nota sobre los IDs arriba).
+        _delete_previous_consolidated(issue_type)
 
         saved = _save_consolidated_runbook(
             issue_type=issue_type,
