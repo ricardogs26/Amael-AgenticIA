@@ -407,6 +407,13 @@ def _ensure_schema() -> None:
                     updated_at   TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            # Opt-in explícito al brief diario. Por default NADIE lo recibe:
+            # estar dado de alta en la plataforma no es haber pedido un mensaje
+            # de WhatsApp a las 7am. Se activa cuando la persona lo solicita.
+            cur.execute("""
+                ALTER TABLE user_profile
+                ADD COLUMN IF NOT EXISTS daily_brief_enabled BOOLEAN NOT NULL DEFAULT FALSE
+            """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS user_identities (
                     id                SERIAL PRIMARY KEY,

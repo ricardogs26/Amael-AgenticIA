@@ -22,6 +22,10 @@ logger = logging.getLogger("interfaces.api.planner")
 
 router = APIRouter(prefix="/api/planner", tags=["planner"])
 
+# Usuario de servicio: existe para que el bridge y los CronJobs firmen JWT, no
+# es una persona con calendario ni con WhatsApp.
+_BOT_USER = "bot-amael@richardx.dev"
+
 
 class PlannerResult(BaseModel):
     processed: int
@@ -72,7 +76,21 @@ async def run_daily_planner() -> PlannerResult:
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT user_id FROM user_profile WHERE status = 'active'")
+                # Solo quien PIDIÓ el brief. Antes bastaba con estar activo, así
+                # que la plataforma le mandaba un WhatsApp a las 7am a gente que
+                # nunca lo solicitó — y por el bug del teléfono (ver
+                # _send_brief_whatsapp) todos esos mensajes caían en el número
+                # del admin. El bot de servicio no es una persona: no recibe nada.
+                cur.execute(
+                    """
+                    SELECT user_id FROM user_profile
+                    WHERE status = 'active'
+                      AND daily_brief_enabled = TRUE
+                      AND user_id <> %s
+                    ORDER BY user_id
+                    """,
+                    (_BOT_USER,),
+                )
                 rows = cur.fetchall()
                 user_emails = [r[0] for r in rows if "@" in (r[0] or "")]
     except Exception as exc:
@@ -103,8 +121,16 @@ async def run_daily_planner() -> PlannerResult:
 
 def _send_brief_whatsapp(user_email: str, summary: str) -> None:
     """
-    Envía el brief del día al número WhatsApp del usuario (best-effort).
-    Busca el número de teléfono del usuario en user_identities.
+    Envía el brief del día al WhatsApp del usuario (best-effort).
+
+    El tipo de identidad es 'whatsapp' — es lo que escribe el bridge. Antes se
+    consultaba 'phone', un tipo que NADIE escribe: la consulta no devolvía nada
+    nunca y los seis briefs caían al fallback `admin_phone`. O sea que el
+    resumen de calendario y correo de cada persona se entregaba en el teléfono
+    del admin en vez del suyo, cada día laborable a las 7am.
+
+    Por eso ya no hay fallback: sin número propio no se manda nada. Entregar el
+    brief de alguien más al admin es peor que no entregarlo.
     """
     import httpx
 
@@ -112,15 +138,19 @@ def _send_brief_whatsapp(user_email: str, summary: str) -> None:
     from storage.postgres.client import get_connection
 
     try:
-        # Buscar número de teléfono en user_identities
         phone: str | None = None
         with get_connection() as conn:
             with conn.cursor() as cur:
+                # ORDER BY id: hay usuarios con más de un número registrado y un
+                # LIMIT 1 sin orden devuelve una fila arbitraria — el brief se
+                # iría un día a un número y otro día a otro. Gana el primero
+                # que se dio de alta.
                 cur.execute(
                     """
                     SELECT identity_value FROM user_identities
                     WHERE canonical_user_id = %s
-                      AND identity_type = 'phone'
+                      AND identity_type = 'whatsapp'
+                    ORDER BY id
                     LIMIT 1
                     """,
                     (user_email,),
@@ -130,11 +160,9 @@ def _send_brief_whatsapp(user_email: str, summary: str) -> None:
                     phone = row[0]
 
         if not phone:
-            # Fallback: ADMIN_PHONE desde settings
-            phone = getattr(settings, "admin_phone", None)
-
-        if not phone:
-            logger.warning(f"[planner] No se encontró teléfono para {user_email}, omitiendo WhatsApp")
+            logger.warning(
+                f"[planner] {user_email} pidió el brief pero no tiene WhatsApp "
+                f"registrado — omitido (no se redirige a nadie más)")
             return
 
         wa_url = getattr(settings, "whatsapp_bridge_url", "http://whatsapp-bridge-service:3000")
