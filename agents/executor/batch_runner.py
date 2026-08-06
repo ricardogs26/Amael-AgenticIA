@@ -13,8 +13,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from langchain_ollama import ChatOllama
-
 from agents.executor.step_handlers import STEP_HANDLERS
 from observability.metrics import (
     EXECUTOR_BACKPRESSURE_QUEUE_DEPTH,
@@ -25,7 +23,6 @@ from observability.metrics import (
     EXECUTOR_PARALLEL_BATCHES_TOTAL,
     EXECUTOR_STEP_LATENCY_SECONDS,
     EXECUTOR_STEPS_TOTAL,
-    LLM_TOKENS_TOTAL,
 )
 from observability.tracing import tracer
 
@@ -37,8 +34,8 @@ MAX_ANSWER_CHARS = 8_000
 # Pattern para tags de media embebidos (imágenes Grafana, etc.)
 _MEDIA_PATTERN = re.compile(r"\[MEDIA:[^\]]+\]", re.DOTALL)
 
-# Singleton LLM para REASONING — ChatOllama para control de idioma via SystemMessage
-_llm_reasoning: ChatOllama | None = None
+# Singleton LLM para REASONING
+_llm_reasoning = None
 
 # Backpressure: límite de llamadas LLM/herramientas concurrentes
 # Evita que un burst de requests simultáneos sature Ollama o agote threads
@@ -49,36 +46,15 @@ _pending_steps = 0
 _pending_lock = threading.Lock()
 
 
-def _track_llm_tokens(response, model: str, input_text: str, agent: str = "reasoning") -> None:
-    """Registra tokens de entrada y salida en LLM_TOKENS_TOTAL."""
-    try:
-        usage = getattr(response, "usage_metadata", None)
-        if usage:
-            input_tokens = usage.get("input_tokens", 0)
-            output_tokens = usage.get("output_tokens", 0)
-        else:
-            # Estimación: chars / 4
-            input_tokens = len(input_text) // 4
-            output_content = getattr(response, "content", "") or ""
-            output_tokens = len(output_content) // 4
-        LLM_TOKENS_TOTAL.labels(model=model, token_type="input", agent=agent).inc(input_tokens)
-        LLM_TOKENS_TOTAL.labels(model=model, token_type="output", agent=agent).inc(output_tokens)
-    except Exception:
-        pass
-
 
 _LLM_REASONING_TIMEOUT = 90  # segundos — evita thread starvation si Ollama está lento
 
 
-def _get_llm_reasoning() -> ChatOllama:
+def _get_llm_reasoning():
     global _llm_reasoning
     if _llm_reasoning is None:
-        from config.settings import settings
-        _llm_reasoning = ChatOllama(
-            model=settings.llm_model,
-            base_url=settings.ollama_base_url,
-            request_timeout=_LLM_REASONING_TIMEOUT,
-        )
+        from agents.base.llm_factory import get_chat_llm
+        _llm_reasoning = get_chat_llm(timeout=_LLM_REASONING_TIMEOUT)
     return _llm_reasoning
 
 
@@ -277,14 +253,13 @@ def run_reasoning_step(
     estimated_tokens = (len(system_prompt) + len(human_prompt)) // 4
     EXECUTOR_ESTIMATED_PROMPT_TOKENS.labels(step_type="REASONING").observe(estimated_tokens)
 
+    from agents.base.llm_factory import llm_agent_context
     llm = _get_llm_reasoning()
-    from config.settings import settings as _settings
-    _model = _settings.llm_model
+    llm_agent_context.set("reasoning")
     response = llm.invoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=human_prompt),
     ])
-    _track_llm_tokens(response, _model, system_prompt + human_prompt)
     new_answer = response.content if hasattr(response, "content") else str(response)
 
     # Post-traducción: si el idioma de destino es español pero la respuesta no lo es,
@@ -294,12 +269,11 @@ def run_reasoning_step(
     _target_es = (pref_lang == "es") or (_detect_language(user_question) == "es" if user_question else False)
     if _target_es and _detect_language(new_answer) != "es":
         logger.info("[executor] Respuesta en inglés detectada para pregunta en español — traduciendo")
-        trans_input = new_answer
+        llm_agent_context.set("translation")
         trans_response = llm.invoke([
             SystemMessage(content="Eres un traductor experto de inglés a español. Traduce el siguiente texto al español de forma natural y fluida, conservando el formato (bloques de código, listas, etc.) exactamente igual."),
             HumanMessage(content=new_answer),
         ])
-        _track_llm_tokens(trans_response, _model, trans_input, agent="translation")
         new_answer = trans_response.content if hasattr(trans_response, "content") else str(trans_response)
 
     if all_media:

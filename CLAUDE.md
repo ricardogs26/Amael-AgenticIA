@@ -183,6 +183,90 @@ Full list in `config/settings.py`.
 
 ---
 
+## SRE Runbooks — 3 Niveles
+
+La colección `sre_runbooks` en Qdrant tiene 3 capas de contenido:
+
+| Nivel | Origen | Cuándo | Flag Qdrant | Archivo |
+|-------|--------|--------|-------------|---------|
+| **0 — Estáticos** | 15 archivos `.md` en `runbooks/` | Al arrancar (colección vacía) | `auto_generated=False` | `agent.py:init_runbooks_qdrant()` |
+| **1 — Auto-generados** | LLM tras cada remediación exitosa (6 secciones: Descripción, Síntomas, Causa raíz, Remediación, Detección temprana, Prevención) | Post-ROLLOUT_RESTART exitoso | `auto_generated=True, bootstrapped=False` | `diagnoser.py:maybe_save_runbook_entry()` |
+| **2 — Bootstrap** | LLM genera runbook preventivo por workload K8s descubierto (Deployments, StatefulSets, DaemonSets, CronJobs) | Al arrancar, 60s delay, una vez (Redis lock `sre:bootstrap_lock` TTL 1h + Qdrant umbral ≥5) | `auto_generated=True, bootstrapped=True` | `agent.py:bootstrap_runbooks_from_cluster()` |
+| **3 — Consolidados** | LLM sintetiza N runbooks del mismo `issue_type` en uno enriquecido con patrones aprendidos | Diario 03:00 UTC (APScheduler cron job `runbook_consolidation`) | `auto_generated=True, consolidated=True, consolidated_from=N` | `runbook_consolidator.py:run_consolidation()` |
+
+**Umbrales Nivel 3**: `MIN_RUNBOOKS_TO_CONSOLIDATE = 3`, `MAX_RUNBOOKS_PER_TYPE = 10`.
+
+**Trigger manual de consolidación:**
+```bash
+kubectl exec -n amael-ia deploy/amael-agentic-deployment -- python3 -c "
+from agents.sre.runbook_consolidator import run_consolidation
+run_consolidation()
+"
+```
+
+**Limpiar bootstrap para forzar re-run (nuevo cluster):**
+```bash
+kubectl exec -n amael-ia $(kubectl get pod -n amael-ia -l app=redis -o name | head -1) -- redis-cli DEL sre:bootstrap_lock
+```
+
+---
+
+## Token Tracking & Cost Estimation
+
+Implementado en `v1.10.49`. Todos los proveedores LLM registran tokens automáticamente via callback.
+
+### Arquitectura
+
+- **`agents/base/llm_factory.py`**:
+  - `llm_agent_context: ContextVar[str]` — identifica qué agente hace cada llamada LLM (sin cambiar firmas de funciones)
+  - `TokenTrackingCallback(BaseCallbackHandler)` — singleton registrado en todos los providers, intercepta `on_llm_end`
+  - Soporta 3 formatos de respuesta: `llm_output["token_usage"]`, `usage_metadata` (mensajes), `generation_info` (Ollama `prompt_eval_count`/`eval_count`)
+  - `_COST_PER_MILLION` — tabla de costos USD/M tokens para 15 modelos (Anthropic, OpenAI, Google, Groq, Ollama=0)
+
+- **`observability/metrics.py`**:
+  - `amael_llm_tokens_total{model, token_type, agent}` — counter de tokens input/output
+  - `amael_llm_cost_usd_total{model, agent}` — costo acumulado en USD
+  - `amael_llm_calls_total{model, agent}` — número de llamadas
+
+- **`GET /api/llm/usage`** — resumen de uso actual (lee REGISTRY Prometheus directamente):
+  ```json
+  {
+    "total_tokens": {"input": 0, "output": 0},
+    "by_model": {...},
+    "by_agent": {"planner": {...}, "reasoning": {...}, "supervisor": {...}, ...},
+    "calls_by_agent": {...},
+    "price_table": {...}
+  }
+  ```
+
+### Valores de `llm_agent_context` por agente
+
+| Valor | Dónde se setea |
+|-------|---------------|
+| `"planner"` | `agents/planner/agent.py` |
+| `"reasoning"` | `agents/executor/batch_runner.py` (REASONING step) |
+| `"translation"` | `agents/executor/batch_runner.py` (post-traducción) |
+| `"supervisor"` | `agents/supervisor/quality_scorer.py` |
+| `"runbook_l1"` | `agents/sre/diagnoser.py` (post-incident LLM runbook) |
+| `"runbook_l2"` | `agents/sre/agent.py` (bootstrap runbook) |
+| `"runbook_l3"` | `agents/sre/runbook_consolidator.py` (consolidation) |
+| `"sre"` | Diagnóstico SRE general |
+| `"other"` | Default (cualquier llamada no etiquetada) |
+
+### Estimación de presupuesto mensual (baseline con Ollama local)
+
+Con Ollama (`qwen2.5:14b`), el costo es $0 — `_COST_PER_MILLION` retorna 0 para todos los modelos Ollama.
+
+Si se migra a Claude Sonnet 3.5 (`claude-sonnet-3-5`):
+- **Agentes autónomos** (SRE, consolidator): ~15,300 tokens/día → **~$1.38/mes** (costo fijo)
+- **Por mensaje de usuario**: ~4,406 tokens (planner + reasoning + supervisor)
+- **Escalado**: 10 usuarios/día → ~$12/mes | 150/día → ~$138/mes | 1000/día → ~$907/mes
+- Regla: 98% del costo viene de la pipeline de usuario, 2% de agentes autónomos
+
+> Nota: los datos actuales de Prometheus están distorsionados por `amael-demo-oom` (stress pod del POC). Esperar 7 días de operación normal post-demo para tener baseline limpio.
+
+---
+
 ## Known Gotchas
 
 - **`from __future__ import annotations`** is required in files that use forward-referenced type annotations (e.g., `-> List[Anomaly]` before the `Anomaly` dataclass is defined). Missing this causes `NameError` on Python 3.9.
@@ -190,3 +274,5 @@ Full list in `config/settings.py`.
 - **Qdrant `search()` removed in v1.7+**: always use `query_points()`.
 - **WhatsApp bridge** uses `strategy: Recreate` (not RollingUpdate) to avoid Chromium `SingletonLock` on the session PVC.
 - **Ollama restarts**: Use `kubectl delete pod -l app=ollama -n amael-ia` (not `rollout restart`) — RollingUpdate leaves new pod Pending with a single GPU.
+- **Bootstrap Nivel 2 LLM timeout**: El LLM (qwen2.5:14b) compite con el loop SRE (60s interval). El bootstrap usa prompt corto (3 secciones, ~300 tokens), timeout 120s, `executor.shutdown(wait=False)` para no bloquear, y sleep 10s entre workloads. Si aún falla, subir el timeout en `_generate_bootstrap_runbook()`.
+- **Bootstrap duplicado (2 uvicorn workers)**: El Redis SETNX `sre:bootstrap_lock` (TTL 1h) garantiza que solo 1 worker ejecuta el bootstrap. Si ambos ven el lock expirado al mismo tiempo (reinicio), el segundo detecta `bootstrapped=True` en Qdrant (umbral ≥5) y sale.

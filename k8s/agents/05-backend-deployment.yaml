@@ -5,7 +5,7 @@ metadata:
   namespace: amael-ia
   labels:
     app: amael-agentic-backend
-    version: "1.10.53"
+    version: "1.10.62"
 spec:
   replicas: 1
   selector:
@@ -20,7 +20,7 @@ spec:
     metadata:
       labels:
         app: amael-agentic-backend
-        version: "1.10.53"
+        version: "1.10.62"
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port:   "8000"
@@ -64,7 +64,7 @@ spec:
 
       containers:
       - name: amael-agentic-backend
-        image: registry.richardx.dev/amael-agentic-backend:1.10.53
+        image: registry.richardx.dev/amael-agentic-backend:1.10.62
         imagePullPolicy: Always
         ports:
         - name: http
@@ -191,6 +191,18 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+
+        # ── WhatsApp (SRE reporter) ───────────────────────────────────────
+        - name: OWNER_PHONE
+          valueFrom:
+            configMapKeyRef:
+              name: k8s-agent-configmap
+              key: OWNER_PHONE
+        - name: WHATSAPP_BRIDGE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: k8s-agent-configmap
+              key: WHATSAPP_BRIDGE_URL
 
         # ── Recursos ──────────────────────────────────────────────────────
         resources:

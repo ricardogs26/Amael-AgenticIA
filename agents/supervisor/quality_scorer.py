@@ -11,12 +11,10 @@ import time
 from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_ollama import ChatOllama
 from pydantic import BaseModel, ValidationError, field_validator
 
 from agents.supervisor.prompts import SUPERVISOR_SYSTEM_PROMPT
 from observability.metrics import (
-    LLM_TOKENS_TOTAL,
     SUPERVISOR_DECISIONS_TOTAL,
     SUPERVISOR_LATENCY_SECONDS,
     SUPERVISOR_QUALITY_SCORE,
@@ -31,19 +29,14 @@ _FEEDBACK_KEY_PREFIX = "agent_feedback:"
 _FEEDBACK_MAX_ENTRIES = 100
 
 # Singleton LLM (temperatura 0 para evaluación determinística)
-_chat_llm: ChatOllama | None = None
+_chat_llm = None
 
 
-def _get_llm() -> ChatOllama:
+def _get_llm():
     global _chat_llm
     if _chat_llm is None:
-        from config.settings import settings
-        _chat_llm = ChatOllama(
-            model=settings.llm_model,
-            base_url=settings.ollama_base_url,
-            temperature=0,
-            request_timeout=60,
-        )
+        from agents.base.llm_factory import get_chat_llm
+        _chat_llm = get_chat_llm(temperature=0, timeout=60)
     return _chat_llm
 
 
@@ -151,23 +144,13 @@ def evaluate(state: dict, redis_client=None) -> dict:
             HumanMessage(content=evaluation_prompt),
         ]
 
+        from agents.base.llm_factory import llm_agent_context
+        llm_agent_context.set("supervisor")
         t0 = time.time()
         try:
             _sv_resp = _get_llm().invoke(messages)
             SUPERVISOR_LATENCY_SECONDS.observe(time.time() - t0)
             raw = (_sv_resp.content if hasattr(_sv_resp, "content") else str(_sv_resp)).strip()
-            try:
-                from config.settings import settings as _s
-                _model = _s.llm_model
-                _usage = getattr(_sv_resp, "usage_metadata", None)
-                if _usage:
-                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="input", agent="supervisor").inc(_usage.get("input_tokens", 0))
-                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="output", agent="supervisor").inc(_usage.get("output_tokens", 0))
-                else:
-                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="input", agent="supervisor").inc(len(evaluation_prompt) // 4)
-                    LLM_TOKENS_TOTAL.labels(model=_model, token_type="output", agent="supervisor").inc(len(raw) // 4)
-            except Exception:
-                pass
             sv_decision = _parse_decision(raw)
         except Exception as exc:
             logger.error(f"[supervisor] Error invocando LLM: {exc}")

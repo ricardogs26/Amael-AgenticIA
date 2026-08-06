@@ -16,7 +16,6 @@ import time
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_ollama import ChatOllama
 from pydantic import ValidationError
 
 from agents.base.agent_registry import AgentRegistry
@@ -38,22 +37,14 @@ from observability.tracing import tracer
 logger = logging.getLogger("agents.planner")
 
 # ── Singleton LLM a nivel de módulo (no se reinstancia por request) ────────────
-_llm: ChatOllama | None = None
+_llm = None
 
 
-def _get_llm() -> ChatOllama:
+def _get_llm():
     global _llm
     if _llm is None:
-        from config.settings import settings
-        _llm = ChatOllama(
-            model=settings.llm_model,
-            base_url=settings.ollama_base_url,
-            request_timeout=60,
-        )
-        logger.info(
-            f"[planner] ChatOllama inicializado: "
-            f"{settings.llm_model} @ {settings.ollama_base_url}"
-        )
+        from agents.base.llm_factory import get_chat_llm
+        _llm = get_chat_llm(timeout=60)
     return _llm
 
 
@@ -126,6 +117,8 @@ def planner_node(state: dict[str, Any], llm=None) -> dict[str, Any]:
             HumanMessage(content=question),
         ]
 
+        from agents.base.llm_factory import llm_agent_context
+        llm_agent_context.set("planner")
         t0 = time.time()
         _raw_response = _get_llm().invoke(messages)
         PLANNER_LATENCY_SECONDS.observe(time.time() - t0)

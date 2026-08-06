@@ -1,5 +1,6 @@
 """
 LLMFactory — único punto de construcción de instancias LLM y Embeddings.
+Incluye TokenTrackingCallback que registra tokens y costo estimado en Prometheus.
 
 Providers chat soportados:
   ollama     → ChatOllama    (default — requiere OLLAMA_BASE_URL)
@@ -33,9 +34,148 @@ from __future__ import annotations
 
 import logging
 import threading
+from contextvars import ContextVar
 from typing import Any
 
 logger = logging.getLogger("agents.base.llm_factory")
+
+# ── Contexto de agente activo ─────────────────────────────────────────────────
+# Setear antes de llamar al LLM para etiquetar correctamente los tokens.
+# Uso: llm_agent_context.set("planner") antes de llm.invoke(...)
+llm_agent_context: ContextVar[str] = ContextVar("llm_agent_context", default="other")
+
+# ── Precios por millón de tokens (input, output) ──────────────────────────────
+_COST_PER_MILLION: dict[str, tuple[float, float]] = {
+    # Anthropic
+    "claude-sonnet-4-6":          (3.00,  15.00),
+    "claude-sonnet-4-5":          (3.00,  15.00),
+    "claude-haiku-4-5-20251001":  (0.80,   4.00),
+    "claude-haiku-4-5":           (0.80,   4.00),
+    "claude-opus-4-6":            (15.00, 75.00),
+    # OpenAI
+    "gpt-4o":                     (2.50,  10.00),
+    "gpt-4o-mini":                (0.15,   0.60),
+    "gpt-4.1":                    (2.00,   8.00),
+    "gpt-4.1-mini":               (0.40,   1.60),
+    # Google
+    "gemini-2.0-flash":           (0.10,   0.40),
+    "gemini-1.5-pro":             (3.50,  10.50),
+    # Groq (inferencia gratuita / sin costo directo de tokens)
+    "llama-3.3-70b-versatile":    (0.0,    0.0),
+    # Ollama local — siempre 0
+    "qwen2.5:14b":                (0.0,    0.0),
+    "qwen2.5:7b":                 (0.0,    0.0),
+    "llama3.2":                   (0.0,    0.0),
+}
+
+def _get_cost(model: str, input_tok: int, output_tok: int) -> float:
+    """Costo estimado en USD para esta llamada."""
+    # Normalizar: buscar primero coincidencia exacta, luego por prefijo
+    costs = _COST_PER_MILLION.get(model)
+    if costs is None:
+        for key in _COST_PER_MILLION:
+            if model.startswith(key) or key.startswith(model.split(":")[0]):
+                costs = _COST_PER_MILLION[key]
+                break
+    if costs is None:
+        return 0.0
+    input_cost, output_cost = costs
+    return (input_tok * input_cost + output_tok * output_cost) / 1_000_000
+
+
+# ── Token Tracking Callback ───────────────────────────────────────────────────
+
+from langchain_core.callbacks.base import BaseCallbackHandler
+
+
+class TokenTrackingCallback(BaseCallbackHandler):
+    """
+    Callback LangChain que registra tokens y costo estimado en Prometheus.
+    Compatible con ChatOllama, ChatAnthropic, ChatOpenAI, ChatGoogleGenerativeAI, ChatGroq.
+
+    Registra:
+      amael_llm_tokens_total{model, token_type, agent}
+      amael_llm_cost_usd_total{model, agent}
+      amael_llm_calls_total{model, agent}
+    """
+
+    def on_llm_end(self, response: Any, **kwargs: Any) -> None:
+        try:
+            from observability.metrics import LLM_CALLS_TOTAL, LLM_COST_USD_TOTAL, LLM_TOKENS_TOTAL
+
+            model   = self._extract_model(response, kwargs)
+            agent   = llm_agent_context.get()
+            in_tok, out_tok = self._extract_tokens(response)
+
+            if in_tok > 0 or out_tok > 0:
+                LLM_TOKENS_TOTAL.labels(model=model, token_type="input",  agent=agent).inc(in_tok)
+                LLM_TOKENS_TOTAL.labels(model=model, token_type="output", agent=agent).inc(out_tok)
+                cost = _get_cost(model, in_tok, out_tok)
+                if cost > 0:
+                    LLM_COST_USD_TOTAL.labels(model=model, agent=agent).inc(cost)
+
+            LLM_CALLS_TOTAL.labels(model=model, agent=agent).inc()
+
+        except Exception as exc:
+            logger.debug(f"[token_tracking] Error registrando tokens: {exc}")
+
+    def _extract_model(self, response: Any, kwargs: Any) -> str:
+        # Intentar extraer el modelo del llm_output o invocation_params
+        llm_out = getattr(response, "llm_output", {}) or {}
+        model = (
+            llm_out.get("model_name")
+            or llm_out.get("model")
+            or kwargs.get("invocation_params", {}).get("model")
+            or kwargs.get("invocation_params", {}).get("model_name")
+        )
+        if not model:
+            # Fallback: leer directamente de settings (siempre disponible)
+            try:
+                from config.settings import settings
+                model = settings.llm_model
+            except Exception:
+                model = "unknown"
+        return str(model)
+
+    def _extract_tokens(self, response: Any) -> tuple[int, int]:
+        """Extrae (input_tokens, output_tokens) de LLMResult — soporta múltiples formatos."""
+        in_tok = out_tok = 0
+
+        # Formato 1: llm_output["token_usage"] — OpenAI, Groq
+        llm_out = getattr(response, "llm_output", {}) or {}
+        usage = llm_out.get("token_usage") or llm_out.get("usage") or {}
+        if usage:
+            in_tok  = usage.get("input_tokens") or usage.get("prompt_tokens", 0)
+            out_tok = usage.get("output_tokens") or usage.get("completion_tokens", 0)
+            if in_tok or out_tok:
+                return int(in_tok), int(out_tok)
+
+        # Formato 2: generations[0][0].message.usage_metadata — LangChain 0.2+ (Ollama, Anthropic)
+        try:
+            gen = response.generations[0][0]
+            msg = getattr(gen, "message", None)
+            meta = getattr(msg, "usage_metadata", None) or {}
+            if meta:
+                in_tok  = meta.get("input_tokens", 0)
+                out_tok = meta.get("output_tokens", 0)
+                if in_tok or out_tok:
+                    return int(in_tok), int(out_tok)
+        except (IndexError, AttributeError):
+            pass
+
+        # Formato 3: generations[0][0].generation_info — Ollama directo
+        try:
+            gen = response.generations[0][0]
+            info = getattr(gen, "generation_info", {}) or {}
+            in_tok  = info.get("prompt_eval_count", 0)
+            out_tok = info.get("eval_count", 0)
+        except (IndexError, AttributeError):
+            pass
+
+        return int(in_tok), int(out_tok)
+
+
+_token_callback = TokenTrackingCallback()
 
 # Cache de instancias: (provider, model, temperature, timeout) → BaseChatModel
 _chat_cache: dict[tuple, Any] = {}
@@ -83,6 +223,8 @@ def _build_chat_llm(
     timeout: int,
     settings: Any,
 ) -> Any:
+    callbacks = [_token_callback]
+
     if provider == "openai":
         from langchain_openai import ChatOpenAI
 
@@ -91,6 +233,7 @@ def _build_chat_llm(
             temperature=temperature,
             timeout=timeout,
             api_key=settings.llm_api_key,
+            callbacks=callbacks,
         )
         if settings.llm_base_url:
             kwargs["base_url"] = settings.llm_base_url
@@ -103,6 +246,7 @@ def _build_chat_llm(
             model=model,
             temperature=temperature,
             groq_api_key=settings.llm_api_key,
+            callbacks=callbacks,
         )
 
     elif provider == "gemini":
@@ -112,6 +256,7 @@ def _build_chat_llm(
             model=model,
             temperature=temperature,
             google_api_key=settings.llm_api_key,
+            callbacks=callbacks,
         )
 
     elif provider == "anthropic":
@@ -122,6 +267,7 @@ def _build_chat_llm(
             temperature=temperature,
             timeout=timeout,
             api_key=settings.llm_api_key,
+            callbacks=callbacks,
         )
 
     else:  # ollama (default)
@@ -132,6 +278,7 @@ def _build_chat_llm(
             base_url=settings.ollama_base_url,
             temperature=temperature,
             request_timeout=timeout,
+            callbacks=callbacks,
         )
 
 

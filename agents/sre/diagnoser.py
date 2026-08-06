@@ -5,13 +5,20 @@ Migrado desde k8s-agent/main.py:
   diagnose_with_llm()           — diagnóstico LLM con timeout 30s (P2)
   adjust_confidence_with_history() — blending histórico 70/30 (P3-B)
   search_runbooks()             — RAG sobre runbooks en Qdrant (P2)
-  _maybe_save_runbook_entry()   — auto-runbooks en Qdrant (P4-D)
+  maybe_save_runbook_entry()    — auto-runbooks LLM completos en Qdrant (P4-D, Nivel 1)
+
+Nivel 1 — Auto-runbooks generados con LLM:
+  _generate_runbook_with_llm()  — genera Markdown completo (6 secciones, timeout 45s)
+  _fallback_runbook_text()      — runbook mínimo si LLM no disponible
+  maybe_save_runbook_entry()    — orquesta generación + embedding + Qdrant en thread daemon
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+
+from agents.base.llm_factory import llm_agent_context
 
 logger = logging.getLogger("agents.sre.diagnoser")
 
@@ -113,6 +120,7 @@ def diagnose_with_llm(anomaly, vault_knowledge: str = "", metrics_knowledge: str
 
     try:
         import concurrent.futures
+        llm_agent_context.set("sre")
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
             future = ex.submit(_get_diag_llm().invoke, prompt)
             raw = future.result(timeout=30)
@@ -198,47 +206,132 @@ def adjust_confidence_with_history(
     return adjusted
 
 
-def maybe_save_runbook_entry(anomaly, root_cause: str, action_taken: str) -> None:
+def _generate_runbook_with_llm(anomaly, root_cause: str, action_taken: str) -> str:
     """
-    Auto-genera y guarda un runbook en Qdrant si la remediación fue exitosa (P4-D).
-
-    Migrado desde k8s-agent/main.py → _maybe_save_runbook_entry()
+    Usa el LLM para generar un runbook completo en Markdown (timeout 45s).
+    Retorna el texto generado o "" si falla.
     """
-    from observability.metrics import SRE_AUTO_RUNBOOK_SAVED_TOTAL
-
-    entry_text = (
-        f"# Auto-runbook: {anomaly.issue_type}\n\n"
-        f"**Recurso**: {anomaly.namespace}/{anomaly.resource_name}\n"
-        f"**Detalles**: {anomaly.details}\n"
-        f"**Causa raíz**: {root_cause}\n"
+    prompt = (
+        f"Eres un SRE experto. Acabo de resolver exitosamente este incidente en Kubernetes:\n\n"
+        f"**Tipo de anomalía**: {anomaly.issue_type}\n"
+        f"**Namespace/Recurso**: {anomaly.namespace}/{anomaly.resource_name} ({anomaly.resource_type})\n"
+        f"**Detalles observados**: {anomaly.details}\n"
+        f"**Causa raíz identificada**: {root_cause}\n"
         f"**Acción tomada**: {action_taken}\n"
-        f"**Timestamp**: {anomaly.timestamp.isoformat()}\n"
+        f"**Severidad**: {anomaly.severity}\n\n"
+        "Genera un runbook operacional completo en Markdown con exactamente estas secciones:\n\n"
+        "## Descripción\n"
+        "Explica qué es este tipo de problema y cuándo ocurre.\n\n"
+        "## Síntomas\n"
+        "Lista de síntomas observables (logs, métricas, estado de pods).\n\n"
+        "## Causa raíz\n"
+        "Explicación técnica de la causa raíz de este incidente específico.\n\n"
+        "## Pasos de remediación\n"
+        "Pasos numerados para resolver el problema, incluyendo comandos kubectl si aplica.\n\n"
+        "## Detección temprana\n"
+        "Qué alertas o métricas configurar para detectar esto antes de que escale.\n\n"
+        "## Prevención\n"
+        "Cambios de configuración o buenas prácticas para evitar que vuelva a ocurrir.\n\n"
+        "Sé conciso y técnico. No incluyas introducciones ni conclusiones fuera de las secciones."
     )
 
-    embedding = _get_embedding(entry_text)
-    if not embedding:
-        return
-
     try:
-        import uuid
-
-        from qdrant_client import QdrantClient
-        from qdrant_client.models import PointStruct
-
-        client = QdrantClient(url=_QDRANT_URL)
-        point = PointStruct(
-            id=str(uuid.uuid4()),
-            vector=embedding,
-            payload={
-                "text": entry_text,
-                "issue_type": anomaly.issue_type,
-                "namespace": anomaly.namespace,
-                "resource_name": anomaly.resource_name,
-                "auto_generated": True,
-            },
-        )
-        client.upsert(collection_name=_SRE_RUNBOOKS_COLLECTION, points=[point])
-        SRE_AUTO_RUNBOOK_SAVED_TOTAL.inc()
-        logger.info(f"[diagnoser] Auto-runbook guardado para {anomaly.issue_type}")
+        import concurrent.futures
+        llm_agent_context.set("runbook_l1")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(_get_diag_llm().invoke, prompt)
+            raw = future.result(timeout=45)
+            if hasattr(raw, "content"):
+                raw = raw.content
+        return raw.strip()
     except Exception as exc:
-        logger.warning(f"[diagnoser] No se pudo guardar runbook: {exc}")
+        logger.warning(f"[diagnoser] LLM runbook generation falló: {exc}")
+        return ""
+
+
+def _fallback_runbook_text(anomaly, root_cause: str, action_taken: str) -> str:
+    """Runbook mínimo cuando el LLM no está disponible."""
+    return (
+        f"# Auto-runbook: {anomaly.issue_type}\n\n"
+        f"## Descripción\n"
+        f"Incidente de tipo `{anomaly.issue_type}` detectado en `{anomaly.namespace}/{anomaly.resource_name}`.\n\n"
+        f"## Síntomas\n"
+        f"{anomaly.details}\n\n"
+        f"## Causa raíz\n"
+        f"{root_cause}\n\n"
+        f"## Pasos de remediación\n"
+        f"1. Acción ejecutada automáticamente: `{action_taken}`\n\n"
+        f"## Detección temprana\n"
+        f"Monitorear el recurso `{anomaly.resource_name}` en namespace `{anomaly.namespace}`.\n\n"
+        f"## Prevención\n"
+        f"Revisar la configuración del recurso afectado.\n\n"
+        f"*Generado automáticamente — {anomaly.timestamp.isoformat()}*\n"
+    )
+
+
+def maybe_save_runbook_entry(anomaly, root_cause: str, action_taken: str) -> None:
+    """
+    Auto-genera un runbook completo con LLM y lo guarda en Qdrant (P4-D, Nivel 1).
+
+    El LLM genera un documento Markdown estructurado con secciones:
+    Descripción, Síntomas, Causa raíz, Remediación, Detección temprana, Prevención.
+    Si el LLM falla, se guarda un runbook mínimo como fallback.
+    Corre en un thread daemon para no bloquear el loop SRE.
+    """
+    import threading
+
+    def _do_save():
+        from observability.metrics import SRE_AUTO_RUNBOOK_SAVED_TOTAL
+
+        # Intentar runbook completo con LLM; caer a formato mínimo si falla
+        runbook_text = _generate_runbook_with_llm(anomaly, root_cause, action_taken)
+        if not runbook_text:
+            runbook_text = _fallback_runbook_text(anomaly, root_cause, action_taken)
+            logger.info(f"[diagnoser] Usando runbook fallback para {anomaly.issue_type}")
+
+        # Encabezado con metadatos para búsqueda semántica
+        full_text = (
+            f"# Runbook: {anomaly.issue_type} — {anomaly.resource_name}\n"
+            f"*Namespace: {anomaly.namespace} | Acción: {action_taken} | "
+            f"Generado: {anomaly.timestamp.isoformat()}*\n\n"
+            + runbook_text
+        )
+
+        embedding = _get_embedding(full_text)
+        if not embedding:
+            logger.warning(f"[diagnoser] Embedding falló — runbook no guardado para {anomaly.issue_type}")
+            return
+
+        try:
+            import uuid
+            from qdrant_client import QdrantClient
+            from qdrant_client.models import PointStruct
+
+            client = QdrantClient(url=_QDRANT_URL)
+            point = PointStruct(
+                id=str(uuid.uuid4()),
+                vector=embedding,
+                payload={
+                    "text": full_text,
+                    "issue_type": anomaly.issue_type,
+                    "namespace": anomaly.namespace,
+                    "resource_name": anomaly.resource_name,
+                    "resource_type": anomaly.resource_type,
+                    "action_taken": action_taken,
+                    "severity": anomaly.severity,
+                    "auto_generated": True,
+                    "llm_generated": bool(runbook_text),
+                    "timestamp": anomaly.timestamp.isoformat(),
+                },
+            )
+            client.upsert(collection_name=_SRE_RUNBOOKS_COLLECTION, points=[point])
+            SRE_AUTO_RUNBOOK_SAVED_TOTAL.inc()
+            logger.info(
+                f"[diagnoser] Runbook {'LLM' if bool(runbook_text) else 'fallback'} "
+                f"guardado para {anomaly.issue_type}/{anomaly.resource_name}"
+            )
+        except Exception as exc:
+            logger.warning(f"[diagnoser] No se pudo guardar runbook en Qdrant: {exc}")
+
+    t = threading.Thread(target=_do_save, daemon=True)
+    t.start()

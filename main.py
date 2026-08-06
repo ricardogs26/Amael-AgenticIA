@@ -214,18 +214,25 @@ def create_app() -> FastAPI:
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.session_secret_key,
-        https_only=True,
+        https_only=not settings.is_development,
         same_site="lax",
     )
 
     # ── CORS ──────────────────────────────────────────────────────────────────
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[
+    import os as _os
+    _allowed_origins_env = _os.environ.get("ALLOWED_ORIGINS", "")
+    _allowed_origins = (
+        [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
+        if _allowed_origins_env
+        else [
             "https://amael-ia.richardx.dev",
             "http://localhost:3000",
             "http://localhost:8501",
-        ],
+        ]
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -416,14 +423,17 @@ def _warmup_ollama_models() -> None:
     import os
     import urllib.request
 
-    ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
-    llm_model  = os.environ.get("LLM_MODEL",       "qwen2.5:14b")
-    embed_model = os.environ.get("LLM_EMBED_MODEL", "nomic-embed-text")
+    ollama_url   = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
+    llm_provider = os.environ.get("LLM_PROVIDER",   "ollama")
+    llm_model    = os.environ.get("LLM_MODEL",       "qwen2.5:14b")
+    embed_model  = os.environ.get("LLM_EMBED_MODEL", "nomic-embed-text")
 
-    for model, endpoint, payload in [
-        (llm_model,   "/api/generate",   f'{{"model":"{llm_model}","prompt":"","stream":false}}'),
-        (embed_model, "/api/embeddings",  f'{{"model":"{embed_model}","prompt":"warmup"}}'),
-    ]:
+    # Solo calentar el modelo LLM cuando el proveedor es ollama
+    warmup_targets = [(embed_model, "/api/embeddings", f'{{"model":"{embed_model}","prompt":"warmup"}}')]
+    if llm_provider == "ollama":
+        warmup_targets.insert(0, (llm_model, "/api/generate", f'{{"model":"{llm_model}","prompt":"","stream":false}}'))
+
+    for model, endpoint, payload in warmup_targets:
         try:
             req = urllib.request.Request(
                 f"{ollama_url}{endpoint}",

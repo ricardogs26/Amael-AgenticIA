@@ -136,7 +136,18 @@ LLM_TOKENS_TOTAL = Counter(
     "Total de tokens procesados por el LLM",
     ["model", "token_type", "agent"],
     # token_type: input | output
-    # agent: planner | supervisor | reasoning | translation | llm_utils | sre | other
+    # agent: planner | supervisor | reasoning | translation | sre | devops | bootstrap | consolidator | other
+)
+LLM_COST_USD_TOTAL = Counter(
+    "amael_llm_cost_usd_total",
+    "Costo estimado acumulado en USD por llamadas al LLM",
+    ["model", "agent"],
+    # Solo cloud providers tienen costo > 0. Ollama/local = 0.
+)
+LLM_CALLS_TOTAL = Counter(
+    "amael_llm_calls_total",
+    "Total de llamadas al LLM por modelo y agente",
+    ["model", "agent"],
 )
 LLM_LATENCY_SECONDS = Histogram(
     "amael_llm_latency_seconds",
@@ -301,6 +312,55 @@ SRE_LANGGRAPH_REQUESTS = Counter(
     "Requests al agente LangGraph del SRE (modo conversacional)",
     ["result"],   # ok | fallback | error
 )
+
+# ── GitOps / Camael ───────────────────────────────────────────────────────────
+GITOPS_HANDOFF_TOTAL = Counter(
+    "amael_gitops_handoff_total",
+    "Handoffs Raphael→Camael iniciados por el SRE agent",
+    ["issue_type"],
+)
+GITOPS_PR_CREATED_TOTAL = Counter(
+    "amael_gitops_pr_created_total",
+    "Pull Requests creados automáticamente por Camael en Bitbucket",
+    ["issue_type"],
+)
+GITOPS_PR_MERGED_TOTAL = Counter(
+    "amael_gitops_pr_merged_total",
+    "Pull Requests mergeados por Camael tras aprobación humana",
+    ["issue_type"],
+)
+GITOPS_PR_REJECTED_TOTAL = Counter(
+    "amael_gitops_pr_rejected_total",
+    "Pull Requests rechazados por el operador",
+    ["issue_type"],
+)
+
+# Pre-inicializar labels conocidos para que Prometheus siempre scrape estas series,
+# incluso si el pod reinicia antes de que ocurra el primer evento.
+for _issue in ("OOM_KILLED", "CRASH_LOOP", "DEPLOYMENT_DEGRADED", "HIGH_MEMORY"):
+    GITOPS_HANDOFF_TOTAL.labels(issue_type=_issue)
+    GITOPS_PR_CREATED_TOTAL.labels(issue_type=_issue)
+    GITOPS_PR_MERGED_TOTAL.labels(issue_type=_issue)
+    GITOPS_PR_REJECTED_TOTAL.labels(issue_type=_issue)
+
+# SRE — verificaciones y rollbacks
+for _r in ("healthy", "unhealthy", "error"):
+    SRE_VERIFICATION_TOTAL.labels(result=_r)
+for _r in ("ok", "error"):
+    SRE_ROLLBACK_TOTAL.labels(result=_r)
+
+# SRE — tendencias predictivas (P5-A)
+for _t in ("DISK_EXHAUSTION_PREDICTED", "MEMORY_LEAK_PREDICTED", "ERROR_RATE_ESCALATING"):
+    SRE_TREND_ANOMALIES_TOTAL.labels(issue_type=_t)
+
+# SRE — comandos WhatsApp
+for _cmd in ("estado", "incidents", "slo", "status", "grafana", "postmortems",
+             "maintenance", "ayuda", "pr", "sn"):
+    SRE_WA_COMMANDS_TOTAL.labels(command=_cmd)
+
+# SRE — SLO violations (handlers del SLO config)
+for _svc in ("/api/chat", "/api/k8s-agent", "/api/conversations"):
+    SRE_SLO_VIOLATIONS_TOTAL.labels(service=_svc)
 
 # ── Skills ────────────────────────────────────────────────────────────────────
 SKILL_EXECUTIONS_TOTAL = Counter(

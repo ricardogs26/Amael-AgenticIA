@@ -129,7 +129,8 @@ class CamaelAgent(BaseAgent):
         # Detectar APROBAR / RECHAZAR para el flujo human-in-the-loop
         approval = _detect_approval(query)
         if approval:
-            return await self._handle_approval_keyword(approval, user_email)
+            action, pr_id = approval
+            return await self._handle_approval_keyword(action, user_email, pr_id=pr_id)
 
         rag_ctx = await retrieve_rag_context(user_email, query, k=3, agent_name=self.name)
         prompt  = build_prompt(
@@ -151,25 +152,42 @@ class CamaelAgent(BaseAgent):
                                error=str(exc))
 
     async def _handle_approval_keyword(
-        self, action: str, user_email: str
+        self, action: str, user_email: str, pr_id: int | None = None
     ) -> AgentResult:
         """
-        Detecta APROBAR/RECHAZAR en el chat y ejecuta gitops_approve
-        buscando el PR pendiente más reciente en Redis.
+        Detecta APROBAR/RECHAZAR en el chat y ejecuta gitops_approve.
+        Si pr_id se proporciona, busca el PR específico en Redis.
+        Si no, toma el PR más reciente disponible.
         """
-        incident_key = _get_latest_pending_pr_key()
-        if not incident_key:
-            return AgentResult(
-                success=True,
-                output={
-                    "response": (
-                        "No encontré ningún PR pendiente de aprobación. "
-                        "Puede que haya expirado (10 min) o ya fue procesado."
-                    ),
-                    "source": "camael",
-                },
-                agent_name=self.name,
-            )
+        if pr_id is not None:
+            incident_key = _get_pending_pr_key_by_id(pr_id)
+            if not incident_key:
+                return AgentResult(
+                    success=True,
+                    output={
+                        "response": (
+                            f"No encontré ningún PR #{pr_id} pendiente. "
+                            "Puede que haya expirado o ya fue procesado. "
+                            "Usa /devops pr para ver los PRs activos."
+                        ),
+                        "source": "camael",
+                    },
+                    agent_name=self.name,
+                )
+        else:
+            incident_key = _get_latest_pending_pr_key()
+            if not incident_key:
+                return AgentResult(
+                    success=True,
+                    output={
+                        "response": (
+                            "No encontré ningún PR pendiente de aprobación. "
+                            "Puede que haya expirado (2h) o ya fue procesado."
+                        ),
+                        "source": "camael",
+                    },
+                    agent_name=self.name,
+                )
         return await self._gitops_approve(
             {"incident_key": incident_key, "action": action, "user_id": user_email}
         )
@@ -400,21 +418,46 @@ class CamaelAgent(BaseAgent):
             logger.info(f"[camael] GitOps fix — leyendo {fix.file_path} de {repo}")
             yaml_content = await bb.read_file(workspace, repo, fix.file_path, "main")
 
-            # 2. Aplicar patch
-            patched_content = fix.patch_fn(yaml_content)
+            # 2. Análisis agentic — Camael razona la estrategia óptima de fix
+            logger.info(f"[camael] Analizando incidente con LLM...")
+            from agents.devops.camael_analyzer import analyze_and_decide
+            decision = await analyze_and_decide(
+                issue_type    = issue_type,
+                resource_name = resource_name,
+                namespace     = namespace,
+                yaml_content  = yaml_content,
+                diagnosis     = details,
+                confidence    = task.get("confidence", 0.0),
+                incident_key  = incident_key,
+            )
+            logger.info(
+                f"[camael] Decisión LLM: x{decision.multiplier:.1f} "
+                f"({decision.current_limit}→{decision.proposed_limit}), "
+                f"risk={decision.risk_level}, temporal={decision.is_temporary}"
+            )
+
+            # 3. Aplicar patch con el multiplicador decidido por el LLM
+            from agents.sre.bug_library import _patch_memory_limit
+            patched_content = _patch_memory_limit(yaml_content, multiplier=decision.multiplier)
+            if patched_content == yaml_content:
+                # Fallback al patch original si el LLM-driven no funcionó
+                patched_content = fix.patch_fn(yaml_content)
             if patched_content == yaml_content:
                 logger.warning("[camael] El patch no modificó el archivo — revisar regex")
 
-            # 3. Crear branch
+            # 4. Crear branch (usa el tipo de issue para el nombre)
             branch_name = f"{fix.branch_prefix}-{datetime.now().strftime('%m%d-%H%M%S')}"
             logger.info(f"[camael] Creando branch '{branch_name}'")
             await bb.create_branch(workspace, repo, branch_name, from_branch="main")
 
-            # 4. Commit del archivo parchado
+            # 5. Commit con mensaje que refleja el razonamiento
+            pr_title = decision.pr_title or fix.pr_title
             commit_message = (
-                f"{fix.pr_title}\n\n"
+                f"{pr_title}\n\n"
                 f"Incidente: {incident_key}\n"
                 f"Recurso: {namespace}/{resource_name}\n"
+                f"Fix: {decision.current_limit} → {decision.proposed_limit} (x{decision.multiplier:.1f})\n"
+                f"Razonamiento: {decision.reasoning[:200]}\n"
                 f"Generado por: Camael (DevOps Agent)"
             )
             logger.info(f"[camael] Commiteando {fix.file_path} en '{branch_name}'")
@@ -424,14 +467,14 @@ class CamaelAgent(BaseAgent):
                 author="Camael DevOps Agent <camael@amael-ia.richardx.dev>",
             )
 
-            # 5. Crear Pull Request
-            pr_body = fix.pr_body_tpl.format(
+            # 6. Crear Pull Request con descripción generada por LLM
+            pr_body = decision.pr_body or fix.pr_body_tpl.format(
                 namespace=namespace,
                 resource=resource_name,
                 incident_key=incident_key,
                 details=details[:300],
             )
-            logger.info(f"[camael] Creando PR '{fix.pr_title}'")
+            logger.info(f"[camael] Creando PR '{pr_title}'")
             pr_data = await bb.create_pr(
                 workspace, repo,
                 title=fix.pr_title,
@@ -448,17 +491,20 @@ class CamaelAgent(BaseAgent):
             rfc_info = {"sys_id": "", "number": "N/A", "url": ""}
             if sn.is_configured():
                 try:
+                    # Buscar Change Model de Emergency (controla type=emergency en SN)
+                    emergency_model = await sn.get_emergency_chg_model()
                     rfc_payload = build_emergency_rfc(
                         issue_type   = issue_type,
                         pod_name     = resource_name,
                         namespace    = namespace,
                         incident_key = incident_key,
-                        fix_summary  = fix.pr_title,
+                        fix_summary  = pr_title,
                         branch_name  = branch_name,
                         pr_url       = pr_url,
                         pr_id        = pr_id,
                         confidence   = task.get("confidence", 0.0),
                         detected_at  = task.get("detected_at", ""),
+                        chg_model    = emergency_model,
                     )
                     rfc_info = await sn.create_rfc(rfc_payload)
                     # Actualizar RFC con link al PR de Bitbucket
@@ -502,13 +548,27 @@ class CamaelAgent(BaseAgent):
                 if rfc_info["number"] not in ("N/A", "ERROR", "")
                 else ""
             )
+            # Construir mensaje WhatsApp con razonamiento agentic de Camael
+            risk_emoji = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴"}.get(decision.risk_level, "🟡")
+            temp_note  = "\n⚠️ *Fix temporal* — " + decision.alternative if decision.is_temporary else ""
+            history_note = (
+                f"\n📚 Historial: {decision.past_incidents} incidente(s) similar(es) previo(s)"
+                if decision.past_incidents > 0
+                else "\n📚 Historial: Primera vez — sin precedentes para este servicio"
+            )
             wa_msg = (
-                f"🔧 *PR LISTO PARA REVISIÓN*\n"
-                f"Incidente: {incident_key}\n"
-                f"Fix: {fix.pr_title}\n"
-                f"PR #{pr_id}: {pr_url}\n"
+                f"🤖 *Camael — Análisis completado*\n\n"
+                f"📊 *Contexto detectado:*\n"
+                f"• Límite actual: `{decision.current_limit}` → propuesto: `{decision.proposed_limit}`\n"
+                f"• Factor de escala: x{decision.multiplier:.1f} (decidido por LLM)\n"
+                f"{history_note}\n\n"
+                f"🧠 *Razonamiento:*\n{decision.reasoning}\n\n"
+                f"📋 *Nota para el operador:*\n{decision.operator_note}\n"
+                f"{temp_note}\n\n"
+                f"{risk_emoji} Riesgo: {decision.risk_level}\n"
+                f"📝 PR #{pr_id}: {pr_url}\n"
                 f"{rfc_line}"
-                f"\nResponde *APROBAR* para mergear a main y que ArgoCD despliegue.\n"
+                f"\nResponde *APROBAR* para mergear y desplegar.\n"
                 f"Responde *RECHAZAR* para cancelar.\n"
                 f"_(Expira en 10 minutos)_"
             )
@@ -617,6 +677,26 @@ class CamaelAgent(BaseAgent):
         rfc_sys_id = pr_info.get("rfc_sys_id", "")
         rfc_number = pr_info.get("rfc_number", "N/A")
         rfc_url    = pr_info.get("rfc_url", "")
+
+        # ITIL v4: ECAB authorization — registrar aprobación antes del merge
+        if rfc_sys_id:
+            try:
+                from agents.devops import servicenow_client as sn
+                import datetime as _dt
+                authorized_at = _dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+                await sn.update_rfc(rfc_sys_id, {
+                    "state":      sn.RFCState.AUTHORIZE,
+                    "work_notes": (
+                        f"[ECAB] Cambio de emergencia autorizado.\n"
+                        f"Autorizado por: Operador (vía WhatsApp)\n"
+                        f"Fecha/hora: {authorized_at}\n"
+                        f"PR #{pr_id} aprobado para merge a main."
+                    ),
+                })
+                logger.info(f"[camael] RFC {rfc_number} → Authorize (ECAB) en ServiceNow")
+            except Exception as exc_sn:
+                logger.warning(f"[camael] SN authorize RFC falló: {exc_sn}")
+
         try:
             logger.info(f"[camael] Mergeando PR #{pr_id} en {workspace}/{repo}")
             merge_result = await bb.merge_pr(
@@ -628,16 +708,16 @@ class CamaelAgent(BaseAgent):
 
             merge_hash = (merge_result.get("merge_commit") or {}).get("hash", "")[:8]
 
-            # Actualizar RFC → estado Implement
+            # ITIL v4: Assess → Authorize (ECAB) → Implement
             if rfc_sys_id:
                 try:
                     from agents.devops import servicenow_client as sn
                     await sn.update_rfc(rfc_sys_id, {
                         "state":      sn.RFCState.IMPLEMENT,
                         "work_notes": (
-                            f"PR #{pr_id} aprobado y mergeado a main por el operador.\n"
+                            f"PR #{pr_id} mergeado a main.\n"
                             f"Commit: {merge_hash}\n"
-                            f"ArgoCD sincronizando cambios al cluster..."
+                            f"ArgoCD sincronizando cambios al cluster Kubernetes..."
                         ),
                     })
                     logger.info(f"[camael] RFC {rfc_number} → Implement en ServiceNow")
@@ -683,13 +763,25 @@ class CamaelAgent(BaseAgent):
 
 # ── Helpers internos ──────────────────────────────────────────────────────────
 
-def _detect_approval(query: str) -> str | None:
-    """Detecta si el usuario escribió APROBAR o RECHAZAR."""
-    q = query.strip().upper()
-    if q in ("APROBAR", "APPROVE", "SI", "SÍ", "YES"):
-        return "APROBAR"
-    if q in ("RECHAZAR", "REJECT", "NO", "CANCEL", "CANCELAR"):
-        return "RECHAZAR"
+def _detect_approval(query: str) -> tuple[str, int | None] | None:
+    """
+    Detecta si el usuario escribió APROBAR o RECHAZAR, con PR number opcional.
+    Soporta: "APROBAR", "APROBAR 42", "RECHAZAR 43", "APPROVE 42", etc.
+    Retorna (action, pr_id) donde pr_id puede ser None.
+    """
+    parts = query.strip().upper().split()
+    if not parts:
+        return None
+    word, pr_id = parts[0], None
+    if len(parts) >= 2:
+        try:
+            pr_id = int(parts[1])
+        except ValueError:
+            pass
+    if word in ("APROBAR", "APPROVE", "SI", "SÍ", "YES"):
+        return ("APROBAR", pr_id)
+    if word in ("RECHAZAR", "REJECT", "NO", "CANCEL", "CANCELAR"):
+        return ("RECHAZAR", pr_id)
     return None
 
 
@@ -718,23 +810,59 @@ def _get_pending_pr(incident_key: str) -> dict | None:
 
 
 def _get_latest_pending_pr_key() -> str | None:
-    """Busca el primer bb:pending_pr:* disponible en Redis."""
+    """Devuelve el incident_key del PR pendiente con mayor pr_id (más reciente)."""
     try:
         from storage.redis import get_client
         redis = get_client()
         keys = redis.keys("bb:pending_pr:*")
-        if keys:
-            key = keys[0] if isinstance(keys[0], str) else keys[0].decode()
-            return key.replace("bb:pending_pr:", "")
+        if not keys:
+            return None
+        best_key, best_pr_id = None, -1
+        for k in keys:
+            k_str = k if isinstance(k, str) else k.decode()
+            try:
+                raw = redis.get(k_str)
+                pr_id = int(json.loads(raw).get("pr_id", -1)) if raw else -1
+            except Exception:
+                pr_id = -1
+            if pr_id > best_pr_id:
+                best_pr_id, best_key = pr_id, k_str
+        return best_key.replace("bb:pending_pr:", "") if best_key else None
     except Exception as exc:
         logger.warning(f"[camael] No se pudo buscar PR pendiente: {exc}")
+    return None
+
+
+def _get_pending_pr_key_by_id(pr_id: int) -> str | None:
+    """Busca el incident_key cuyo PR tiene el pr_id indicado."""
+    try:
+        from storage.redis import get_client
+        redis = get_client()
+        for k in redis.keys("bb:pending_pr:*"):
+            k_str = k if isinstance(k, str) else k.decode()
+            try:
+                raw = redis.get(k_str)
+                if raw and int(json.loads(raw).get("pr_id", -1)) == pr_id:
+                    return k_str.replace("bb:pending_pr:", "")
+            except Exception:
+                continue
+    except Exception as exc:
+        logger.warning(f"[camael] No se pudo buscar PR #{pr_id}: {exc}")
     return None
 
 
 def _delete_pending_pr(incident_key: str) -> None:
     try:
         from storage.redis import get_client
-        get_client().delete(f"bb:pending_pr:{incident_key}")
+        r = get_client()
+        r.delete(f"bb:pending_pr:{incident_key}")
+        # Liberar gitops lock para que el repo pueda recibir nuevos handoffs
+        for lock in r.keys("gitops:lock:*"):
+            lock_str = lock if isinstance(lock, str) else lock.decode()
+            owner = r.get(lock_str)
+            owner_str = owner.decode() if isinstance(owner, bytes) else owner
+            if owner_str == incident_key:
+                r.delete(lock_str)
     except Exception:
         pass
 

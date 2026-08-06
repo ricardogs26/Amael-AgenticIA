@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -24,7 +24,15 @@ class Settings(BaseSettings):
     (namespace amael-ia). Para desarrollo local, crear un archivo .env.
     """
 
-    # ── LLM (Ollama — única GPU disponible) ───────────────────────────────────
+    # ── LLM Provider ──────────────────────────────────────────────────────────
+    # Valores válidos: ollama | openai | groq | gemini | anthropic
+    llm_provider: str = Field(default="ollama", alias="LLM_PROVIDER")
+    # API key para proveedores cloud (no requerido si provider=ollama)
+    llm_api_key: str | None = Field(default=None, alias="LLM_API_KEY")
+    # URL base opcional — para OpenAI-compatible (llm-adapter) o proxy propio
+    llm_base_url: str | None = Field(default=None, alias="LLM_BASE_URL")
+
+    # ── LLM (Ollama — fallback cuando llm_provider="ollama") ──────────────────
     ollama_base_url: str = Field(
         default="http://ollama-service:11434",
         alias="OLLAMA_BASE_URL",
@@ -41,6 +49,13 @@ class Settings(BaseSettings):
         default="nomic-embed-text",
         alias="LLM_EMBED_MODEL",
     )
+
+    # ── Embeddings Provider ───────────────────────────────────────────────────
+    # Valores válidos: ollama | openai | google
+    # Si no se especifica, usa llm_provider cuando es compatible, si no ollama
+    embed_provider: str = Field(default="ollama", alias="EMBED_PROVIDER")
+    # API key para embeddings (default: llm_api_key si no se especifica)
+    embed_api_key: str | None = Field(default=None, alias="EMBED_API_KEY")
 
     # ── Servicios internos ────────────────────────────────────────────────────
     k8s_agent_url: str = Field(
@@ -68,7 +83,8 @@ class Settings(BaseSettings):
     internal_api_secret: str = Field(alias="INTERNAL_API_SECRET")
     jwt_secret_key: str = Field(alias="JWT_SECRET_KEY")
     jwt_algorithm: str = "HS256"
-    session_secret_key: str = Field(alias="SESSION_SECRET_KEY")
+    # Opcional — cuando no se provee se deriva de jwt_secret_key en el validator
+    session_secret_key: str | None = Field(default=None, alias="SESSION_SECRET_KEY")
 
     # ── OAuth (Google) ────────────────────────────────────────────────────────
     google_client_id: str | None = Field(default=None, alias="GOOGLE_CLIENT_ID")
@@ -102,8 +118,8 @@ class Settings(BaseSettings):
 
     # ── MinIO ─────────────────────────────────────────────────────────────────
     minio_endpoint: str = Field(default="minio-service:9000", alias="MINIO_ENDPOINT")
-    minio_access_key: str = Field(alias="MINIO_ACCESS_KEY")
-    minio_secret_key: str = Field(alias="MINIO_SECRET_KEY")
+    minio_access_key: str = Field(default="", alias="MINIO_ACCESS_KEY")
+    minio_secret_key: str = Field(default="", alias="MINIO_SECRET_KEY")
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
     minio_bucket: str = Field(default="amael-uploads", alias="MINIO_BUCKET")
 
@@ -144,6 +160,16 @@ class Settings(BaseSettings):
     github_default_repo:  str = Field(default="", alias="GABRIEL_GITHUB_REPO")
     github_default_branch: str = Field(default="main", alias="GABRIEL_GITHUB_BRANCH")
 
+    # ── Camael — Bitbucket / GitOps ───────────────────────────────────────────
+    bitbucket_workspace: str = Field(
+        default="amael_agenticia", alias="BITBUCKET_WORKSPACE"
+    )
+    bitbucket_token: str | None = Field(default=None, alias="BITBUCKET_TOKEN")
+    bitbucket_username: str | None = Field(default=None, alias="BITBUCKET_USERNAME")
+    bitbucket_default_repo: str = Field(
+        default="amael-agentic-backend", alias="BITBUCKET_DEFAULT_REPO"
+    )
+
     # ── Entorno ───────────────────────────────────────────────────────────────
     environment: str = Field(default="production", alias="ENVIRONMENT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
@@ -157,7 +183,7 @@ class Settings(BaseSettings):
 
     # ── Validadores de seguridad ──────────────────────────────────────────────
 
-    @field_validator("jwt_secret_key", "internal_api_secret", "session_secret_key")
+    @field_validator("jwt_secret_key", "internal_api_secret")
     @classmethod
     def validate_secret_length(cls, v: str, info) -> str:
         if len(v) < 28:
@@ -166,6 +192,13 @@ class Settings(BaseSettings):
                 f"(actual: {len(v)}). Genera uno con: openssl rand -hex 32"
             )
         return v
+
+    @model_validator(mode="after")
+    def derive_session_secret(self) -> Settings:
+        """Deriva session_secret_key de jwt_secret_key cuando no se provee explícitamente."""
+        if self.session_secret_key is None:
+            self.session_secret_key = self.jwt_secret_key
+        return self
 
     @field_validator("jwt_secret_key")
     @classmethod

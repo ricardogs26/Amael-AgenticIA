@@ -16,10 +16,8 @@ import threading
 
 logger = logging.getLogger("agents.researcher.rag")
 
-_QDRANT_URL   = os.environ.get("QDRANT_URL",     "http://qdrant-service:6333")
-_OLLAMA_URL   = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
-_EMBED_MODEL  = "nomic-embed-text"
-_VECTOR_SIZE  = 768  # nomic-embed-text output dimension
+_QDRANT_URL   = os.environ.get("QDRANT_URL", "http://qdrant-service:6333")
+_VECTOR_SIZE  = 768  # dimensión por defecto (nomic-embed-text / google text-embedding-004)
 
 # Module-level singletons (P5-3 optimization — avoid per-request reconnections)
 # Los locks garantizan inicialización thread-safe bajo cargas concurrentes
@@ -44,8 +42,8 @@ def _get_embeddings():
     if _embeddings is None:
         with _embeddings_lock:
             if _embeddings is None:  # double-checked locking
-                from langchain_ollama import OllamaEmbeddings
-                _embeddings = OllamaEmbeddings(model=_EMBED_MODEL, base_url=_OLLAMA_URL)
+                from agents.base.llm_factory import get_embeddings
+                _embeddings = get_embeddings()
     return _embeddings
 
 

@@ -33,6 +33,9 @@ class RoutingDecision:
 
 # ── Reglas keyword (orden importa: más específico primero) ────────────────────
 _KEYWORD_RULES = [
+    # GitOps human-in-the-loop: APROBAR/RECHAZAR deben ir directo a Camael
+    (r"^\s*(APROBAR|RECHAZAR|APPROVE|REJECT)\s*$",
+     "devops", ["camael"]),
     # SRE / incidentes
     (r"\b(incident|anomaly|crash\s*loop|oom|circuit.breaker|sre|postmortem|slo)\b",
      "sre", ["sre"]),

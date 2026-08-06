@@ -10,6 +10,7 @@ Módulos:
   reporter  — store_incident, notify_whatsapp_sre, get_recent_incidents
   scheduler — sre_autonomous_loop, CircuitBreaker, get_loop_state
   agent     — SREAgent (BaseAgent), start_sre_loop, init_sre_db, init_runbooks_qdrant
+  runbook_consolidator — run_consolidation (Nivel 3, APScheduler 03:00 UTC diario)
 """
 from agents.sre.agent import (
     RaphaelAgent as SREAgent,

@@ -11,7 +11,7 @@ Produce el payload completo para ServiceNow change_request con:
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from agents.devops.servicenow_client import RFCState
 
@@ -57,6 +57,7 @@ def build_emergency_rfc(
     pr_id:         int,
     confidence:    float = 0.0,
     detected_at:   str   = "",
+    chg_model:     str   = "",
 ) -> dict:
     """
     Genera el payload completo para crear un Emergency Change RFC en ServiceNow.
@@ -64,8 +65,11 @@ def build_emergency_rfc(
     """
     risk, impact, priority = _RISK_MAP.get(issue_type, ("moderate", "2", "2 - High"))
     issue_label = _ISSUE_LABELS.get(issue_type, issue_type)
-    detected_at = detected_at or datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.utcnow()
+    detected_at = detected_at or now.strftime("%Y-%m-%d %H:%M UTC")
     service_name = pod_name.replace("-deployment", "").replace("-service", "")
+    planned_start = now.strftime("%Y-%m-%d %H:%M:%S")
+    planned_end   = (now + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
 
     description = _build_description(
         issue_type=issue_type,
@@ -82,57 +86,77 @@ def build_emergency_rfc(
         service_name=service_name,
     )
 
-    return {
+    payload = {
         # ── Identificación ──────────────────────────────────────────────────
         "short_description": (
             f"[AUTO] Emergency Fix: {issue_type} — {service_name} ({namespace})"
         ),
-        "description":       description,
+        "description": description,
+
+        # ── Change Model (controla type=emergency en ServiceNow) ────────────
+        # chg_model debe enviarse en la CREACIÓN — la BR "Change Model: read only
+        # presets" impide modificar type/category después de crear el registro.
+        **({"chg_model": chg_model} if chg_model else {}),
 
         # ── Clasificación ITIL v4 ───────────────────────────────────────────
-        "type":              "emergency",
-        "category":          "Software",
-        "subcategory":       "Kubernetes / Containers",
-        "risk":              risk,
-        "impact":            impact,
-        "priority":          priority,
-        "state":             RFCState.ASSESS,
+        "type":        "emergency",
+        "category":    "Software",
+        "subcategory": "Kubernetes / Containers",
+        "risk":        risk,
+        "impact":      impact,
+        "urgency":     "1",      # 1=Critical — emergencia activa en producción
+        "priority":    priority,
+        "state":       RFCState.ASSESS,
+
+        # ── Ventana de cambio ───────────────────────────────────────────────
+        "start_date": planned_start,
+        "end_date":   planned_end,
 
         # ── Asignación ─────────────────────────────────────────────────────
-        "assignment_group":  "DevOps",
+        "assignment_group": "DevOps",
+        "requested_by":     "Raphael (SRE Autónomo)",
 
         # ── Planes ITIL v4 ─────────────────────────────────────────────────
         "justification": (
             f"El agente SRE autónomo Raphael detectó '{issue_type}' en "
             f"{pod_name} (namespace: {namespace}) con {confidence:.0%} de confianza. "
             f"Descripción técnica: {issue_label}. "
-            f"La corrección automática es necesaria para restaurar disponibilidad."
+            f"Corrección necesaria para restaurar disponibilidad del servicio."
         ),
         "implementation_plan": (
             f"1. Branch automático creado: {branch_name}\n"
             f"2. Patch aplicado al manifest Kubernetes por Camael DevOps Agent\n"
-            f"3. Pull Request #{pr_id} creado en Bitbucket\n"
-            f"4. Operador aprueba vía WhatsApp o chat\n"
+            f"3. Pull Request #{pr_id} creado en Bitbucket ({pr_url})\n"
+            f"4. Operador autoriza vía WhatsApp (ECAB simplificado)\n"
             f"5. Merge a main → ArgoCD detecta cambio → sync automático\n"
-            f"6. Verificación post-despliegue automática (5 min) por Raphael"
+            f"6. Post Implementation Review automático (5 min) por Raphael"
         ),
         "backout_plan": (
             f"En caso de fallo post-despliegue:\n"
             f"1. Raphael ejecuta rollout undo automáticamente si detecta degradación\n"
             f"2. kubectl rollout undo deployment/{service_name} -n {namespace}\n"
-            f"3. Este RFC se actualiza con el resultado del rollback"
+            f"3. RFC se actualiza con el estado del rollback\n"
+            f"4. Notificación inmediata al operador vía WhatsApp"
         ),
         "test_plan": (
-            f"Verificación automática por Raphael (5 min post-deploy):\n"
+            f"Post Implementation Review automático por Raphael (T+5 min):\n"
             f"- Pod en estado Running sin reinicios\n"
             f"- Error rate < 1% (Prometheus)\n"
-            f"- SLO de disponibilidad mantenido\n"
-            f"- Sin alertas nuevas en ventana de 5 min"
+            f"- SLO de disponibilidad mantenido (>= 99%)\n"
+            f"- Sin nuevas alertas en ventana de monitoreo de 5 min"
+        ),
+        "risk_impact_analysis": (
+            f"Riesgo: {risk.upper()} | Impacto: {impact} | Urgencia: Critical\n"
+            f"Servicio afectado: {service_name} (namespace: {namespace})\n"
+            f"Anomalía detectada: {issue_label}\n"
+            f"Confianza del diagnóstico: {confidence:.0%}\n"
+            f"Tiempo de inactividad esperado: Mínimo (rolling update sin downtime)"
         ),
 
-        # ── CI ─────────────────────────────────────────────────────────────
-        "cmdb_ci":           service_name,
+        # ── Configuration Item ──────────────────────────────────────────────
+        "cmdb_ci": service_name,
     }
+    return payload
 
 
 def _build_description(

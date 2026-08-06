@@ -196,7 +196,8 @@ def rollout_undo_deployment(deployment_name: str, namespace: str) -> str:
 
 
 def _is_deployment_healthy(deployment_name: str, namespace: str) -> bool:
-    """Verifica si las réplicas deseadas están todas disponibles."""
+    """Verifica si las réplicas deseadas están todas disponibles.
+    Si el deployment ya no existe (404) se considera resuelto → True."""
     try:
         apps_v1 = _get_k8s_apps()
         dep = apps_v1.read_namespaced_deployment(
@@ -206,6 +207,12 @@ def _is_deployment_healthy(deployment_name: str, namespace: str) -> bool:
         available = dep.status.available_replicas or 0
         return available >= desired
     except Exception as exc:
+        # Deployment eliminado → el problema desapareció, tratar como saludable
+        if "404" in str(exc) or "Not Found" in str(exc):
+            logger.info(
+                f"[healer] {namespace}/{deployment_name} ya no existe → verificación OK"
+            )
+            return True
         logger.warning(f"[healer] _is_deployment_healthy error: {exc}")
         return False
 
@@ -232,8 +239,11 @@ def _run_verification_job(
     # Intentar leer RFC de ServiceNow desde Redis (creado por Camael en gitops_fix)
     rfc_info = _get_rfc_from_redis(incident_key)
 
+    from observability.metrics import SRE_VERIFICATION_TOTAL, SRE_ROLLBACK_TOTAL
+
     if healthy:
         logger.info(f"[healer] ✅ {deployment_name} verificado como saludable.")
+        SRE_VERIFICATION_TOTAL.labels(result="healthy").inc()
         update_incident_fn(incident_key, "verify:ok")
         # Cerrar RFC en ServiceNow → Closed
         if rfc_info:
@@ -248,7 +258,7 @@ def _run_verification_job(
         logger.warning(
             f"[healer] {deployment_name} sigue unhealthy + recién desplegado → auto-rollback"
         )
-        from observability.metrics import SRE_ROLLBACK_TOTAL
+        SRE_VERIFICATION_TOTAL.labels(result="unhealthy").inc()
         rollback_result = rollout_undo_deployment(deployment_name, namespace)
         if "✅" in rollback_result:
             SRE_ROLLBACK_TOTAL.labels(result="ok").inc()
@@ -267,6 +277,7 @@ def _run_verification_job(
             )
     else:
         logger.warning(f"[healer] {deployment_name} sigue unhealthy pero sin deploy reciente.")
+        SRE_VERIFICATION_TOTAL.labels(result="unhealthy").inc()
         update_incident_fn(incident_key, "verify:unresolved")
         if rfc_info:
             _close_rfc_async(rfc_info, deployment_name, namespace,
@@ -442,6 +453,24 @@ def handoff_to_camael(
     fix = get_fix(anomaly.issue_type, resource_name)
     if not fix:
         return
+
+    # Evitar RFC/PR duplicados con lock atómico (SETNX) — previene race condition
+    # entre threads paralelos que detectan CRASH_LOOP + DEPLOYMENT_DEGRADED simultáneamente
+    lock_key = f"gitops:lock:{fix.repo}"
+    try:
+        from storage.redis.client import get_client as _redis
+        r = _redis()
+        # SETNX: solo el primer thread adquiere el lock (TTL 10 min)
+        acquired = r.set(lock_key, incident_key, nx=True, ex=600)
+        if not acquired:
+            owner = r.get(lock_key) or "unknown"
+            logger.info(
+                f"[healer] GitOps handoff omitido — lock activo para {fix.repo} "
+                f"(dueño={owner}, solicitante={incident_key})"
+            )
+            return
+    except Exception:
+        pass  # Si Redis falla, continuar normalmente
 
     from observability.metrics import GITOPS_HANDOFF_TOTAL
     GITOPS_HANDOFF_TOTAL.labels(issue_type=anomaly.issue_type).inc()

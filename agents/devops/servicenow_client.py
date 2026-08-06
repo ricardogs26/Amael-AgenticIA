@@ -160,12 +160,65 @@ async def add_work_note(sys_id: str, note: str) -> bool:
     return await update_rfc(sys_id, {"work_notes": note})
 
 
+# ── Emergency Change Model lookup ─────────────────────────────────────────────
+
+_emergency_model_cache: str = ""
+
+
+async def get_emergency_chg_model() -> str:
+    """
+    Busca el sys_id del Change Model de Emergency en ServiceNow.
+    Necesario para que el RFC se cree con type=emergency (la Business Rule
+    'Change Model: read only presets' impide modificar el tipo después de la creación).
+    Retorna "" si no se encuentra (fallback: sin chg_model → ServiceNow elige el default).
+    """
+    global _emergency_model_cache
+    if _emergency_model_cache:
+        return _emergency_model_cache
+
+    base, user, pwd = _cfg()
+    if not base:
+        return ""
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                f"{base}/api/now/table/chg_model",
+                auth=(user, pwd),
+                headers={"Accept": "application/json"},
+                params={
+                    "sysparm_query": "nameCONTAINSEmergency^active=true",
+                    "sysparm_fields": "sys_id,name",
+                    "sysparm_limit": "1",
+                },
+            )
+            if r.status_code == 200:
+                results = r.json().get("result", [])
+                if results:
+                    _emergency_model_cache = results[0].get("sys_id", "")
+                    logger.info(f"[sn] Emergency Change Model: {results[0].get('name')} ({_emergency_model_cache})")
+                    return _emergency_model_cache
+    except Exception as exc:
+        logger.warning(f"[sn] No se pudo obtener Emergency Change Model: {exc}")
+    return ""
+
+
 async def close_rfc(sys_id: str, close_notes: str) -> bool:
-    """Cierra el RFC como exitoso (ITIL v4: Review → Closed)."""
+    """
+    Cierra el RFC como exitoso siguiendo el ciclo ITIL v4:
+    Implement → Review (PIR) → Closed
+    """
+    # Paso 1: Post Implementation Review
+    await update_rfc(sys_id, {
+        "state":      RFCState.REVIEW,
+        "work_notes": f"[PIR] Post Implementation Review completado.\n{close_notes}",
+    })
+    # Paso 2: Closed
     return await update_rfc(sys_id, {
         "state":       RFCState.CLOSED,
+        "close_code":  "successful",
         "close_notes": close_notes,
-        "work_notes":  close_notes,
+        "work_notes":  f"RFC cerrado automáticamente tras verificación exitosa.",
     })
 
 

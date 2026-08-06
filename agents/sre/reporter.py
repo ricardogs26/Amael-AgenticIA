@@ -32,13 +32,8 @@ _postmortem_llm = None
 def _get_postmortem_llm():
     global _postmortem_llm
     if _postmortem_llm is None:
-        from langchain_ollama import OllamaLLM
-
-        from config.settings import settings
-        _postmortem_llm = OllamaLLM(
-            model=settings.llm_model,
-            base_url=settings.ollama_base_url,
-        )
+        from agents.base.llm_factory import get_chat_llm
+        _postmortem_llm = get_chat_llm()
     return _postmortem_llm
 
 
@@ -199,7 +194,8 @@ def _generate_postmortem_sync(incident: dict) -> dict | None:
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
             future = ex.submit(_get_postmortem_llm().invoke, prompt)
-            raw = future.result(timeout=60)
+            _resp = future.result(timeout=60)
+        raw = _resp.content if hasattr(_resp, "content") else str(_resp)
 
         import re
         match = re.search(r"\{.*\}", raw, re.DOTALL)

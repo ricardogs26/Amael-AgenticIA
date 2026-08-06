@@ -58,20 +58,20 @@ async def invoke_llm(prompt: str, context: Any, agent_name: str = "agent") -> st
         system_text   = ""
         question_text = prompt.strip()
 
-    # Intentar vía ChatOllama singleton
+    # Intentar vía LLM factory
     try:
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        from skills.llm.skill import _get_chat_ollama
+        from agents.base.llm_factory import get_chat_llm
 
-        chat_llm = _get_chat_ollama()
+        chat_llm = get_chat_llm()
         messages = [SystemMessage(content=system_text), HumanMessage(content=question_text)]
         result   = await asyncio.to_thread(chat_llm.invoke, messages)
         _track_tokens(result, prompt, agent_name)
         return result.content if hasattr(result, "content") else str(result)
 
     except Exception as exc:
-        logger.debug(f"[{agent_name}] ChatOllama singleton falló, usando context.llm: {exc}")
+        logger.debug(f"[{agent_name}] LLM factory falló, usando context.llm: {exc}")
 
     # Fallback: OllamaLLM del contexto
     if context.llm is not None:

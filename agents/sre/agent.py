@@ -5,7 +5,7 @@ Responsabilidades:
   1. Ciclo autónomo Observe→Detect→Diagnose→Decide→Act→Report (APScheduler 60s)
   2. Agente conversacional via LangGraph ReAct (primary) + LangChain clásico (fallback)
   3. Inicialización de base de datos PostgreSQL (sre_incidents, sre_postmortems)
-  4. Indexación de runbooks en Qdrant
+  4. Indexación de runbooks en Qdrant (estáticos + bootstrap Nivel 2 + consolidación Nivel 3)
 
 Registro: @AgentRegistry.register → disponible como AgentRegistry.get("sre", ctx)
 """
@@ -199,10 +199,15 @@ def init_runbooks_qdrant() -> None:
             )
             logger.info(f"[sre.agent] Colección '{_QDRANT_COLLECTION}' creada (dim={dim}).")
 
-        # Verificar si ya tiene documentos
+        # Nivel 2 — bootstrap siempre en background (idempotente internamente)
+        import threading
+        t = threading.Thread(target=bootstrap_runbooks_from_cluster, daemon=True)
+        t.start()
+
+        # Verificar si ya tiene documentos estáticos indexados
         count = client.count(collection_name=_QDRANT_COLLECTION).count
         if count > 0:
-            logger.info(f"[sre.agent] Runbooks ya indexados ({count} docs). Skipping.")
+            logger.info(f"[sre.agent] Runbooks ya indexados ({count} docs). Skipping static load.")
             return
 
         # Indexar archivos markdown del directorio runbooks/
@@ -242,6 +247,271 @@ def init_runbooks_qdrant() -> None:
 
     except Exception as exc:
         logger.warning(f"[sre.agent] init_runbooks_qdrant error: {exc}")
+
+
+# ── Nivel 2 — Bootstrap de runbooks desde el cluster ─────────────────────────
+
+import threading as _threading
+_bootstrap_started = False
+_bootstrap_lock    = _threading.Lock()
+
+
+def _discover_workloads(namespaces: list[str]) -> list[dict]:
+    """
+    Descubre todos los workloads activos del cluster via K8s API.
+    Retorna lista de dicts con metadata relevante para generación de runbooks.
+    """
+    workloads = []
+    try:
+        from kubernetes import client as k8s_client, config as k8s_config
+        try:
+            k8s_config.load_incluster_config()
+        except Exception:
+            k8s_config.load_kube_config()
+
+        apps_v1  = k8s_client.AppsV1Api()
+        batch_v1 = k8s_client.BatchV1Api()
+
+        for ns in namespaces:
+            # Deployments
+            try:
+                for d in apps_v1.list_namespaced_deployment(ns).items:
+                    spec = d.spec.template.spec
+                    containers = spec.containers or []
+                    c = containers[0] if containers else None
+                    workloads.append({
+                        "kind": "Deployment",
+                        "name": d.metadata.name,
+                        "namespace": ns,
+                        "replicas": d.spec.replicas or 1,
+                        "image": c.image if c else "unknown",
+                        "cpu_limit":    (c.resources.limits or {}).get("cpu", "none") if c and c.resources else "none",
+                        "memory_limit": (c.resources.limits or {}).get("memory", "none") if c and c.resources else "none",
+                        "ports": [p.container_port for p in (c.ports or [])] if c else [],
+                    })
+            except Exception as exc:
+                logger.debug(f"[sre.agent] bootstrap: deployments en {ns}: {exc}")
+
+            # StatefulSets
+            try:
+                for s in apps_v1.list_namespaced_stateful_set(ns).items:
+                    spec = s.spec.template.spec
+                    containers = spec.containers or []
+                    c = containers[0] if containers else None
+                    workloads.append({
+                        "kind": "StatefulSet",
+                        "name": s.metadata.name,
+                        "namespace": ns,
+                        "replicas": s.spec.replicas or 1,
+                        "image": c.image if c else "unknown",
+                        "cpu_limit":    (c.resources.limits or {}).get("cpu", "none") if c and c.resources else "none",
+                        "memory_limit": (c.resources.limits or {}).get("memory", "none") if c and c.resources else "none",
+                        "ports": [p.container_port for p in (c.ports or [])] if c else [],
+                    })
+            except Exception as exc:
+                logger.debug(f"[sre.agent] bootstrap: statefulsets en {ns}: {exc}")
+
+            # DaemonSets
+            try:
+                for ds in apps_v1.list_namespaced_daemon_set(ns).items:
+                    spec = ds.spec.template.spec
+                    containers = spec.containers or []
+                    c = containers[0] if containers else None
+                    workloads.append({
+                        "kind": "DaemonSet",
+                        "name": ds.metadata.name,
+                        "namespace": ns,
+                        "replicas": "N/A (por nodo)",
+                        "image": c.image if c else "unknown",
+                        "cpu_limit":    (c.resources.limits or {}).get("cpu", "none") if c and c.resources else "none",
+                        "memory_limit": (c.resources.limits or {}).get("memory", "none") if c and c.resources else "none",
+                        "ports": [p.container_port for p in (c.ports or [])] if c else [],
+                    })
+            except Exception as exc:
+                logger.debug(f"[sre.agent] bootstrap: daemonsets en {ns}: {exc}")
+
+            # CronJobs
+            try:
+                for cj in batch_v1.list_namespaced_cron_job(ns).items:
+                    spec = cj.spec.job_template.spec.template.spec
+                    containers = spec.containers or []
+                    c = containers[0] if containers else None
+                    workloads.append({
+                        "kind": "CronJob",
+                        "name": cj.metadata.name,
+                        "namespace": ns,
+                        "replicas": f"schedule={cj.spec.schedule}",
+                        "image": c.image if c else "unknown",
+                        "cpu_limit":    (c.resources.limits or {}).get("cpu", "none") if c and c.resources else "none",
+                        "memory_limit": (c.resources.limits or {}).get("memory", "none") if c and c.resources else "none",
+                        "ports": [],
+                    })
+            except Exception as exc:
+                logger.debug(f"[sre.agent] bootstrap: cronjobs en {ns}: {exc}")
+
+    except Exception as exc:
+        logger.warning(f"[sre.agent] bootstrap: error descubriendo workloads: {exc}")
+
+    return workloads
+
+
+def _generate_bootstrap_runbook(workload: dict) -> str:
+    """
+    Usa el LLM para generar un runbook preventivo para un workload descubierto.
+    Timeout 60s. Retorna "" si falla.
+    """
+    # Prompt corto — máx ~300 tokens de salida para no competir con el loop SRE
+    prompt = (
+        f"SRE Kubernetes. Workload: {workload['kind']} '{workload['name']}' "
+        f"ns={workload['namespace']} img={workload['image']} "
+        f"mem={workload['memory_limit']} cpu={workload['cpu_limit']}.\n\n"
+        "Genera un runbook breve en Markdown con EXACTAMENTE estas 3 secciones "
+        "(máximo 4 bullets cada una, sé muy conciso):\n\n"
+        "## Fallos comunes\n"
+        "## Síntomas\n"
+        "## Remediación\n"
+    )
+
+    try:
+        import concurrent.futures
+        from agents.base.llm_factory import get_chat_llm, llm_agent_context
+        llm = get_chat_llm()
+        llm_agent_context.set("runbook_l2")
+        # No usar 'with' — bloquea al salir esperando el thread aunque haya timeout.
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(llm.invoke, prompt)
+        try:
+            raw = future.result(timeout=120)
+        finally:
+            executor.shutdown(wait=False)
+        if hasattr(raw, "content"):
+            raw = raw.content
+        return raw.strip()
+    except Exception as exc:
+        logger.warning(f"[sre.agent] bootstrap: LLM falló para {workload['name']}: {type(exc).__name__}: {exc}")
+        return ""
+
+
+def bootstrap_runbooks_from_cluster() -> None:
+    """
+    Nivel 2 — Genera runbooks preventivos para todos los workloads del cluster.
+
+    Idempotente entre procesos (Redis SETNX) y entre reinicios (Qdrant bootstrapped=True).
+    Espera 60s al arranque para que el LLM esté listo antes de generar runbooks.
+    """
+    global _bootstrap_started
+    with _bootstrap_lock:
+        if _bootstrap_started:
+            return
+        _bootstrap_started = True
+
+    import time
+    import uuid
+
+    # Esperar a que el LLM y el resto del sistema arranquen
+    logger.info("[sre.agent] bootstrap: esperando 60s para que el LLM esté listo...")
+    time.sleep(60)
+
+    # Lock distribuido Redis — evita que 2 workers corran el bootstrap en paralelo
+    try:
+        from storage.redis.client import get_redis_client
+        redis = get_redis_client()
+        acquired = redis.set("sre:bootstrap_lock", "1", nx=True, ex=3600)
+        if not acquired:
+            logger.info("[sre.agent] bootstrap: otro worker ya está ejecutando el bootstrap. Skipping.")
+            return
+    except Exception as exc:
+        logger.warning(f"[sre.agent] bootstrap: Redis lock no disponible ({exc}), continuando sin lock.")
+
+    try:
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import FieldCondition, Filter, MatchValue, PointStruct
+    except ImportError:
+        logger.warning("[sre.agent] bootstrap: qdrant_client no disponible")
+        return
+
+    try:
+        client = QdrantClient(url=_QDRANT_URL)
+
+        # Verificar si ya existen suficientes runbooks bootstrapped — idempotente
+        # Umbral=5: si hay menos, el run anterior fue incompleto y hay que reintentar.
+        try:
+            existing = client.scroll(
+                collection_name=_QDRANT_COLLECTION,
+                scroll_filter=Filter(must=[
+                    FieldCondition(key="bootstrapped", match=MatchValue(value=True))
+                ]),
+                limit=5,
+                with_payload=False,
+            )
+            if len(existing[0]) >= 5:
+                logger.info(f"[sre.agent] bootstrap: {len(existing[0])}+ runbooks de cluster ya existen, skipping.")
+                return
+        except Exception:
+            pass  # Si el scroll falla (colección vacía, etc.), continuar
+
+        from agents.sre.observer import _OBSERVE_NAMESPACES
+        workloads = _discover_workloads(_OBSERVE_NAMESPACES)
+
+        if not workloads:
+            logger.warning("[sre.agent] bootstrap: no se encontraron workloads en el cluster.")
+            return
+
+        logger.info(f"[sre.agent] bootstrap: {len(workloads)} workloads descubiertos — generando runbooks...")
+
+        import requests as _req
+        saved = 0
+
+        # Limitar a 15 workloads. Sleep entre cada uno para no competir con el loop SRE.
+        for workload in workloads[:15]:
+            time.sleep(10)
+            runbook_text = _generate_bootstrap_runbook(workload)
+            if not runbook_text:
+                continue
+
+            full_text = (
+                f"# Runbook preventivo: {workload['kind']}/{workload['name']}\n"
+                f"*Namespace: {workload['namespace']} | "
+                f"Imagen: {workload['image']} | "
+                f"Memoria: {workload['memory_limit']} | CPU: {workload['cpu_limit']}*\n\n"
+                + runbook_text
+            )
+
+            # Embedding
+            try:
+                resp = _req.post(
+                    f"{_OLLAMA_BASE_URL}/api/embeddings",
+                    json={"model": _EMBED_MODEL, "prompt": full_text[:2000]},
+                    timeout=30,
+                )
+                embedding = resp.json().get("embedding")
+                if not embedding:
+                    continue
+            except Exception as exc:
+                logger.warning(f"[sre.agent] bootstrap: embedding falló para {workload['name']}: {exc}")
+                continue
+
+            point = PointStruct(
+                id=str(uuid.uuid4()),
+                vector=embedding,
+                payload={
+                    "text": full_text,
+                    "workload_name": workload["name"],
+                    "workload_kind": workload["kind"],
+                    "namespace": workload["namespace"],
+                    "image": workload["image"],
+                    "auto_generated": True,
+                    "bootstrapped": True,
+                },
+            )
+            client.upsert(collection_name=_QDRANT_COLLECTION, points=[point])
+            saved += 1
+            logger.info(f"[sre.agent] bootstrap: runbook generado → {workload['kind']}/{workload['name']}")
+
+        logger.info(f"[sre.agent] bootstrap: {saved}/{len(workloads[:15])} runbooks de cluster guardados en Qdrant.")
+
+    except Exception as exc:
+        logger.warning(f"[sre.agent] bootstrap_runbooks_from_cluster error: {exc}")
 
 
 # ── Vault question detection ──────────────────────────────────────────────────
@@ -568,9 +838,22 @@ def start_sre_loop() -> Any | None:
             id="sre_autonomous_loop",
             replace_existing=True,
         )
+
+        # Nivel 3 — consolidación de runbooks cada 24h a las 03:00 UTC
+        from agents.sre.runbook_consolidator import run_consolidation
+        _sre_scheduler.add_job(
+            run_consolidation,
+            "cron",
+            hour=3,
+            minute=0,
+            id="runbook_consolidation",
+            replace_existing=True,
+        )
+
         _sre_scheduler.start()
         logger.info(
-            f"[sre.agent] Loop autónomo iniciado (interval={_SRE_LOOP_INTERVAL}s)."
+            f"[sre.agent] Loop autónomo iniciado (interval={_SRE_LOOP_INTERVAL}s). "
+            "Consolidación de runbooks: diaria 03:00 UTC."
         )
         return _sre_scheduler
 
@@ -614,7 +897,7 @@ class RaphaelAgent(BaseAgent):
 
     name         = "raphael"
     role         = "Site Reliability Engineering — Kubernetes Autonomous Agent"
-    version      = "5.0.2"
+    version      = "5.1.0"
     capabilities = [
         "observe_cluster",
         "detect_anomalies",

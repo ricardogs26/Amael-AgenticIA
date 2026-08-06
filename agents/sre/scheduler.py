@@ -18,7 +18,7 @@ from agents.sre.models import SRELoopState
 
 logger = logging.getLogger("agents.sre.scheduler")
 
-_POD_NAME          = os.environ.get("POD_NAME", "k8s-agent-single")
+_POD_NAME          = f"{os.environ.get('POD_NAME', 'k8s-agent-single')}-w{os.getpid()}"
 _LEASE_NAME        = os.environ.get("SRE_LEASE_NAME", "sre-agent-leader")
 _LEASE_NAMESPACE   = os.environ.get("DEFAULT_NAMESPACE", "amael-ia")
 _LEASE_DURATION_S  = 90
@@ -161,6 +161,11 @@ def _try_acquire_lease() -> bool:
                 return True
             raise
     except Exception as exc:
+        # En conflicto (409) otro worker ganó el Lease → NO asumir liderazgo
+        if "409" in str(exc) or "Conflict" in str(exc):
+            logger.warning(f"[scheduler] Leader election 409 — otro worker es líder. Skipping.")
+            _loop_state.is_leader = False
+            return False
         logger.warning(f"[scheduler] Leader election error: {exc}. Asumiendo líder.")
         return True
 
@@ -374,6 +379,10 @@ def sre_autonomous_loop(
             if action_type == "ROLLOUT_RESTART" and "✅" in action_result:
                 # Nota: el scheduler se pasa desde el agent.py
                 diagnoser.maybe_save_runbook_entry(anomaly, root_cause, action_type)
+                # GitOps handoff → Camael genera PR con el fix permanente
+                healer.handoff_to_camael(
+                    anomaly, anomaly.incident_key, reporter.notify_whatsapp_sre
+                )
 
             actions_taken += 1
 
@@ -394,3 +403,67 @@ def get_loop_state() -> SRELoopState:
     _loop_state.circuit_breaker_state = circuit_breaker.state
     _loop_state.maintenance_active    = is_maintenance_active()
     return _loop_state
+
+
+def get_slo_burn_rates() -> list[dict]:
+    """
+    Retorna el estado actual de cada SLO target con burn rate calculado desde Prometheus.
+    Usado por GET /api/sre/slo/status.
+    """
+    import json as _json
+    from agents.sre.agent import _PROMETHEUS_URL
+    from agents.sre.observer import _prometheus_query
+
+    # Cargar SLO targets directamente del env var (no depende de load_slo_targets())
+    raw = os.environ.get("SLO_TARGETS_JSON", "[]")
+    try:
+        slo_targets = _json.loads(raw)
+    except Exception:
+        slo_targets = []
+
+    results = []
+    for slo in slo_targets:
+        handler = slo.get("handler", "")
+        # Configmap usa "target", fallback a "availability_target"
+        target  = float(slo.get("target", slo.get("availability_target", 0.995)))
+        window  = slo.get("window_hours", 24)
+
+        entry: dict = {
+            "handler":              handler,
+            "availability_target":  target,
+            "window_hours":         window,
+            "availability":         None,
+            "burn_rate":            None,
+            "budget_remaining":     None,
+            "status":               "unknown",
+        }
+
+        query = (
+            f'1 - (sum(rate(http_requests_total{{namespace="amael-ia",'
+            f'handler=~"{handler}",status=~"5.."}}[{window}h])) / '
+            f'sum(rate(http_requests_total{{namespace="amael-ia",'
+            f'handler=~"{handler}"}}[{window}h])))'
+        )
+        prom_results = _prometheus_query(_PROMETHEUS_URL, query)
+        if prom_results:
+            try:
+                availability    = float(prom_results[0]["value"][1])
+                budget_remaining = (availability - target) / (1 - target)
+                burn_rate       = 1 - budget_remaining
+                entry["availability"]    = round(availability, 6)
+                entry["burn_rate"]       = round(burn_rate, 4)
+                entry["budget_remaining"] = round(budget_remaining, 4)
+                if burn_rate > 0.9:
+                    entry["status"] = "critical"
+                elif burn_rate > 0.5:
+                    entry["status"] = "warning"
+                else:
+                    entry["status"] = "ok"
+            except (ValueError, KeyError, ZeroDivisionError):
+                entry["status"] = "no_data"
+        else:
+            entry["status"] = "no_data"
+
+        results.append(entry)
+
+    return results
