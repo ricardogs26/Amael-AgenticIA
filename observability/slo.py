@@ -51,17 +51,35 @@ SLO_TARGETS: list[SLOTarget] = [
 
 # ── Prometheus queries ────────────────────────────────────────────────────────
 
+# El settings se llama `sre_prometheus_url` (alias de env PROMETHEUS_URL). Este
+# módulo leía `prometheus_url`, que no existe: el getattr con default nunca
+# lanza, así que siempre caía al fallback `prometheus-server.observability:80`
+# — un nombre que no resuelve en este cluster. Resultado: toda query de SLO
+# devolvía None y los burn rates se veían como «sin datos» en vez de como error.
+_FALLBACK_PROM = "http://kube-prometheus-stack-prometheus.observability:9090"
+
+
 def _prometheus_url() -> str:
     try:
         from config.settings import settings
-        return getattr(settings, "prometheus_url", "http://prometheus-server.observability:80")
+        return getattr(settings, "sre_prometheus_url", _FALLBACK_PROM)
     except Exception:
-        return "http://prometheus-server.observability:80"
+        return _FALLBACK_PROM
 
 
 def _query(promql: str, timeout: float = 5.0) -> float | None:
-    """Ejecuta una query instantánea en Prometheus. Retorna el primer valor escalar."""
+    """
+    Ejecuta una query instantánea en Prometheus. Retorna el primer valor escalar.
+
+    PromQL devuelve `NaN` cuando no hay muestras (típico de `histogram_quantile`
+    sobre un handler sin tráfico) y `+Inf` en divisiones por cero. Ninguno de los
+    dos es JSON válido: llegaban intactos a la respuesta y FastAPI reventaba con
+    500 «Out of range float values are not JSON compliant». No son datos — son
+    ausencia de datos, así que se reportan como None igual que un fallo de red.
+    """
     try:
+        import math
+
         import httpx
         url = f"{_prometheus_url()}/api/v1/query"
         resp = httpx.get(url, params={"query": promql}, timeout=timeout)
@@ -69,7 +87,8 @@ def _query(promql: str, timeout: float = 5.0) -> float | None:
         data = resp.json()
         results = data.get("data", {}).get("result", [])
         if results:
-            return float(results[0]["value"][1])
+            valor = float(results[0]["value"][1])
+            return valor if math.isfinite(valor) else None
     except Exception as exc:
         logger.debug(f"[slo] Prometheus query failed: {exc}")
     return None
