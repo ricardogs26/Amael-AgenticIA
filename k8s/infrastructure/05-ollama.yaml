@@ -152,6 +152,31 @@ spec:
         #    y los embeddings caen de ~29 ms a ~3,100 ms por batch.
         #    Con KV en f16 (160 KiB/token en qwen3:14b) el presupuesto de VRAM
         #    solo alcanza para 4096 × 2 slots dejando sitio al embedder.
+        # ── Calentamiento del embedder ───────────────────────────────────
+        # nomic-embed-text CABE en GPU (pide 268 MiB y sobran ~1.7 GB), pero
+        # Ollama decide la ubicacion AL CARGAR y no la revisa despues. Si el
+        # qwen3:14b entra primero y se ancla (keep_alive=24h), el embedder ya no
+        # encuentra sitio para sus buffers (-b 2048 -ub 2048) y cae a CPU:
+        # 27 ms -> 400 ms por embedding, y de 180 ms a 12 s en batch de 32.
+        #
+        # postStart corre antes de que llegue cualquier peticion de chat, asi
+        # que el embedder gana la carrera y ambos quedan en GPU.
+        # La imagen de Ollama no trae curl/wget/python - solo sh y el CLI, de
+        # ahi `ollama run` en vez de una llamada HTTP.
+        # Verificar tras cada reinicio: `ollama ps` debe decir 100% GPU en ambos.
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /usr/bin/sh
+              - -c
+              - |
+                i=0
+                while [ $i -lt 90 ]; do
+                  ollama list >/dev/null 2>&1 && break
+                  i=$((i+1)); sleep 2
+                done
+                ollama run nomic-embed-text "warmup" >/dev/null 2>&1 || true
         volumeMounts:
         - name: ollama-storage
           mountPath: /root/.ollama
