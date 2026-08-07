@@ -25,7 +25,10 @@ def test_app_has_camael_router_registered():
     """La app de camael_service debe montar /api/camael/*."""
     from camael_service.main import app
 
-    paths = [r.path for r in app.routes]
+    # getattr con default: en FastAPI reciente los routers incluidos aparecen
+    # como _IncludedRouter sin .path — el atributo directo revienta en CI, que
+    # resuelve la versión más nueva (4º intento del 7-ago).
+    paths = [getattr(r, "path", "") for r in app.routes]
     assert any("/api/camael/handoff" in p for p in paths)
     assert any("/api/camael/rfc/" in p for p in paths)
 

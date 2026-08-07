@@ -145,7 +145,10 @@ jobs:
           cache: pip
 
       - name: Instalar dependencias
-        run: pip install -e ".[dev]" --quiet
+        # .[all] y no .[dev]: apscheduler vive en el extra sre y el scheduler
+        # conversacional lo importa — con .[dev] los tests de Cassiel caen con
+        # ModuleNotFoundError (4º intento del 7-ago).
+        run: pip install -e ".[all]" --quiet
 
       - name: Lint (ruff)
         run: ruff check . --output-format=github
