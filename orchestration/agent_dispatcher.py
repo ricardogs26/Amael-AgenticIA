@@ -48,6 +48,8 @@ _AGENT_MIN_ROLE: dict[str, str] = {
 # ── Intents que van directamente a un agente específico (sin LangGraph)
 # Formato: "intent_keyword" → "agent_registry_name"
 _DIRECT_DISPATCH: dict[str, str] = {
+    "reminder":     "cassiel",    # Cassiel — recordatorios y tareas programadas
+    "memory":       "zaphkiel",   # Zaphkiel — búsqueda en el historial propio
     "sre":          "raphael",    # Raphael — SRE autónomo
     "productivity": "haniel",     # Haniel — Calendar/Gmail
     "research":     "sandalphon", # Sandalphon — RAG + web
@@ -60,8 +62,11 @@ _DIRECT_DISPATCH: dict[str, str] = {
     "qa":           "qa",         # Phanuel — ejecución de tests y reporte CI
 }
 
-# Intents que pasan por el pipeline LangGraph completo
-_PIPELINE_INTENTS = {"general", "kubernetes", "monitoring", "memory"}
+# Intents que pasan por el pipeline LangGraph completo.
+# "memory" salió de aquí (1.14.2): iba al pipeline, que no tiene NINGUNA
+# herramienta de historial — «¿qué te dije del trader?» terminaba en un plan
+# sin forma de consultar las conversaciones. Ahora va directo a Zaphkiel.
+_PIPELINE_INTENTS = {"general", "kubernetes", "monitoring"}
 
 
 class AgentDispatcher:
@@ -300,6 +305,27 @@ class AgentDispatcher:
                 metadata=extra_metadata,
             )
             task = {"query": question, "user_id": user_id}
+
+        elif intent == "reminder":
+            # Cassiel no usa skills — solo el LLM de parseo y Postgres.
+            ctx = ContextFactory.build_context(
+                user_id=user_id,
+                request_id=request_id,
+                conversation_id=conversation_id,
+                skill_names=[],
+            )
+            task = {"query": question, "user_email": user_id}
+
+        elif intent == "memory":
+            # Búsqueda de historial: pg_trgm + mensajes crudos, sin LLM.
+            # El user_id viene del JWT — Zaphkiel jamás lo recibe del modelo.
+            ctx = ContextFactory.build_context(
+                user_id=user_id,
+                request_id=request_id,
+                conversation_id=conversation_id,
+                skill_names=[],
+            )
+            task = {"action": "search_history", "user_id": user_id, "query": question}
 
         else:
             ctx = ContextFactory.build_context(

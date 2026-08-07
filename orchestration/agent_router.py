@@ -33,6 +33,15 @@ class RoutingDecision:
 
 # ── Reglas keyword (orden importa: más específico primero) ────────────────────
 _KEYWORD_RULES = [
+    # Recordatorios / tareas programadas — Cassiel.
+    # DEBE ir antes que "memory" (cuyo patrón atrapa recuerda|recordar) y que
+    # "productivity" (que atrapa schedule|agenda): «recuérdame X cada lunes» es
+    # un job, no una consulta de memoria ni un evento de calendario.
+    (r"\b(recu[eé]rdame|recordatorio|record[aá]rmelo|"
+     r"(m[aá]ndame|env[ií]ame|avisame|av[ií]same)\s+.*\b(cada|todos\s+los|diario|a\s+las)|"
+     r"cada\s+(hora|d[ií]a|semana|mes|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)|"
+     r"todos\s+los\s+d[ií]as|tareas?\s+programadas?|mis\s+recordatorios)\b",
+     "reminder", ["scheduler"]),
     # SRE / incidentes
     (r"\b(incident|anomaly|crash\s*loop|oom|circuit.breaker|sre|postmortem|slo)\b",
      "sre", ["sre"]),
@@ -71,6 +80,7 @@ _KEYWORD_RULES = [
 
 
 _INTENT_TO_AGENTS = {
+    "reminder":     ["scheduler"],
     "sre":          ["sre"],
     "kubernetes":   ["devops", "sre"],
     "monitoring":   ["sre", "devops"],
@@ -87,9 +97,10 @@ _INTENT_TO_AGENTS = {
 }
 
 _LLM_ROUTING_PROMPT = """Clasifica la siguiente pregunta en uno de estos intents:
-sre, kubernetes, monitoring, productivity, cto, dev, arch, research, memory, qa, general
+reminder, sre, kubernetes, monitoring, productivity, cto, dev, arch, research, memory, qa, general
 
 Reglas:
+- reminder: recordatorios y tareas programadas recurrentes ("recuérdame", "mándame X cada día", listar/pausar/borrar tareas programadas)
 - sre: incidentes, anomalías, circuit breaker, postmortem, SLO
 - kubernetes: pods, deployments, namespaces, kubectl, cluster, nodos
 - monitoring: prometheus, grafana, métricas, alertas, latencia, dashboards

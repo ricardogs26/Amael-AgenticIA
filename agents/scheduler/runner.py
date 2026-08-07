@@ -1,0 +1,143 @@
+"""
+Tick del scheduler — ejecuta los `user_jobs` vencidos.
+
+Cada 60 s (patrón del loop SRE) toma los jobs vencidos con claim atómico y corre
+el prompt de cada uno por el AgentDispatcher COMO SI el usuario lo hubiera
+escrito en ese momento: «resumen del trader» pasa por el router y cae en el
+agente del trader, igual que en el chat. Es el diseño de Hermes (sesión fresca
+por job) sobre las piezas que ya existen.
+
+Con AGENTS_MODE=remote el backend no arranca ningún APScheduler (el loop SRE
+vive en raphael-service), así que este módulo trae el suyo propio y se arranca
+incondicionalmente desde el lifespan.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+
+logger = logging.getLogger("agents.scheduler.runner")
+
+_TICK_SECONDS   = int(os.environ.get("SCHEDULER_TICK_SECONDS", "60"))
+# Timeout por job: un prompt que cae al pipeline LangGraph puede tomar minutos
+# en el 14b; sin tope, un job colgado bloquearía el tick para siempre.
+_JOB_TIMEOUT_S  = int(os.environ.get("SCHEDULER_JOB_TIMEOUT_S", "300"))
+
+_scheduler = None
+
+
+def start_scheduler_loop() -> None:
+    """Arranca el tick. Llamar una vez desde el lifespan del backend."""
+    global _scheduler
+    if _scheduler is not None:
+        return
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    _scheduler = AsyncIOScheduler(timezone="UTC")
+    _scheduler.add_job(
+        _tick, "interval", seconds=_TICK_SECONDS,
+        id="user_jobs_tick", replace_existing=True,
+        max_instances=1,   # un tick largo no debe encimarse con el siguiente
+    )
+    _scheduler.start()
+    logger.info(f"[scheduler] Tick de user_jobs cada {_TICK_SECONDS}s.")
+
+
+def stop_scheduler_loop() -> None:
+    global _scheduler
+    if _scheduler is not None:
+        _scheduler.shutdown(wait=False)
+        _scheduler = None
+
+
+async def _tick() -> None:
+    from agents.scheduler import storage
+    try:
+        due = storage.claim_due_jobs()
+    except Exception as exc:
+        logger.error(f"[scheduler] claim falló: {exc}")
+        return
+    if not due:
+        return
+    logger.info(f"[scheduler] {len(due)} job(s) vencidos.")
+    # Secuencial a propósito: los jobs comparten un solo GPU/LLM y encimarlos
+    # solo alarga a todos. El claim ya fijó next_run_at, no hay prisa.
+    for job in due:
+        try:
+            await asyncio.wait_for(_run_job(job), timeout=_JOB_TIMEOUT_S)
+            storage.record_result(job.id, "ok")
+        except TimeoutError:
+            logger.error(f"[scheduler] Job #{job.id} superó {_JOB_TIMEOUT_S}s.")
+            storage.record_result(job.id, "timeout")
+        except Exception as exc:
+            logger.error(f"[scheduler] Job #{job.id} falló: {exc}")
+            storage.record_result(job.id, f"error: {exc}")
+
+
+async def _run_job(job) -> None:
+    """Ejecuta el prompt del job por el flujo normal de chat y entrega."""
+    from interfaces.api.routers.chat import _build_tools_map
+    from orchestration.agent_dispatcher import AgentDispatcher
+    from orchestration.agent_router import AgentRouter
+
+    decision = await AgentRouter().route(job.prompt)
+    result   = await AgentDispatcher().dispatch(
+        question=job.prompt,
+        user_id=job.user_id,
+        tools_map=_build_tools_map(job.user_id),
+        routing_decision=decision,
+        request_id=f"job-{job.id}",
+    )
+    answer = (result.get("final_answer") or "").strip()
+    if not answer:
+        raise RuntimeError("el dispatcher no devolvió respuesta")
+
+    from security.sanitizer import sanitize_output
+    answer = sanitize_output(answer)
+
+    if job.delivery == "whatsapp":
+        _deliver_whatsapp(job, answer)
+    else:
+        logger.info(f"[scheduler] Job #{job.id} completado (sin entrega).")
+
+
+def _deliver_whatsapp(job, text: str) -> None:
+    """
+    Entrega por el bridge, resolviendo el número igual que el brief diario
+    (planner.py): identity_type='whatsapp', ORDER BY id, y SIN fallback — el
+    resultado de la tarea de alguien no se manda al teléfono de nadie más.
+    """
+    import httpx
+
+    from config.settings import settings
+    from storage.postgres.client import get_connection
+
+    phone: str | None = None
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT identity_value FROM user_identities
+                WHERE canonical_user_id = %s AND identity_type = 'whatsapp'
+                ORDER BY id LIMIT 1
+                """,
+                (job.user_id,),
+            )
+            row = cur.fetchone()
+            if row:
+                phone = row[0]
+    if not phone:
+        raise RuntimeError(
+            f"{job.user_id} no tiene WhatsApp registrado — resultado no entregado"
+        )
+
+    wa_url = getattr(settings, "whatsapp_bridge_url", "http://whatsapp-bridge-service:3000")
+    resp = httpx.post(
+        f"{wa_url}/send",
+        json={"phoneNumber": phone, "text": f"⏰ *{job.title}*\n\n{text}"},
+        timeout=20.0,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"bridge /send respondió {resp.status_code}")
+    logger.info(f"[scheduler] Job #{job.id} entregado a {phone}.")

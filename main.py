@@ -194,6 +194,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             settings.agents_mode,
         )
 
+    # 6.5 Scheduler conversacional (Cassiel) — user_jobs + tick de 60s.
+    # Incondicional: con AGENTS_MODE=remote el backend no corre ningún otro
+    # APScheduler, así que el tick trae el suyo propio.
+    try:
+        from agents.scheduler.runner import start_scheduler_loop
+        from agents.scheduler.storage import init_scheduler_db
+        init_scheduler_db()
+        start_scheduler_loop()
+        logger.info("[startup] Scheduler de user_jobs iniciado")
+    except Exception as exc:
+        logger.error(f"[startup] Scheduler FALLÓ: {exc}", exc_info=True)
+
     # 7. LangGraph warm-up (compilar grafo una vez antes del primer request)
     try:
         from orchestration.workflow_engine import get_orchestrator
@@ -226,6 +238,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # ── SHUTDOWN ──────────────────────────────────────────────────────────────
     logger.info("=== Amael-AgenticIA apagando — drenando requests in-flight ===")
+
+    try:
+        from agents.scheduler.runner import stop_scheduler_loop
+        stop_scheduler_loop()
+    except Exception:
+        pass
 
     # Drain period: dar tiempo a requests en vuelo para completarse
     # Kubernetes envía SIGTERM y espera terminationGracePeriodSeconds antes de SIGKILL

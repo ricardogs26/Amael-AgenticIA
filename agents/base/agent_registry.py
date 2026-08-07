@@ -148,6 +148,7 @@ def register_all_agents(skip_camael: bool = False) -> None:
         ("agents.arch.agent",         "UrielAgent"),
         ("agents.memory_agent.agent", "ZaphkielAgent"),
         ("agents.coder.agent",        "JophielAgent"),
+        ("agents.scheduler.agent",    "CassielAgent"),
         ("agents.devops.agent",       "CamaelAgent"),
         ("agents.qa.agent",           "QAAgent"),
     ]
