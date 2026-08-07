@@ -25,20 +25,11 @@ def test_app_has_camael_router_registered():
     """La app de camael_service debe montar /api/camael/*."""
     from camael_service.main import app
 
-    # En FastAPI reciente include_router monta un _IncludedRouter sin .path
-    # cuyas rutas viven ANIDADAS en .routes — el atributo plano primero
-    # reventaba y luego devolvía vacío (intentos 4 y 5 del 7-ago). Se recorre
-    # recursivo: funciona igual en la versión local y en la que CI resuelva.
-    def _collect_paths(routes) -> list[str]:
-        out = []
-        for r in routes:
-            p = getattr(r, "path", None)
-            if p:
-                out.append(p)
-            out.extend(_collect_paths(getattr(r, "routes", [])))
-        return out
-
-    paths = _collect_paths(app.routes)
+    # Se afirma contra el contrato OpenAPI y no contra app.routes: FastAPI
+    # 0.141 monta include_router como _IncludedRouter que ni expone .path ni
+    # anida .routes (guarda original_router). Tres intentos de introspección
+    # murieron con tres versiones distintas; el spec es la interfaz estable.
+    paths = list(app.openapi()["paths"].keys())
     assert any("/api/camael/handoff" in p for p in paths)
     assert any("/api/camael/rfc/" in p for p in paths)
 
