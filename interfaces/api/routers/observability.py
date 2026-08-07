@@ -86,6 +86,7 @@ async def list_agents(
 async def get_agent_graph(
     current_user: Annotated[dict, Depends(get_current_user)],
     traffic: bool = Query(True, description="Consultar Prometheus por el tráfico"),
+    knowledge: bool = Query(True, description="Incluir runbooks y colecciones Qdrant"),
 ):
     """
     Grafo de agentes para renderizar en el front.
@@ -94,9 +95,11 @@ async def get_agent_graph(
     required_skills), así que un agente nuevo aparece solo. El tráfico sale del
     contador `amael_agent_edge_total`, acumulado desde el arranque del pod —
     sin ventana, por las razones documentadas en `agent_graph._apply_traffic`.
+    La capa de conocimiento agrupa los runbooks de Qdrant por `issue_type` y
+    lista las colecciones RAG con su dueño.
 
     Returns:
-        { nodes: [...], edges: [...], metric, has_traffic, counts }
+        { nodes: [...], edges: [...], metric, has_traffic, knowledge, counts }
     """
     from observability.agent_graph import build_graph
-    return build_graph(include_traffic=traffic)
+    return build_graph(include_traffic=traffic, include_knowledge=knowledge)

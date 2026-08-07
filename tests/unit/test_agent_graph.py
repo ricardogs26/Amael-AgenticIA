@@ -21,7 +21,7 @@ def _registry():
 
 @pytest.fixture
 def grafo():
-    return agent_graph.build_graph(include_traffic=False)
+    return agent_graph.build_graph(include_traffic=False, include_knowledge=False)
 
 
 # ── Topología ─────────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ def test_no_hay_ventana_configurable(grafo):
 def test_sin_prometheus_has_traffic_es_false(monkeypatch):
     """Prometheus caído debe verse distinto de un sistema ocioso."""
     monkeypatch.setattr(agent_graph, "_query_vector", lambda *a, **k: [])
-    grafo = agent_graph.build_graph()
+    grafo = agent_graph.build_graph(include_knowledge=False)
     assert grafo["has_traffic"] is False
     assert all("invocations" not in e for e in grafo["edges"])
 
@@ -130,7 +130,7 @@ def test_la_consulta_lee_el_contador_crudo(monkeypatch):
     monkeypatch.setattr(
         agent_graph, "_query_vector", lambda q, timeout=5.0: vistas.append(q) or []
     )
-    agent_graph.build_graph()
+    agent_graph.build_graph(include_knowledge=False)
     assert vistas
     assert not any("rate(" in q or "increase(" in q for q in vistas)
     assert any("amael_agent_edge_total" in q for q in vistas)
@@ -151,7 +151,7 @@ def test_las_invocaciones_se_asignan_a_la_arista_correcta(monkeypatch):
         ]
 
     monkeypatch.setattr(agent_graph, "_query_vector", fake)
-    grafo = agent_graph.build_graph()
+    grafo = agent_graph.build_graph(include_knowledge=False)
     assert grafo["has_traffic"] is True
 
     por_clave = {
@@ -176,7 +176,7 @@ def test_error_rate_es_none_cuando_no_hubo_ejecuciones(monkeypatch):
         return [{"metric": {"agent_name": "raphael", "success": "true"}, "value": [0, "0"]}]
 
     monkeypatch.setattr(agent_graph, "_query_vector", fake)
-    grafo   = agent_graph.build_graph()
+    grafo   = agent_graph.build_graph(include_knowledge=False)
     raphael = next(n for n in grafo["nodes"] if n["id"] == "raphael")
     assert raphael["error_rate"] is None
 
@@ -196,7 +196,7 @@ def test_una_arista_medida_pero_no_declarada_aparece_en_el_grafo(monkeypatch):
         return [{"metric": {"agent_name": "zaphkiel", "success": "true"}, "value": [0, "6"]}]
 
     monkeypatch.setattr(agent_graph, "_query_vector", fake)
-    grafo = agent_graph.build_graph()
+    grafo = agent_graph.build_graph(include_knowledge=False)
 
     arista = next(
         (e for e in grafo["edges"]
@@ -216,7 +216,7 @@ def test_las_aristas_declaradas_no_se_marcan_como_descubiertas(monkeypatch):
         return []
 
     monkeypatch.setattr(agent_graph, "_query_vector", fake)
-    grafo = agent_graph.build_graph()
+    grafo = agent_graph.build_graph(include_knowledge=False)
     arista = next(e for e in grafo["edges"]
                   if (e["source"], e["target"]) == ("planner", "grouper"))
     assert "discovered" not in arista
@@ -232,7 +232,7 @@ def test_un_nodo_desconocido_medido_se_agrega_al_grafo(monkeypatch):
         return []
 
     monkeypatch.setattr(agent_graph, "_query_vector", fake)
-    grafo = agent_graph.build_graph()
+    grafo = agent_graph.build_graph(include_knowledge=False)
     nodo = next((n for n in grafo["nodes"] if n["id"] == "agente_nuevo"), None)
     assert nodo is not None
     assert nodo["kind"] == "unknown"
@@ -247,5 +247,150 @@ def test_una_arista_medida_en_cero_no_ensucia_el_grafo(monkeypatch):
         return []
 
     monkeypatch.setattr(agent_graph, "_query_vector", fake)
-    grafo = agent_graph.build_graph()
+    grafo = agent_graph.build_graph(include_knowledge=False)
     assert not any(n["id"] == "fantasma" for n in grafo["nodes"])
+
+
+# ── Capa de conocimiento ──────────────────────────────────────────────────────
+
+def _sin_cache():
+    agent_graph._knowledge_cache["t"] = 0.0
+    agent_graph._knowledge_cache["data"] = None
+
+
+@pytest.fixture(autouse=True)
+def _limpia_cache_conocimiento():
+    """El caché es global: sin limpiarlo, un test contamina al siguiente."""
+    _sin_cache()
+    yield
+    _sin_cache()
+
+
+def _qdrant_falso(colecciones, runbooks, next_offset=None):
+    """Simula Qdrant: /collections, /collections/<n> y el scroll de runbooks."""
+    def fake(path, body=None, timeout=12.0):
+        if path == "/collections":
+            return {"collections": [{"name": n} for n in colecciones]}
+        if path.endswith("/points/scroll"):
+            return {"points": runbooks, "next_page_offset": next_offset}
+        if path.startswith("/collections/"):
+            return {"points_count": 42}
+        return None
+    return fake
+
+
+def test_los_runbooks_se_agrupan_por_issue_type(monkeypatch):
+    puntos = [
+        {"payload": {"issue_type": "CRASH_LOOP", "auto_generated": True}},
+        {"payload": {"issue_type": "CRASH_LOOP", "auto_generated": True}},
+        {"payload": {"issue_type": "CRASH_LOOP", "consolidated": True}},
+        {"payload": {"issue_type": "OOM_KILLED"}},
+    ]
+    monkeypatch.setattr(agent_graph, "_qdrant", _qdrant_falso(["sre_runbooks"], puntos))
+    grafo = agent_graph.build_graph(include_traffic=False)
+
+    crash = next(n for n in grafo["nodes"] if n["id"] == "rb:CRASH_LOOP")
+    assert crash["kind"] == "runbook"
+    assert crash["runbooks"] == {"total": 3, "auto": 2, "consolidated": 1, "static": 0}
+
+    oom = next(n for n in grafo["nodes"] if n["id"] == "rb:OOM_KILLED")
+    assert oom["runbooks"]["static"] == 1
+    assert grafo["knowledge"]["runbooks_total"] == 4
+
+
+def test_los_runbooks_cuelgan_de_raphael(monkeypatch):
+    puntos = [{"payload": {"issue_type": "CRASH_LOOP", "auto_generated": True}}]
+    monkeypatch.setattr(agent_graph, "_qdrant", _qdrant_falso(["sre_runbooks"], puntos))
+    grafo = agent_graph.build_graph(include_traffic=False)
+    assert {"source": "raphael", "target": "rb:CRASH_LOOP", "via": "runbook"} in grafo["edges"]
+
+
+@pytest.mark.parametrize("payload,esperado", [
+    # Los .md de runbooks/: el indexador actual escribe `source` + text y marca
+    # auto_generated=False. Son base de conocimiento, no huérfanos.
+    ({"auto_generated": False, "source": "vault_sealed.md"}, "BASE_ESTATICA"),
+    # Nivel 2: generados al arrancar para describir workloads del cluster.
+    ({"auto_generated": True, "bootstrapped": True, "workload_name": "ollama"},
+     "BOOTSTRAP_WORKLOADS"),
+    # Esquema viejo del k8s-agent retirado: `content`/`file`/`name`, sin `text`.
+    ({"content": "# Runbook", "file": "crash_loop.md", "name": "crash_loop"},
+     "LEGACY_K8S_AGENT"),
+    ({}, "SIN_CLASIFICAR"),
+])
+def test_los_runbooks_sin_issue_type_se_separan_por_procedencia(
+    monkeypatch, payload, esperado
+):
+    """
+    Verificado contra la colección real: `file` lo escribe el esquema LEGACY, no
+    el actual. Clasificar por ese campo etiqueta la base estática como huérfana y
+    viceversa — exactamente al revés.
+    """
+    monkeypatch.setattr(
+        agent_graph, "_qdrant", _qdrant_falso(["sre_runbooks"], [{"payload": payload}])
+    )
+    grafo = agent_graph.build_graph(include_traffic=False)
+    assert any(n["id"] == f"rb:{esperado}" for n in grafo["nodes"])
+
+
+def test_la_base_estatica_no_se_cuenta_como_auto_generada(monkeypatch):
+    monkeypatch.setattr(
+        agent_graph, "_qdrant",
+        _qdrant_falso(["sre_runbooks"],
+                      [{"payload": {"auto_generated": False, "source": "oom_killed.md"}}]),
+    )
+    grafo = agent_graph.build_graph(include_traffic=False)
+    base = next(n for n in grafo["nodes"] if n["id"] == "rb:BASE_ESTATICA")
+    assert base["runbooks"] == {"total": 1, "auto": 0, "consolidated": 0, "static": 1}
+
+
+@pytest.mark.parametrize("coleccion,agente,via", [
+    ("memory_ricardo_at_gmail_dot_com", "zaphkiel",   "memory"),
+    ("amael_sre_knowledge",             "raphael",    "knowledge"),
+    ("ricardo_at_gmail_dot_com",        "sandalphon", "rag"),
+])
+def test_cada_coleccion_cuelga_de_su_agente(monkeypatch, coleccion, agente, via):
+    monkeypatch.setattr(agent_graph, "_qdrant", _qdrant_falso([coleccion], []))
+    grafo = agent_graph.build_graph(include_traffic=False)
+    assert {"source": agente, "target": f"qd:{coleccion}", "via": via} in grafo["edges"]
+    nodo = next(n for n in grafo["nodes"] if n["id"] == f"qd:{coleccion}")
+    assert nodo["kind"] == "collection"
+    assert nodo["points"] == 42
+
+
+def test_sre_runbooks_no_aparece_como_coleccion(monkeypatch):
+    """Ya está representado por los nodos rb:<issue_type>; duplicarlo confunde."""
+    monkeypatch.setattr(agent_graph, "_qdrant", _qdrant_falso(["sre_runbooks"], []))
+    grafo = agent_graph.build_graph(include_traffic=False)
+    assert not any(n["id"] == "qd:sre_runbooks" for n in grafo["nodes"])
+
+
+def test_qdrant_caido_no_tumba_el_grafo(monkeypatch):
+    monkeypatch.setattr(agent_graph, "_qdrant", lambda *a, **k: None)
+    grafo = agent_graph.build_graph(include_traffic=False)
+    assert grafo["knowledge"]["available"] is False
+    assert grafo["counts"]["agents"] > 0     # el resto del grafo sigue en pie
+
+
+def test_el_tope_de_scroll_se_reporta_como_incompleto(monkeypatch):
+    """Un conteo truncado presentado como exacto sería peor que no darlo."""
+    monkeypatch.setattr(agent_graph, "_MAX_RUNBOOK_POINTS", 2)
+    monkeypatch.setattr(
+        agent_graph, "_qdrant",
+        _qdrant_falso(["sre_runbooks"],
+                      [{"payload": {"issue_type": "X"}}] * 2, next_offset="hay-mas"),
+    )
+    grafo = agent_graph.build_graph(include_traffic=False)
+    assert grafo["knowledge"]["runbooks_complete"] is False
+
+
+def test_el_cache_evita_golpear_qdrant_en_cada_carga(monkeypatch):
+    llamadas = []
+    base = _qdrant_falso(["sre_runbooks"], [{"payload": {"issue_type": "X"}}])
+    monkeypatch.setattr(
+        agent_graph, "_qdrant",
+        lambda path, body=None, timeout=12.0: (llamadas.append(path), base(path, body))[1],
+    )
+    agent_graph.build_graph(include_traffic=False)
+    primera = len(llamadas)
+    agent_graph.build_graph(include_traffic=False)
+    assert len(llamadas) == primera, "la segunda carga volvió a consultar Qdrant"

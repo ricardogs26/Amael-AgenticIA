@@ -9,14 +9,19 @@ agente nuevo aparece en el grafo sin que nadie edite un diagrama:
   1. El grafo LangGraph compilado  → nodos y aristas del pipeline
   2. `AgentRegistry`               → agentes de dispatch directo y su metadata
   3. `required_skills` de cada uno → aristas agente → skill
+  4. Qdrant                        → capa de conocimiento (runbooks y colecciones)
 
 Encima de esa topología se pinta el tráfico medido (`amael_agent_edge_total`).
-Una arista declarada pero con rate 0 es información útil: significa camino
-muerto, no error de dibujo.
+Una arista declarada pero con 0 invocaciones es información útil: significa
+camino muerto, no error de dibujo.
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
+import time
+import urllib.request
 from typing import Any
 
 logger = logging.getLogger("observability.agent_graph")
@@ -29,6 +34,20 @@ _SENTINEL_KINDS = {"__start__": "entry", "__end__": "exit"}
 # Las consultas son contadores crudos, sin ventana. Ver `_apply_traffic` para el
 # porqué; el corolario grato es que ya no se concatena nada en la PromQL, así que
 # desaparece la superficie de inyección que obligaba a una lista blanca.
+
+
+_QDRANT_URL         = os.environ.get("QDRANT_URL", "http://qdrant-service:6333")
+_RUNBOOKS_COLLECTION = "sre_runbooks"
+# Tope del scroll de runbooks. Hoy son ~1300; el tope existe para que un
+# crecimiento inesperado no convierta una carga de página en un escaneo de
+# decenas de miles de puntos. Si se alcanza, el grafo lo dice en vez de mentir.
+_MAX_RUNBOOK_POINTS = 20_000
+_SCROLL_PAGE        = 1_000
+# La capa de conocimiento es cara comparada con leer registries en memoria, y
+# cambia en escala de horas (el consolidador corre 1 vez al día). Un TTL corto
+# evita que abrir la página varias veces golpee Qdrant cada vez.
+_KNOWLEDGE_TTL_S    = 60.0
+_knowledge_cache: dict[str, Any] = {"t": 0.0, "data": None}
 
 
 # ── Prometheus ────────────────────────────────────────────────────────────────
@@ -147,6 +166,162 @@ def _agent_topology() -> tuple[list[dict], list[dict]]:
         logger.debug(f"[graph] rutas de dispatch no disponibles: {exc}")
 
     return nodes, edges
+
+
+# ── Capa de conocimiento ──────────────────────────────────────────────────────
+
+def _qdrant(path: str, body: dict | None = None, timeout: float = 12.0) -> dict | None:
+    """GET/POST contra Qdrant. Best-effort: si no responde, la capa se omite."""
+    try:
+        req = urllib.request.Request(
+            f"{_QDRANT_URL}{path}",
+            data=json.dumps(body).encode() if body is not None else None,
+            headers={"Content-Type": "application/json"} if body is not None else {},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.load(resp).get("result")
+    except Exception as exc:
+        logger.debug(f"[graph] Qdrant {path} falló: {exc}")
+        return None
+
+
+def _clasificar_sin_tipo(payload: dict) -> str:
+    """
+    Agrupa los runbooks que no llevan `issue_type`.
+
+    Son tres poblaciones con significados distintos, y meterlas en un solo cubo
+    manda a perseguir problemas que no existen. Se distinguen por la firma de su
+    payload, verificada contra la colección real el 6-ago-2026:
+
+      {auto_generated: False, source, text}  → los .md de runbooks/ (18 de 18
+          indexados). Base de conocimiento escrita a mano; no llevan issue_type
+          por diseño y `init_runbooks_qdrant` los inventaría justamente por
+          `source`.
+      {bootstrapped, workload_*, image, ...} → nivel 2, generados al arrancar
+          para describir los workloads del cluster.
+      {content, file, name}                  → esquema viejo del k8s-agent
+          retirado: usa `content` donde el actual usa `text`. Estos sí son
+          huérfanos.
+
+    Ojo con `file`: lo escribe el esquema legacy, no el actual. Clasificar por
+    ese campo da exactamente el resultado contrario al correcto.
+    """
+    if payload.get("bootstrapped"):
+        return "BOOTSTRAP_WORKLOADS"
+    if payload.get("auto_generated") is False and payload.get("source"):
+        return "BASE_ESTATICA"
+    if payload.get("file") or payload.get("name"):
+        return "LEGACY_K8S_AGENT"
+    return "SIN_CLASIFICAR"
+
+
+def _resumen_runbooks() -> tuple[dict[str, dict], bool]:
+    """
+    Agrupa los runbooks por `issue_type`, contando su procedencia.
+
+    Se recorre con `scroll` pidiendo solo tres campos del payload y ningún
+    vector: traer 1300 vectores de 768 dimensiones para contarlos sería absurdo.
+
+    Devuelve `(resumen, completo)`; `completo=False` significa que se alcanzó el
+    tope y los conteos son un piso, no el total — el front debe decirlo en vez de
+    presentar un número incompleto como si fuera exacto.
+    """
+    resumen: dict[str, dict] = {}
+    offset: Any = None
+    vistos = 0
+
+    while vistos < _MAX_RUNBOOK_POINTS:
+        body: dict[str, Any] = {
+            "limit": _SCROLL_PAGE,
+            "with_vector": False,
+            "with_payload": [
+                "issue_type", "auto_generated", "consolidated",
+                "source", "bootstrapped", "file",
+            ],
+        }
+        if offset is not None:
+            body["offset"] = offset
+        page = _qdrant(f"/collections/{_RUNBOOKS_COLLECTION}/points/scroll", body)
+        if not page:
+            break
+        for punto in page.get("points", []):
+            payload = punto.get("payload") or {}
+            tipo = payload.get("issue_type") or _clasificar_sin_tipo(payload)
+            fila = resumen.setdefault(
+                tipo, {"total": 0, "auto": 0, "consolidated": 0, "static": 0}
+            )
+            fila["total"] += 1
+            if payload.get("consolidated"):
+                fila["consolidated"] += 1
+            elif payload.get("auto_generated"):
+                fila["auto"] += 1
+            else:
+                fila["static"] += 1
+            vistos += 1
+        offset = page.get("next_page_offset")
+        if offset is None:
+            return resumen, True
+
+    return resumen, offset is None
+
+
+# Qué agente consume cada colección. El orden importa: `memory_` se evalúa antes
+# que el caso general, que es «colección RAG de un usuario».
+def _dueno_de_coleccion(nombre: str) -> tuple[str, str] | None:
+    if nombre == _RUNBOOKS_COLLECTION:
+        return None                       # se representa como nodos por issue_type
+    if nombre.startswith("memory_"):
+        return "zaphkiel", "memory"
+    if "sre_knowledge" in nombre:
+        return "raphael", "knowledge"
+    return "sandalphon", "rag"
+
+
+def _knowledge_topology() -> tuple[list[dict], list[dict], dict]:
+    """Nodos y aristas de la capa de conocimiento: runbooks y colecciones RAG."""
+    ahora = time.monotonic()
+    if _knowledge_cache["data"] and ahora - _knowledge_cache["t"] < _KNOWLEDGE_TTL_S:
+        return _knowledge_cache["data"]
+
+    nodes: list[dict] = []
+    edges: list[dict] = []
+    meta: dict = {"available": False}
+
+    colecciones = _qdrant("/collections")
+    if not colecciones:
+        return nodes, edges, meta
+    meta["available"] = True
+
+    for col in colecciones.get("collections", []):
+        nombre = col.get("name", "")
+        dueno  = _dueno_de_coleccion(nombre)
+        if not dueno:
+            continue
+        info   = _qdrant(f"/collections/{nombre}") or {}
+        agente, via = dueno
+        nodes.append({
+            "id":     f"qd:{nombre}",
+            "label":  nombre,
+            "kind":   "collection",
+            "points": info.get("points_count"),
+        })
+        edges.append({"source": agente, "target": f"qd:{nombre}", "via": via})
+
+    resumen, completo = _resumen_runbooks()
+    meta["runbooks_complete"] = completo
+    meta["runbooks_total"]    = sum(f["total"] for f in resumen.values())
+    for tipo, fila in resumen.items():
+        nodes.append({
+            "id":       f"rb:{tipo}",
+            "label":    tipo,
+            "kind":     "runbook",
+            "runbooks": fila,
+        })
+        edges.append({"source": "raphael", "target": f"rb:{tipo}", "via": "runbook"})
+
+    _knowledge_cache["t"]    = ahora
+    _knowledge_cache["data"] = (nodes, edges, meta)
+    return nodes, edges, meta
 
 
 def _dedupe_nodes(nodes: list[dict]) -> list[dict]:
@@ -269,13 +444,16 @@ def _apply_traffic(nodes: list[dict], edges: list[dict]) -> bool:
 
 # ── API pública ───────────────────────────────────────────────────────────────
 
-def build_graph(include_traffic: bool = True) -> dict:
-    """Grafo completo listo para renderizar: `{nodes, edges, metric, has_traffic}`."""
+def build_graph(include_traffic: bool = True, include_knowledge: bool = True) -> dict:
+    """Grafo completo listo para renderizar."""
     pipeline_nodes, pipeline_edges = _pipeline_topology()
     agent_nodes,    agent_edges    = _agent_topology()
+    know_nodes, know_edges, know_meta = (
+        _knowledge_topology() if include_knowledge else ([], [], {"available": False})
+    )
 
-    nodes = _dedupe_nodes(pipeline_nodes + agent_nodes)
-    edges = _dedupe_edges(pipeline_edges + agent_edges)
+    nodes = _dedupe_nodes(pipeline_nodes + agent_nodes + know_nodes)
+    edges = _dedupe_edges(pipeline_edges + agent_edges + know_edges)
 
     has_traffic = _apply_traffic(nodes, edges) if include_traffic else False
     return {
@@ -285,10 +463,13 @@ def build_graph(include_traffic: bool = True) -> dict:
         # arranque del pod, no un promedio ni una ventana.
         "metric":      "cumulative_since_pod_start",
         "has_traffic": has_traffic,
+        "knowledge":   know_meta,
         "counts": {
-            "agents":   sum(1 for n in nodes if n["kind"] == "agent"),
-            "pipeline": sum(1 for n in nodes if n["kind"] == "pipeline"),
-            "skills":   sum(1 for n in nodes if n["kind"] == "skill"),
-            "edges":    len(edges),
+            "agents":     sum(1 for n in nodes if n["kind"] == "agent"),
+            "pipeline":   sum(1 for n in nodes if n["kind"] == "pipeline"),
+            "skills":     sum(1 for n in nodes if n["kind"] == "skill"),
+            "runbooks":   sum(1 for n in nodes if n["kind"] == "runbook"),
+            "collections": sum(1 for n in nodes if n["kind"] == "collection"),
+            "edges":      len(edges),
         },
     }

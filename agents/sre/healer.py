@@ -1043,9 +1043,14 @@ def _run_gitops_fix_in_thread(anomaly: Anomaly, incident_key: str, repo: str) ->
             conversation_id=incident_key,
             request_id=str(uuid.uuid4()),
             llm=llm,
+            # Sin esto el grafo de agentes atribuye el handoff al usuario: `caller`
+            # vacío se registra como "user", o sea que la arista diría que alguien
+            # invocó a Camael a mano en vez de que Raphael se lo pasó.
+            caller="raphael",
+            via="handoff",
         )
         camael = AgentRegistry.get("camael", ctx)
-        result = loop.run_until_complete(camael.execute(task))
+        result = loop.run_until_complete(camael.run(task))
         if result.success:
             logger.info(
                 f"[healer] GitOps fix iniciado por Camael — "
