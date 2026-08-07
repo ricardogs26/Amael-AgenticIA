@@ -213,3 +213,55 @@ async def test_run_job_sin_respuesta_truena(monkeypatch):
                       enabled=True, one_shot=False, next_run_at=datetime.now(UTC))
     with pytest.raises(RuntimeError, match="no devolvió respuesta"):
         await runner._run_job(job)
+
+
+# ── Lock entre réplicas ───────────────────────────────────────────────────────
+
+async def test_la_consolidacion_solo_corre_en_una_replica(monkeypatch):
+    """
+    El HPA fija minReplicas=2, así que el cron dispara en dos pods a la vez
+    (verificado el 7-ago: ambos a las 09:30:00.014). Solo el que gana el SET NX
+    debe sintetizar.
+    """
+    from agents.scheduler import runner
+
+    corridas = []
+    monkeypatch.setattr(
+        "agents.memory_agent.consolidator.run_consolidation",
+        lambda: corridas.append(1) or [],
+    )
+
+    class _Redis:
+        def __init__(self):
+            self.claves = {}
+
+        def set(self, k, v, nx=False, ex=None):
+            if nx and k in self.claves:
+                return None
+            self.claves[k] = v
+            return True
+
+    r = _Redis()
+    monkeypatch.setattr("storage.redis.client.get_redis_client", lambda: r)
+
+    await runner._memory_consolidation()   # réplica 1: gana el lock
+    await runner._memory_consolidation()   # réplica 2: lo encuentra tomado
+    assert len(corridas) == 1
+
+
+async def test_redis_caido_no_bloquea_la_consolidacion(monkeypatch):
+    """Duplicar una síntesis es preferible a no consolidar nunca."""
+    from agents.scheduler import runner
+
+    corridas = []
+    monkeypatch.setattr(
+        "agents.memory_agent.consolidator.run_consolidation",
+        lambda: corridas.append(1) or [],
+    )
+
+    def explota():
+        raise ConnectionError("redis down")
+    monkeypatch.setattr("storage.redis.client.get_redis_client", explota)
+
+    await runner._memory_consolidation()
+    assert corridas == [1]

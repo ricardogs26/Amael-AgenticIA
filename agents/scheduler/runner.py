@@ -63,9 +63,35 @@ def stop_scheduler_loop() -> None:
         _scheduler = None
 
 
+def _acquire_daily_lock(nombre: str, ttl_s: int = 3300) -> bool:
+    """
+    Lock diario entre réplicas vía Redis SET NX. TTL de 55 min: menor que las
+    24 h entre corridas (mañana el lock ya expiró) y mayor que cualquier
+    consolidación razonable. Si Redis no responde, se corre igual — duplicar
+    una síntesis es preferible a no consolidar nunca por un Redis caído.
+    """
+    try:
+        from storage.redis.client import get_redis_client
+        return bool(get_redis_client().set(
+            f"scheduler:lock:{nombre}", "1", nx=True, ex=ttl_s,
+        ))
+    except Exception as exc:
+        logger.warning(f"[scheduler] lock {nombre} no disponible ({exc}) — se corre igual.")
+        return True
+
+
 async def _memory_consolidation() -> None:
     """Destila los episodios de memoria en hechos. Trabajo sync (LLM del tier
     profundo, ~minutos) → a un thread para no bloquear el event loop."""
+    # El HPA fija minReplicas=2 (el replicas:1 del manifest es letra muerta),
+    # así que este cron dispara en DOS pods a la vez — verificado el 7-ago:
+    # ambos corrieron a las 09:30:00.014 con 130 µs de diferencia. Dos
+    # síntesis simultáneas duplicarían hechos y se pisarían los borrados.
+    # Mismo problema que user_jobs resuelve con SKIP LOCKED; aquí basta un
+    # SET NX: el que llega segundo no debe esperar, debe no correr.
+    if not _acquire_daily_lock("memory_consolidation"):
+        logger.info("[scheduler] Consolidación de memoria: otra réplica la tomó.")
+        return
     from agents.memory_agent.consolidator import run_consolidation
     try:
         resultados = await asyncio.to_thread(run_consolidation)
