@@ -302,6 +302,11 @@ class ZaphkielAgent(BaseAgent):
                     success=True, output={"deleted": 0}, agent_name=self.name,
                 )
 
+            # El borrado puede tocar hechos destilados: sin invalidar, el
+            # bloque de perfil seguiría inyectando hasta 1 h lo que el usuario
+            # pidió olvidar — un GDPR wipe que "recuerda" es incumplimiento.
+            from agents.memory_agent.profile import invalidate as _invalidate_profile
+
             if point_id:
                 from qdrant_client.models import PointIdsList
                 await asyncio.to_thread(
@@ -309,6 +314,7 @@ class ZaphkielAgent(BaseAgent):
                     collection_name=collection,
                     points_selector=PointIdsList(points=[point_id]),
                 )
+                _invalidate_profile(user_id)
                 return AgentResult(
                     success=True,
                     output={"deleted": 1, "id": point_id},
@@ -317,6 +323,7 @@ class ZaphkielAgent(BaseAgent):
             else:
                 # GDPR wipe — elimina la colección completa
                 await asyncio.to_thread(client.delete_collection, collection)
+                _invalidate_profile(user_id)
                 logger.info(f"[zaphkiel] GDPR wipe: colección {collection} eliminada")
                 return AgentResult(
                     success=True,

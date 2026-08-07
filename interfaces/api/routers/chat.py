@@ -210,11 +210,25 @@ async def chat(
         decision    = await router_inst.route(question)
         tools_map   = _build_tools_map(effective_user)
 
-        # Enriquecer con memoria episódica (best-effort, no bloquea si falla)
+        # Enriquecer con memoria (best-effort, no bloquea si falla).
+        # Dos capas con reglas distintas (B2 del plan Hermes):
+        #   - perfil: hechos destilados, inyectados COMPLETOS siempre — el
+        #     coseno no recupera «prefiere respuestas cortas» cuando la
+        #     pregunta es sobre Kong. Cacheado en Redis, tope duro en código.
+        #   - episodios: lo circunstancial sí se recupera por similitud.
+        profile_block = await _run_in_thread_safe(
+            _render_profile_block, effective_user
+        )
         memory_ctx = await _retrieve_memory_context(effective_user, question)
+
+        partes = []
+        if profile_block:
+            partes.append(profile_block)
+        if memory_ctx:
+            partes.append(f"[Contexto de sesiones anteriores]\n{memory_ctx}")
         dispatch_q = (
-            f"[Contexto de sesiones anteriores]\n{memory_ctx}\n\n[Pregunta actual]\n{question}"
-            if memory_ctx else question
+            "\n\n".join(partes) + f"\n\n[Pregunta actual]\n{question}"
+            if partes else question
         )
 
         result_dict = await dispatch(
@@ -597,6 +611,21 @@ def _persist_message(
                 )
     except Exception as exc:
         logger.warning(f"[chat] No se pudo persistir mensaje: {exc}")
+
+
+def _render_profile_block(user_id: str) -> str:
+    from agents.memory_agent.profile import render_profile_block
+    return render_profile_block(user_id)
+
+
+async def _run_in_thread_safe(fn, *args) -> str:
+    """to_thread con red: la memoria jamás tumba el chat."""
+    import asyncio
+    try:
+        return await asyncio.to_thread(fn, *args)
+    except Exception as exc:
+        logger.debug(f"[chat] perfil no disponible (no crítico): {exc}")
+        return ""
 
 
 async def _retrieve_memory_context(user_id: str, question: str) -> str:

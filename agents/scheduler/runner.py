@@ -40,8 +40,20 @@ def start_scheduler_loop() -> None:
         id="user_jobs_tick", replace_existing=True,
         max_instances=1,   # un tick largo no debe encimarse con el siguiente
     )
+    # Consolidación de memoria (B1) — 03:30 hora de México, media hora después
+    # del consolidador de runbooks para no encimarse con él en el ollama-cpu.
+    # La trampa que NO se repite: el nivel 3 de runbooks estuvo roto desde su
+    # creación porque ningún add_job lo agendaba pese a lo que decía la doc.
+    # Por eso el log de abajo imprime el next_run_time real de cada job.
+    _scheduler.add_job(
+        _memory_consolidation, "cron", hour=3, minute=30,
+        timezone="America/Mexico_City",
+        id="memory_consolidation", replace_existing=True,
+        max_instances=1,
+    )
     _scheduler.start()
-    logger.info(f"[scheduler] Tick de user_jobs cada {_TICK_SECONDS}s.")
+    for job in _scheduler.get_jobs():
+        logger.info(f"[scheduler] Job agendado: {job.id} → próxima {job.next_run_time}")
 
 
 def stop_scheduler_loop() -> None:
@@ -49,6 +61,21 @@ def stop_scheduler_loop() -> None:
     if _scheduler is not None:
         _scheduler.shutdown(wait=False)
         _scheduler = None
+
+
+async def _memory_consolidation() -> None:
+    """Destila los episodios de memoria en hechos. Trabajo sync (LLM del tier
+    profundo, ~minutos) → a un thread para no bloquear el event loop."""
+    from agents.memory_agent.consolidator import run_consolidation
+    try:
+        resultados = await asyncio.to_thread(run_consolidation)
+        hechos = sum(r.get("facts", 0) for r in resultados)
+        logger.info(
+            f"[scheduler] Consolidación de memoria: {len(resultados)} colección(es), "
+            f"{hechos} hecho(s) destilados."
+        )
+    except Exception as exc:
+        logger.error(f"[scheduler] Consolidación de memoria falló: {exc}")
 
 
 async def _tick() -> None:
