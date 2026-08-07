@@ -181,6 +181,30 @@ def get_skill(name: str, status: str | None = None) -> dict | None:
     return {"id": p["id"], **(p.get("payload") or {})}
 
 
+def list_skills_brief(scope: str = "sre") -> str:
+    """
+    Catálogo de skills ACTIVAS en una línea por skill: `name — description`.
+
+    Progressive disclosure (C2): al prompt va este catálogo barato (~80 chars
+    por skill) para que el agente SEPA qué existe; el cuerpo completo solo
+    entra para el top match semántico o cuando el agente lo pide por nombre.
+    Con el tope de 900 chars, 10 skills activas caben; más allá se corta por
+    líneas completas — misma regla que el bloque de perfil de memoria.
+    """
+    lineas = [
+        f"- {s['name']} — {s.get('description', '')[:90]}"
+        for s in list_skills(status="active", scope=scope)
+    ]
+    out, total = [], 0
+    for linea in sorted(lineas):
+        if total + len(linea) + 1 > 900:
+            out.append(f"- … y {len(lineas) - len(out)} más")
+            break
+        out.append(linea)
+        total += len(linea) + 1
+    return "\n".join(out)
+
+
 def search_active(query: str, scope: str = "sre", k: int = 2) -> list[dict]:
     """Skills ACTIVAS relevantes al query. Las propuestas jamás salen de aquí."""
     try:

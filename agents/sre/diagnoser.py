@@ -117,12 +117,14 @@ def diagnose_with_llm(anomaly, vault_knowledge: str = "", metrics_knowledge: str
 
     runbook = search_runbooks(anomaly.issue_type, anomaly.details)
 
-    # Skills procedurales APROBADAS (C1). Solo status=active llega aquí — las
-    # propuestas de los agentes no tocan un diagnóstico hasta que un humano
-    # las aprueba por /sre skill approve.
-    skill_ctx = ""
+    # Skills procedurales APROBADAS (C1/C2). Progressive disclosure: el
+    # catálogo breve (1 línea por skill activa) entra siempre para que el LLM
+    # sepa qué existe; el CUERPO solo entra para el top match semántico. Las
+    # propuestas sin aprobar no tocan un diagnóstico jamás.
+    skill_ctx, skill_catalog = "", ""
     try:
-        from skills.procedural.store import search_active
+        from skills.procedural.store import list_skills_brief, search_active
+        skill_catalog = list_skills_brief(scope="sre")
         skills = search_active(f"{anomaly.issue_type}: {anomaly.details}",
                                scope="sre", k=1)
         if skills:
@@ -138,8 +140,10 @@ def diagnose_with_llm(anomaly, vault_knowledge: str = "", metrics_knowledge: str
         f"Recurso: {anomaly.resource_name} ({anomaly.resource_type})\n"
         f"Detalles: {anomaly.details}\n\n"
     )
+    if skill_catalog:
+        prompt += f"Skills aprobadas disponibles:\n{skill_catalog}\n\n"
     if skill_ctx:
-        prompt += f"Skill aprobada aplicable (síguela si encaja):\n{skill_ctx}\n\n"
+        prompt += f"Skill más relevante (síguela si encaja):\n{skill_ctx}\n\n"
     if runbook:
         prompt += f"Runbook relevante:\n{runbook[:1000]}\n\n"
 

@@ -217,3 +217,30 @@ def test_flujo_completo_por_comandos(qdrant, monkeypatch):
     assert store.get_skill("sre-crash-loop", status="active")
 
     assert "No hay propuesta" in handle_command("skill approve sre-crash-loop")
+
+
+# ── C2: progressive disclosure ────────────────────────────────────────────────
+
+def test_el_catalogo_es_una_linea_por_skill_activa(qdrant):
+    manage.skill_manage(action="create", owner_agent="raphael",
+                        skill_md=SKILL_VALIDA, notify=False)
+    # Una propuesta NO sale en el catálogo…
+    assert store.list_skills_brief() == ""
+    store.approve("sre-crash-loop")
+    catalogo = store.list_skills_brief()
+    assert catalogo.startswith("- sre-crash-loop — ")
+    assert "\n" not in catalogo          # una sola skill = una sola línea
+    assert "## Procedimiento" not in catalogo, \
+        "el catálogo llevó el cuerpo — eso es lo que C2 evita"
+
+
+def test_el_catalogo_se_corta_por_lineas_completas(qdrant, monkeypatch):
+    for i in range(15):
+        md = SKILL_VALIDA.replace("sre-crash-loop", f"sre-skill-{i:02d}")
+        manage.skill_manage(action="create", owner_agent="raphael",
+                            skill_md=md, notify=False)
+        store.approve(f"sre-skill-{i:02d}")
+    catalogo = store.list_skills_brief()
+    assert len(catalogo) <= 950
+    assert "más" in catalogo.splitlines()[-1], \
+        "el corte debe DECIR que hay más, no truncar en silencio"

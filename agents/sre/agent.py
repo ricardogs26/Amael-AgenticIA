@@ -433,6 +433,28 @@ def _build_tools() -> list:
         result = search_runbooks(issue_type, details)
         return result or "No se encontraron runbooks relevantes."
 
+    def _consult_skills(query: str) -> str:
+        """
+        Progressive disclosure (C2): 'list' devuelve el catálogo de una línea
+        por skill; un nombre exacto devuelve el cuerpo completo; cualquier otro
+        texto busca por similitud. El catálogo es barato — el cuerpo solo viaja
+        cuando el agente lo pide.
+        """
+        from skills.procedural.store import get_skill, list_skills_brief, search_active
+        q = (query or "").strip()
+        if q.lower() in ("", "list", "lista", "listar"):
+            catalogo = list_skills_brief(scope="sre")
+            return (f"Skills aprobadas:\n{catalogo}\n\n(Pide una por nombre "
+                    f"para ver el procedimiento completo.)"
+                    if catalogo else "No hay skills aprobadas todavía.")
+        skill = get_skill(q, status="active")
+        if skill:
+            return skill.get("text", "")[:3000]
+        resultados = search_active(q, scope="sre", k=1)
+        if resultados:
+            return resultados[0].get("text", "")[:3000]
+        return f"No hay ninguna skill aprobada que coincida con {q!r}."
+
     def _notify_whatsapp(message: str) -> str:
         success = reporter.notify_whatsapp_sre(message, severity="HIGH")
         return "✅ Notificación enviada." if success else "❌ Error enviando notificación."
@@ -481,6 +503,8 @@ def _build_tools() -> list:
             description="Ejecuta una query PromQL. Parámetro: query."),
         StructuredTool.from_function(func=_search_runbooks,       name="Consultar_Base_Conocimiento",
             description="Busca runbooks y procedimientos. Parámetro: query ('tipo_error: descripción')."),
+        StructuredTool.from_function(func=_consult_skills,        name="Consultar_Skills",
+            description="Skills aprobadas: 'list' para el catálogo, un nombre para el procedimiento completo. Parámetro: query."),
         StructuredTool.from_function(func=_vault_query,           name="Consultar_Vault",
             description="Consulta información sobre Vault, secrets, policies. Usar SIEMPRE para preguntas de Vault. Parámetro: query."),
         StructuredTool.from_function(func=_get_sre_status,        name="Estado_SRE",
