@@ -29,7 +29,13 @@ _SRE_RUNBOOKS_COLLECTION = "sre_runbooks"
 _OLLAMA_BASE_URL         = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
 _EMBED_MODEL             = "nomic-embed-text"
 MIN_RUNBOOKS_TO_CONSOLIDATE = 3   # mínimo de auto-runbooks para disparar consolidación
-MAX_RUNBOOKS_PER_TYPE       = 10  # máximo a consolidar por issue_type (evitar prompts gigantes)
+# Máximo a consolidar por issue_type y corrida. Configurable porque es la
+# velocidad de drenaje del backlog: medido el 7-ago-2026, HIGH_RESTARTS
+# acumulaba 626 sin consolidar (la generación se secó el 8-jul con los fixes de
+# 1.1.12 — no hay fuga activa, solo backlog). A 10/noche eran ~2 meses; a 30
+# son ~3 semanas, y 30×600 chars de prompt sigue siendo manejable en el tier
+# profundo con el timeout de 300 s.
+MAX_RUNBOOKS_PER_TYPE = int(os.environ.get("SRE_CONSOLIDATOR_MAX_PER_TYPE", "30"))
 # El tier profundo corre en CPU (~16 tok/s) y su carga en frío son ~26s. Los
 # 120s originales asumían GPU; una síntesis de ~800 tokens no cabía.
 _SYNTHESIS_TIMEOUT_S        = 300
@@ -135,14 +141,19 @@ def _fetch_auto_runbooks_by_type() -> dict[str, list[dict]]:
 
 # ── LLM synthesis ─────────────────────────────────────────────────────────────
 
-def _synthesize_runbooks(issue_type: str, runbooks: list[dict]) -> str:
+def _synthesize_runbooks(
+    issue_type: str, runbooks: list[dict], previous_text: str = ""
+) -> str:
     """
     El LLM sintetiza N runbooks del mismo issue_type en un documento consolidado
-    con patrones aprendidos. Timeout 120s. Retorna "" si falla.
+    con patrones aprendidos, FUSIONANDO el consolidado previo si existe — el
+    conocimiento acumulado en corridas anteriores no se descarta. Retorna ""
+    si falla.
     """
+    lote = runbooks[:MAX_RUNBOOKS_PER_TYPE]
     # Construir resumen de incidentes para el prompt
     incidents_summary = ""
-    for i, rb in enumerate(runbooks[:MAX_RUNBOOKS_PER_TYPE], 1):
+    for i, rb in enumerate(lote, 1):
         incidents_summary += (
             f"\n--- Incidente {i} ---\n"
             f"Recurso: {rb['namespace']}/{rb['resource_name']}\n"
@@ -151,14 +162,22 @@ def _synthesize_runbooks(issue_type: str, runbooks: list[dict]) -> str:
             f"{rb['text'][:600]}\n"
         )
 
+    previo = (
+        "\n## CONOCIMIENTO PREVIO (runbook consolidado vigente — FUSIÓNALO, "
+        "no lo descartes; si un incidente nuevo lo contradice, gana lo nuevo):\n"
+        f"{previous_text[:4000]}\n"
+        if previous_text else ""
+    )
+
     prompt = (
-        f"Eres un SRE experto. Analiza estos {len(runbooks)} incidentes del tipo "
+        f"Eres un SRE experto. Analiza estos {len(lote)} incidentes del tipo "
         f"`{issue_type}` que ocurrieron en producción y fueron resueltos.\n"
+        f"{previo}"
         f"{incidents_summary}\n\n"
         "Genera un RUNBOOK CONSOLIDADO en Markdown con patrones aprendidos. "
         "Usa EXACTAMENTE estas secciones (muy conciso, máx 5 bullets cada una):\n\n"
         f"# Runbook consolidado: {issue_type}\n"
-        f"*Basado en {len(runbooks)} incidentes resueltos*\n\n"
+        f"*Basado en {len(lote)} incidentes resueltos*\n\n"
         "## Patrón observado\n"
         "Qué tienen en común estos incidentes (recursos afectados, frecuencia, contexto).\n\n"
         "## Causas raíz más frecuentes\n"
@@ -228,6 +247,45 @@ def _save_consolidated_runbook(issue_type: str, text: str, source_count: int) ->
     except Exception as exc:
         logger.warning(f"[consolidator] Error guardando consolidado: {exc}")
         return False
+
+
+def _fetch_previous_consolidated(issue_type: str) -> dict | None:
+    """
+    Recupera el consolidado vigente de un issue_type ANTES de reemplazarlo,
+    para que la síntesis lo fusione. Sin esto, cada corrida nocturna borraba el
+    consolidado anterior y sintetizaba SOLO el lote nuevo: el runbook de cada
+    tipo olvidaba cada 24 h lo aprendido en todas las noches anteriores.
+
+    Retorna {"text": ..., "consolidated_from": int} o None si no hay.
+    """
+    try:
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        client = QdrantClient(url=_QDRANT_URL)
+        result, _ = client.scroll(
+            collection_name=_SRE_RUNBOOKS_COLLECTION,
+            scroll_filter=Filter(must=[
+                FieldCondition(key="consolidated", match=MatchValue(value=True)),
+                FieldCondition(key="issue_type",   match=MatchValue(value=issue_type)),
+            ]),
+            limit=1,
+            with_payload=True,
+            with_vectors=False,
+        )
+        if not result:
+            return None
+        p = result[0].payload or {}
+        texto = p.get("text") or p.get("content") or ""
+        if not texto:
+            return None
+        return {
+            "text": texto,
+            "consolidated_from": int(p.get("consolidated_from", 0) or 0),
+        }
+    except Exception as exc:
+        logger.warning(f"[consolidator] Error leyendo consolidado previo: {exc}")
+        return None
 
 
 def _delete_previous_consolidated(issue_type: str) -> int:
@@ -309,11 +367,20 @@ def run_consolidation() -> None:
             )
             continue
 
+        lote = runbooks[:MAX_RUNBOOKS_PER_TYPE]
         logger.info(
-            f"[consolidator] Consolidando {len(runbooks)} runbooks de {issue_type}..."
+            f"[consolidator] Consolidando {len(lote)} runbooks de {issue_type} "
+            f"({len(runbooks)} pendientes)..."
         )
 
-        consolidated_text = _synthesize_runbooks(issue_type, runbooks)
+        # El consolidado vigente entra a la síntesis: sin esto cada corrida
+        # nocturna lo borraba y sintetizaba SOLO el lote nuevo — el runbook
+        # olvidaba cada 24 h lo aprendido en todas las noches anteriores.
+        previo = _fetch_previous_consolidated(issue_type)
+
+        consolidated_text = _synthesize_runbooks(
+            issue_type, lote, previous_text=(previo or {}).get("text", "")
+        )
         if not consolidated_text:
             logger.warning(f"[consolidator] LLM falló para {issue_type}. Saltando.")
             continue
@@ -327,13 +394,16 @@ def run_consolidation() -> None:
         saved = _save_consolidated_runbook(
             issue_type=issue_type,
             text=consolidated_text,
-            source_count=len(runbooks),
+            # Acumulado honesto: los incidentes de este lote MÁS los que el
+            # consolidado previo ya representaba. Antes decía len(runbooks)
+            # (el grupo completo) aunque solo se procesaran 10.
+            source_count=len(lote) + (previo or {}).get("consolidated_from", 0),
         )
         if not saved:
             continue
 
         # Borrar los runbooks individuales que ya fueron consolidados
-        ids_to_delete = [rb["id"] for rb in runbooks[:MAX_RUNBOOKS_PER_TYPE]]
+        ids_to_delete = [rb["id"] for rb in lote]
         _delete_runbook_points(ids_to_delete)
 
         if SRE_AUTO_RUNBOOK_SAVED_TOTAL:
