@@ -9,8 +9,6 @@ Valida que en modo `remote`:
 from __future__ import annotations
 
 import httpx
-import pytest
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Helpers de respuesta canned (respetan los schemas del OpenAPI)

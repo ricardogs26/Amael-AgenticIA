@@ -10,12 +10,10 @@ Enfoque especial en la función CRÍTICA `handoff_to_camael()`:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Fixtures / helpers
@@ -324,7 +322,8 @@ class TestUpdateRfc:
             async def fail_rfc(self, sys_id, message):
                 calls.append(("fail", sys_id, message))
 
-        import sys, types
+        import sys
+        import types
         fake_module = types.ModuleType("agents.devops.servicenow_client")
         fake_sn = FakeSn()
         fake_module.is_configured = fake_sn.is_configured

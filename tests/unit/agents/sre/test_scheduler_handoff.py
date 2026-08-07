@@ -4,7 +4,6 @@ from __future__ import annotations
 
 def test_scheduler_imports_camael_client_dispatcher(monkeypatch):
     """scheduler.py usa camael_client.handoff_to_camael (no healer.handoff_to_camael)."""
-    import importlib
     import agents.sre.scheduler as sched_mod
     source = open(sched_mod.__file__).read()
 

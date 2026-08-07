@@ -58,12 +58,14 @@ def _fetch_facts(user_id: str) -> list[dict]:
         "with_vector": False,
         "filter": {"must": [{"key": "kind", "match": {"value": "fact"}}]},
     }
+    if not _QDRANT_URL.startswith(("http://", "https://")):
+        raise ValueError(f"QDRANT_URL con esquema no permitido: {_QDRANT_URL!r}")
     req = urllib.request.Request(
         f"{_QDRANT_URL}/collections/{collection_for(user_id)}/points/scroll",
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=8) as resp:
+    with urllib.request.urlopen(req, timeout=8) as resp:  # nosec B310 — esquema validado arriba
         result = json.load(resp).get("result") or {}
     return [p.get("payload") or {} for p in result.get("points", [])]
 

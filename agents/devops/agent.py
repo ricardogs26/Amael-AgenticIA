@@ -574,6 +574,7 @@ class CamaelAgent(BaseAgent):
             # Dedup: si ya existe un RFC para este incidente en Redis, reutilizarlo
             try:
                 import json as _json_dedup
+
                 from storage.redis.client import get_client as _redis_dedup
                 _existing_rfc = _redis_dedup().get(f"sn:rfc:{incident_key}")
                 if _existing_rfc:

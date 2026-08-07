@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("agents.trader.macro_calendar")
@@ -87,7 +87,7 @@ def _floor(now: datetime) -> datetime:
 def _et_to_utc(date_str: str, hh: int, mm: int) -> datetime:
     """'2026-08-12' + 8:30 ET → datetime UTC (ZoneInfo resuelve el DST)."""
     y, m, d = (int(x) for x in date_str.split("-")[:3])
-    return datetime(y, m, d, hh, mm, tzinfo=_ET).astimezone(timezone.utc)
+    return datetime(y, m, d, hh, mm, tzinfo=_ET).astimezone(UTC)
 
 
 # ── FRED ──────────────────────────────────────────────────────────────────────
@@ -205,7 +205,7 @@ def _load(now: datetime, force: bool = False) -> list[dict]:
 
 def upcoming(hours: int | None = None, now: datetime | None = None) -> list[dict]:
     """Eventos dentro del horizonte, con horas restantes. Para el prompt del LLM."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     limit = now + timedelta(hours=hours if hours is not None else LOOKAHEAD_HOURS)
     out = []
     for ev in _load(now):
@@ -228,7 +228,7 @@ def blackout(now: datetime | None = None) -> dict | None:
     importa tanto como el "antes": el minuto siguiente a un CPI es el de mayor
     spread y peor fill del día.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     for ev in _load(now):
         if ev["impact"] != "high":
             continue
@@ -248,4 +248,4 @@ def blackout(now: datetime | None = None) -> dict | None:
 
 def refresh() -> list[dict]:
     """Fuerza recarga desde FRED (endpoint de diagnóstico)."""
-    return _load(datetime.now(timezone.utc), force=True)
+    return _load(datetime.now(UTC), force=True)

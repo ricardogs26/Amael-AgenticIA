@@ -81,7 +81,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: watchdog
-              image: registry.richardx.dev/raphael-service:1.1.10
+              image: registry.richardx.dev/raphael-service:1.1.27
               imagePullPolicy: IfNotPresent
               command: ["python", "-m", "agents.sre.watchdog"]
               env:
@@ -102,6 +102,12 @@ spec:
                   value: "5219993437008"
                 - name: WHATSAPP_BRIDGE_URL
                   value: "http://whatsapp-bridge-service:3000"
+                # Vault sellado no se ve en ningún Deployment: el pod corre y
+                # responde, pero no entrega secretos. El 7-ago-2026 llevaba 4 h
+                # sellado y solo se supo porque el brief de las 7:00 dijo que
+                # faltaban credenciales de Google. Vaciar para desactivar.
+                - name: WATCHDOG_VAULT_ADDR
+                  value: "http://vault.vault.svc.cluster.local:8200"
                 - name: REDIS_HOST
                   value: "redis-service"
                 - name: REDIS_PORT

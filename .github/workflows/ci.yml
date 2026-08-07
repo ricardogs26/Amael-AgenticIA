@@ -62,7 +62,15 @@ jobs:
         run: pip install -e ".[all]" --quiet
 
       - name: Scan de vulnerabilidades en dependencias
-        run: pip-audit --format=markdown --output=dep-scan-report.md || (cat dep-scan-report.md >> $GITHUB_STEP_SUMMARY && exit 1)
+        # PYSEC-2026-1325: ecdsa (dependencia transitiva de python-jose) SIN
+        # versión con fix publicada — no hay acción posible salvo migrar a
+        # PyJWT. Se ignora explícitamente; quitar el ignore cuando haya fix.
+        # El reporte se imprime también al log: el summary no es accesible por
+        # API y diagnosticar a ciegas costó una tarde (7-ago-2026).
+        run: |
+          pip-audit --ignore-vuln PYSEC-2026-1325 \
+            --format=markdown --output=dep-scan-report.md \
+            || (cat dep-scan-report.md && cat dep-scan-report.md >> $GITHUB_STEP_SUMMARY && exit 1)
 
       - name: Publicar reporte en summary
         if: always()
@@ -112,7 +120,7 @@ jobs:
         run: |
           bandit -r agents/ interfaces/ core/ security/ \
             --severity-level medium --confidence-level medium \
-            -f txt -o bandit-report.txt || (cat bandit-report.txt >> $GITHUB_STEP_SUMMARY && exit 1)
+            -f txt -o bandit-report.txt || (cat bandit-report.txt && cat bandit-report.txt >> $GITHUB_STEP_SUMMARY && exit 1)
 
       - name: Publicar reporte en summary
         if: always()
@@ -236,7 +244,7 @@ jobs:
       - name: Notificar a Raphael (monitoreo intensificado 10min)
         run: |
           curl -s -X POST \
-            http://k8s-agent-service.amael-ia.svc.cluster.local:8002/api/sre/deploy-hook \
+            http://raphael-service.amael-ia.svc.cluster.local:8002/api/sre/deploy-hook \
             -H "Authorization: Bearer ${{ secrets.AMAEL_INTERNAL_SECRET }}" \
             -H "Content-Type: application/json" \
             -d "{

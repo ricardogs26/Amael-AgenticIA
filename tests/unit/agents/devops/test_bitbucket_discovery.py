@@ -16,7 +16,7 @@ class TestIsKnownResource:
         assert is_known_resource("amael-agentic-deployment-7d9fab12-xk2vp") is True
 
     def test_unknown_returns_false(self):
-        assert is_known_resource("amael-demo-oom") is False
+        assert is_known_resource("recurso-inexistente-xyz") is False
 
     def test_empty_string_returns_false(self):
         assert is_known_resource("") is False

@@ -18,8 +18,9 @@ API pública:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from config.settings import settings
 
@@ -34,7 +35,7 @@ def _is_inprocess() -> bool:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _anomaly_to_handoff_payload(anomaly: Any, incident_key: str) -> dict[str, Any]:

@@ -3,7 +3,6 @@ servicenow_client directo — rompe coupling cross-agent)."""
 from __future__ import annotations
 
 import asyncio
-import pytest
 
 
 def test_update_rfc_state_calls_camael_client_closed(monkeypatch):
@@ -92,7 +91,6 @@ def test_update_rfc_state_skips_when_no_sys_id(monkeypatch):
 
 def test_update_rfc_state_does_not_import_agents_devops(monkeypatch):
     """healer ya NO debe importar agents.devops.servicenow_client directamente."""
-    import importlib
     import agents.sre.healer as healer_mod
     source = open(healer_mod.__file__).read()
     assert "from agents.devops import servicenow_client" not in source

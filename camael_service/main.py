@@ -147,7 +147,7 @@ async def _drain_wal_local() -> None:
             # Sync wrapper para llamar async desde sync consumer
             loop = asyncio.new_event_loop()
             try:
-                result = loop.run_until_complete(handle_handoff(payload))
+                loop.run_until_complete(handle_handoff(payload))
             finally:
                 loop.close()
             # None = issue no soportado; lo damos por drenado para no reintentar.

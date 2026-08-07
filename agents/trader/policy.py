@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from agents.trader.models import AccountSnapshot, PolicyDecision, TradeProposal
 
@@ -65,7 +65,7 @@ def is_halted() -> bool:
 
 def set_halt(reason: str) -> None:
     """HALT permanente — solo se quita a mano (DEL trader:halt o endpoint)."""
-    _redis().set(KEY_HALT, f"{datetime.now(timezone.utc).isoformat()} {reason}")
+    _redis().set(KEY_HALT, f"{datetime.now(UTC).isoformat()} {reason}")
     logger.critical(f"[policy] HALT activado: {reason}")
 
 
@@ -93,7 +93,7 @@ def register_trade_result(pnl_usd: float) -> None:
 
 
 def orders_today() -> int:
-    key = KEY_ORDERS_DAY.format(date=datetime.now(timezone.utc).strftime("%Y%m%d"))
+    key = KEY_ORDERS_DAY.format(date=datetime.now(UTC).strftime("%Y%m%d"))
     try:
         return int(_redis().get(key) or 0)
     except Exception:
@@ -101,7 +101,7 @@ def orders_today() -> int:
 
 
 def count_order() -> None:
-    key = KEY_ORDERS_DAY.format(date=datetime.now(timezone.utc).strftime("%Y%m%d"))
+    key = KEY_ORDERS_DAY.format(date=datetime.now(UTC).strftime("%Y%m%d"))
     r = _redis()
     r.incr(key)
     r.expire(key, 172800)

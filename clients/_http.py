@@ -86,7 +86,7 @@ def reset_clients() -> None:
         get_camael_async_client,
     ):
         try:
-            client = getter.__wrapped__()  # obtener instancia sin cachear
+            getter.__wrapped__()  # noqa: B018 — se invoca solo para validar construcción
             # Cerrar clientes cacheados si existen
         except Exception:
             pass

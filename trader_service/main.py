@@ -226,8 +226,8 @@ def _register_api(app: FastAPI) -> None:
         determinísticamente y requieren confirm=true; el resto va al LLM
         con contexto en vivo.
         """
-        from agents.trader import policy
         from agents.trader import chat as trader_chat
+        from agents.trader import policy
 
         message = str(payload.get("message", "")).strip()
         confirm = bool(payload.get("confirm", False))

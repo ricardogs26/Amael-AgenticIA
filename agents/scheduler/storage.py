@@ -128,6 +128,27 @@ def compute_next_run(schedule: str, tz_name: str) -> tuple[datetime, bool]:
 _COLS = ("id, user_id, title, prompt, schedule, timezone, delivery, enabled, "
          "one_shot, next_run_at, last_run_at, last_status, run_count")
 
+# SQL precompuesto a nivel módulo: solo interpola _COLS (constante de arriba);
+# TODOS los valores van parametrizados en execute(). El nosec aplica aquí, en
+# la construcción — dentro del string rompería el SQL y en cur.execute() bandit
+# no lo lee (reporta sobre la línea del f-string).
+_INSERT_SQL = f"""
+    INSERT INTO user_jobs
+        (user_id, title, prompt, schedule, timezone, delivery,
+         one_shot, next_run_at)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    RETURNING {_COLS}
+"""  # nosec B608
+_CLAIM_SQL = f"""
+    SELECT {_COLS} FROM user_jobs
+    WHERE enabled AND next_run_at <= NOW()
+    ORDER BY next_run_at
+    LIMIT %s
+    FOR UPDATE SKIP LOCKED
+"""  # nosec B608
+_LIST_SQL      = f"SELECT {_COLS} FROM user_jobs WHERE user_id = %s ORDER BY id"  # nosec B608
+_LIST_ON_SQL   = f"SELECT {_COLS} FROM user_jobs WHERE user_id = %s AND enabled ORDER BY id"  # nosec B608
+
 
 def _row_to_job(row: tuple) -> Job:
     return Job(
@@ -159,13 +180,7 @@ def create_job(
                     f"alguna antes de crear otra."
                 )
             cur.execute(
-                f"""
-                INSERT INTO user_jobs
-                    (user_id, title, prompt, schedule, timezone, delivery,
-                     one_shot, next_run_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING {_COLS}
-                """,
+                _INSERT_SQL,
                 (user_id, title[:120], prompt[:2000], schedule, tz_name,
                  delivery, one_shot, next_run),
             )
@@ -179,10 +194,8 @@ def list_jobs(user_id: str, include_disabled: bool = True) -> list[Job]:
     from storage.postgres.client import get_connection
     with get_connection() as conn:
         with conn.cursor() as cur:
-            filtro = "" if include_disabled else "AND enabled"
             cur.execute(
-                f"SELECT {_COLS} FROM user_jobs WHERE user_id = %s {filtro} "
-                f"ORDER BY id",
+                _LIST_SQL if include_disabled else _LIST_ON_SQL,
                 (user_id,),
             )
             return [_row_to_job(r) for r in cur.fetchall()]
@@ -266,16 +279,7 @@ def claim_due_jobs(limit: int = 10) -> list[Job]:
     claimed: list[Job] = []
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT {_COLS} FROM user_jobs
-                WHERE enabled AND next_run_at <= NOW()
-                ORDER BY next_run_at
-                LIMIT %s
-                FOR UPDATE SKIP LOCKED
-                """,
-                (limit,),
-            )
+            cur.execute(_CLAIM_SQL, (limit,))
             for row in cur.fetchall():
                 job = _row_to_job(row)
                 if job.one_shot:

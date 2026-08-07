@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 logger = logging.getLogger("agents.trader.thesis")
 
@@ -41,7 +41,7 @@ def save_thesis(symbol: str, thesis: str, target_pct: float, stop_pct: float,
             "target_pct": target_pct,
             "stop_pct": stop_pct,
             "entry_price": entry_price,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }), ex=THESIS_TTL_S)
     except Exception as exc:
         logger.warning(f"[thesis] no se pudo guardar tesis de {symbol}: {exc}")
@@ -88,7 +88,7 @@ def open_theses(positions: list[dict]) -> list[dict]:
 def recent_trades_summary(limit: int = 10) -> list[dict]:
     """Últimas órdenes propias, compactas para el prompt."""
     from agents.trader.storage import get_recent_orders
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     out = []
     try:
         for o in get_recent_orders(limit):

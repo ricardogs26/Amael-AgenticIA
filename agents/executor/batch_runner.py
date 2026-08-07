@@ -16,11 +16,6 @@ from typing import Any
 from langchain_ollama import ChatOllama
 
 from agents.executor.step_handlers import STEP_HANDLERS
-
-
-def _strip_think_tags(text: str) -> str:
-    """Elimina bloques <think>...</think> que emite qwen3 en modo thinking."""
-    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 from observability.metrics import (
     EXECUTOR_BACKPRESSURE_QUEUE_DEPTH,
     EXECUTOR_CONTEXT_TRUNCATIONS_TOTAL,
@@ -35,6 +30,11 @@ from observability.metrics import (
 from observability.tracing import tracer
 
 logger = logging.getLogger("agents.executor.batch_runner")
+
+
+def _strip_think_tags(text: str) -> str:
+    """Elimina bloques <think>...</think> que emite qwen3 en modo thinking."""
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 MAX_CONTEXT_CHARS = 12_000
 MAX_ANSWER_CHARS = 8_000

@@ -13,8 +13,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from agents.devops.servicenow_client import RFCState
-
 # ── Mapeos ITIL v4 ────────────────────────────────────────────────────────────
 
 _RISK_MAP: dict[str, tuple[str, str, str]] = {

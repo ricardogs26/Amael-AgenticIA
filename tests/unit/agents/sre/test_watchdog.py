@@ -65,3 +65,93 @@ def test_parse_targets_ignora_entradas_sin_namespace():
         ("amael-ia", "ollama"),
         ("vault", "vault-0"),
     ]
+
+
+# ── Vault sellado (7-ago-2026) ────────────────────────────────────────────────
+#
+# Un pod de Vault que reinicia arranca sellado: el proceso responde y el
+# Deployment se ve sano, así que check_deployment no ve nada. Esa mañana el
+# brief de las 7:00 dijo «no se encontraron credenciales de Google Calendar,
+# autoriza el acceso» — la autorización estaba intacta y Vault llevaba cuatro
+# horas sellado. El watchdog tiene que nombrar la causa real.
+
+class _Resp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def _vault(monkeypatch, payload=None, exc=None):
+    import requests
+
+    def _get(url, timeout=None):
+        assert "/v1/sys/seal-status" in url
+        if exc:
+            raise exc
+        return _Resp(payload)
+
+    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(watchdog, "_VAULT_ADDR", "http://vault.vault:8200")
+
+
+def test_vault_abierto_no_reporta(monkeypatch):
+    _vault(monkeypatch, {"sealed": False, "initialized": True})
+    assert watchdog.check_vault() is None
+
+
+def test_vault_sellado_se_reporta(monkeypatch):
+    _vault(monkeypatch, {"sealed": True, "initialized": True, "progress": 0, "t": 3})
+
+    problem = watchdog.check_vault()
+
+    assert problem is not None
+    assert "SELLADO" in problem and "0/3" in problem
+    # El aviso dice qué se rompe, no solo que algo pasó.
+    assert "brief" in problem.lower()
+
+
+def test_vault_sin_inicializar_se_reporta(monkeypatch):
+    _vault(monkeypatch, {"sealed": True, "initialized": False})
+    assert "NO INICIALIZADO" in watchdog.check_vault()
+
+
+def test_vault_incomunicado_se_reporta(monkeypatch):
+    """No poder preguntar no prueba que esté sellado, pero tampoco se calla."""
+    _vault(monkeypatch, exc=RuntimeError("connection refused"))
+
+    problem = watchdog.check_vault()
+
+    assert "no se pudo consultar" in problem
+    assert "SELLADO" not in problem
+
+
+def test_vault_desactivable(monkeypatch):
+    monkeypatch.setattr(watchdog, "_VAULT_ADDR", "")
+    assert watchdog.check_vault() is None
+
+
+def test_la_clave_de_dedup_sale_del_aviso(monkeypatch):
+    """main() usa p.split('`')[1] — el aviso debe traer el recurso ahí."""
+    _vault(monkeypatch, {"sealed": True, "initialized": True, "progress": 1, "t": 3})
+
+    assert watchdog.check_vault().split("`")[1] == "vault/vault-0"
+
+
+def test_el_whatsapp_incluye_como_abrir_vault(monkeypatch):
+    enviado = {}
+
+    class _Requests:
+        @staticmethod
+        def post(url, json=None, timeout=None):
+            enviado["text"] = json["text"]
+            return SimpleNamespace(status_code=200, text="ok")
+
+    monkeypatch.setattr(watchdog, "_PHONE", "5210000000000")
+    monkeypatch.setitem(__import__("sys").modules, "requests", _Requests)
+
+    watchdog.send_alert(["`vault/vault-0` SELLADO (0/3 llaves)."])
+
+    assert "vault operator unseal" in enviado["text"]
+    assert "vault.root" in enviado["text"]

@@ -31,8 +31,8 @@ os.environ.setdefault("CAMAEL_SERVICE_URL",   "http://camael-service.test:8003")
 import httpx
 import pytest
 
-from config.settings import settings
 from clients import _http
+from config.settings import settings
 
 
 @pytest.fixture(autouse=True)

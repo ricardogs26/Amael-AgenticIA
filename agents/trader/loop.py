@@ -25,9 +25,13 @@ def trader_cycle() -> None:
     """Un ciclo completo. Cualquier excepción se registra y no tumba el scheduler."""
     from agents.trader import analyzer, broker, policy, reporter, storage
     from agents.trader.metrics import (
-        TRADER_CASH, TRADER_CONFIDENCE, TRADER_EQUITY, TRADER_LAST_CONFIDENCE,
+        TRADER_CASH,
+        TRADER_CONFIDENCE,
+        TRADER_EQUITY,
+        TRADER_LAST_CONFIDENCE,
         TRADER_LOOP_RUNS,
-        TRADER_ORDERS, TRADER_POLICY_BLOCKS,
+        TRADER_ORDERS,
+        TRADER_POLICY_BLOCKS,
     )
 
     mode = broker.TRADER_MODE

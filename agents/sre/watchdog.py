@@ -11,9 +11,17 @@ Este módulo es deliberadamente **independiente** de Raphael:
   - Corre como CronJob aparte, en su propio pod y con su propia ServiceAccount.
   - Si Raphael está caído, en CrashLoop o mudo, esto sigue avisando.
 
-Solo hace dos cosas: comprobar que los deployments críticos tienen al menos una
-réplica disponible, y mandar un WhatsApp si no. Nada más — cada función extra es
-una forma nueva de que el vigilante falle en silencio.
+Comprueba dos cosas y manda un WhatsApp si fallan: que los deployments críticos
+tengan al menos una réplica disponible, y que Vault no esté sellado. Nada más —
+cada función extra es una forma nueva de que el vigilante falle en silencio.
+
+Lo de Vault entró el 7-ago-2026. Un pod de Vault que reinicia arranca SELLADO
+siempre: el proceso corre y el Deployment se ve sano, pero no entrega secretos.
+Esa mañana el brief de las 7:00 avisó «no se encontraron credenciales de Google
+Calendar, autoriza el acceso» — la autorización estaba intacta; Vault llevaba
+cuatro horas sellado tras un reciclado del cluster. Un fallo que solo se nota
+por un mensaje engañoso a otra hora es exactamente lo que este módulo existe
+para evitar. NO lo abre: solo avisa (las llaves Shamir no viven en el cluster).
 
 Uso:
     python -m agents.sre.watchdog
@@ -21,6 +29,7 @@ Uso:
 Env vars:
     WATCHDOG_DEPLOYMENTS   CSV `namespace/nombre` (default: los de amael-ia)
     WATCHDOG_REALERT_MIN   minutos entre avisos repetidos del mismo recurso (60)
+    WATCHDOG_VAULT_ADDR    URL de Vault ("" desactiva el chequeo)
     OWNER_PHONE            teléfono destino
     WHATSAPP_BRIDGE_URL    bridge (default http://whatsapp-bridge-service:3000)
 
@@ -50,6 +59,8 @@ _DEFAULT_TARGETS = (
 
 _TARGETS      = os.environ.get("WATCHDOG_DEPLOYMENTS", _DEFAULT_TARGETS)
 _REALERT_MIN  = int(os.environ.get("WATCHDOG_REALERT_MIN", "60"))
+_VAULT_ADDR   = os.environ.get("WATCHDOG_VAULT_ADDR",
+                               "http://vault.vault.svc.cluster.local:8200")
 _BRIDGE_URL   = os.environ.get("WHATSAPP_BRIDGE_URL", "http://whatsapp-bridge-service:3000")
 _PHONE        = (
     os.environ.get("OWNER_PHONE")
@@ -102,6 +113,43 @@ def check_deployment(apps_v1, namespace: str, name: str) -> str | None:
     return None
 
 
+def check_vault() -> str | None:
+    """
+    ¿Vault está sellado? Devuelve el problema, o None si entrega secretos.
+
+    Un pod de Vault recién arrancado corre y responde, así que el Deployment se
+    ve sano y `check_deployment` no ve nada — pero sellado no entrega un solo
+    secreto. `/v1/sys/seal-status` es público (no lleva token) y es la única
+    forma honesta de saberlo desde fuera.
+
+    Devuelve el aviso con el recurso entre backticks porque `main()` saca de ahí
+    la clave de dedup.
+    """
+    if not _VAULT_ADDR:
+        return None
+    try:
+        import requests
+
+        r = requests.get(f"{_VAULT_ADDR}/v1/sys/seal-status", timeout=10)
+        data = r.json()
+    except Exception as exc:
+        # No poder preguntarle a Vault no prueba que esté sellado, pero un
+        # gestor de secretos incomunicado tampoco es un estado sano.
+        return f"`vault/seal-status` no se pudo consultar: {exc}"
+
+    if not data.get("initialized", True):
+        return "`vault/vault-0` NO INICIALIZADO."
+    if data.get("sealed"):
+        progreso = data.get("progress", 0)
+        umbral = data.get("t", "?")
+        return (
+            f"`vault/vault-0` SELLADO ({progreso}/{umbral} llaves). "
+            "Los secretos de Google no se pueden leer: el brief diario y "
+            "productivity-service van a fallar."
+        )
+    return None
+
+
 def _should_alert(key: str) -> bool:
     """Dedup por Redis. Si Redis no responde, se alerta igual (fail-loud)."""
     try:
@@ -125,13 +173,21 @@ def send_alert(problems: list[str]) -> bool:
         logger.error("OWNER_PHONE/SRE_ALERT_PHONE sin definir — no se puede alertar.")
         return False
 
+    hay_vault = any("vault/" in p for p in problems)
     text = (
-        "🚨 *WATCHDOG — deployment crítico caído*\n\n"
+        "🚨 *WATCHDOG — servicio crítico caído*\n\n"
         + "\n".join(f"• {p}" for p in problems)
         + "\n\nRevisa `kubectl get pods -n amael-ia`. "
         "Si hay pods en Unknown tras un reinicio del nodo, están reteniendo "
         "recursos (GPU/PVC) y hay que borrarlos con --force."
     )
+    if hay_vault:
+        # Vault no se arregla mirando pods: necesita las llaves, que a
+        # propósito no viven en el cluster.
+        text += (
+            "\n\nPara Vault: `kubectl exec -n vault vault-0 -- vault operator "
+            "unseal <LLAVE>` tres veces, con las llaves de `vault.root`."
+        )
     try:
         import requests
 
@@ -169,6 +225,13 @@ def main() -> int:
             problems.append(problem)
         else:
             logger.info(f"OK — {ns}/{name}")
+
+    vault_problem = check_vault()
+    if vault_problem:
+        logger.error(vault_problem)
+        problems.append(vault_problem)
+    elif _VAULT_ADDR:
+        logger.info("OK — vault (abierto)")
 
     if not problems:
         logger.info("Todos los deployments críticos están sanos.")

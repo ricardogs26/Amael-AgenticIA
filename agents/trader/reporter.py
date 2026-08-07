@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import UTC
 
 logger = logging.getLogger("agents.trader.reporter")
 
@@ -44,8 +45,8 @@ def morning_report() -> None:
     try:
         acct = get_account_snapshot()
 
-        from datetime import datetime, timedelta, timezone
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=16)
+        from datetime import datetime, timedelta
+        cutoff = datetime.now(UTC) - timedelta(hours=16)
         overnight = [
             o for o in get_recent_orders(50)
             if o["created_at"] >= cutoff and o["status"] in ("executed", "blocked", "pending_approval")

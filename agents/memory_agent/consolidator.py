@@ -68,13 +68,16 @@ def _qdrant(path: str, body: dict | None = None, timeout: float = 20.0,
     «missing field ids», que no dice nada de cuál fue el error real.
     """
     import urllib.request
+    if not _QDRANT_URL.startswith(("http://", "https://")):
+        raise ValueError(f"QDRANT_URL con esquema no permitido: {_QDRANT_URL!r}")
     req = urllib.request.Request(
         f"{_QDRANT_URL}{path}",
         data=json.dumps(body).encode() if body is not None else None,
         headers={"Content-Type": "application/json"} if body is not None else {},
         method=method or ("POST" if body is not None else "GET"),
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    # nosec B310 — esquema validado arriba: solo http(s) hacia el service interno
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
         return json.load(resp).get("result")
 
 

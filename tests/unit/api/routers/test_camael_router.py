@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -28,7 +29,15 @@ def client(app):
     return TestClient(app)
 
 
-AUTH_HEADER = {"Authorization": "Bearer " + ("test-secret-" + "x" * 20)}
+def _auth_header() -> dict:
+    """
+    El secret se lee del settings VIVO, no de la constante del env: settings es
+    un singleton que cachea el entorno de su PRIMER import — si otro archivo de
+    tests lo importó antes con otro valor, el header fijo daba 403 y estos
+    tests fallaban solo en la suite completa (orden-dependientes desde abril).
+    """
+    from config.settings import settings
+    return {"Authorization": f"Bearer {settings.internal_api_secret}"}
 
 
 def test_handoff_requires_auth(client):
@@ -48,7 +57,8 @@ def test_handoff_happy_path(client, monkeypatch):
         calls.append(payload)
         return {"pr_id": "PR-42", "rfc_number": "CHG0042"}
 
-    import sys, types
+    import sys
+    import types
     fake_mod = types.ModuleType("agents.devops.agent")
     fake_mod.handle_handoff = fake_handle
     monkeypatch.setitem(sys.modules, "agents.devops.agent", fake_mod)
@@ -64,7 +74,7 @@ def test_handoff_happy_path(client, monkeypatch):
         "triggered_at":    "2026-04-23T10:00:00Z",
         "context":         {},
     }
-    resp = client.post("/api/camael/handoff", json=body, headers=AUTH_HEADER)
+    resp = client.post("/api/camael/handoff", json=body, headers=_auth_header())
     assert resp.status_code == 202
     data = resp.json()
     assert data["accepted"] is True
@@ -77,7 +87,8 @@ def test_handoff_rejects_unsupported_issue(client, monkeypatch):
     async def fake_handle(payload):
         return None  # no soportado
 
-    import sys, types
+    import sys
+    import types
     fake_mod = types.ModuleType("agents.devops.agent")
     fake_mod.handle_handoff = fake_handle
     monkeypatch.setitem(sys.modules, "agents.devops.agent", fake_mod)
@@ -93,7 +104,7 @@ def test_handoff_rejects_unsupported_issue(client, monkeypatch):
         "triggered_at":    "2026-04-23T10:00:00Z",
         "context":         {},
     }
-    resp = client.post("/api/camael/handoff", json=body, headers=AUTH_HEADER)
+    resp = client.post("/api/camael/handoff", json=body, headers=_auth_header())
     assert resp.status_code == 400
 
 
@@ -108,7 +119,8 @@ def test_update_rfc_closed(client, monkeypatch):
         async def fail_rfc(self, sys_id, message):
             calls.append(("fail", sys_id, message))
 
-    import sys as _sys, types
+    import sys as _sys
+    import types
     m = types.ModuleType("agents.devops.servicenow_client")
     fake_sn = FakeSn()
     m.is_configured = fake_sn.is_configured
@@ -122,7 +134,7 @@ def test_update_rfc_closed(client, monkeypatch):
         "deployment": "demo-oom",
         "namespace":  "amael-ia",
     }
-    resp = client.patch("/api/camael/rfc/SN-123", json=body, headers=AUTH_HEADER)
+    resp = client.patch("/api/camael/rfc/SN-123", json=body, headers=_auth_header())
     assert resp.status_code == 200
     assert calls == [("close", "SN-123", "Healthy post-deploy")]
 
@@ -138,7 +150,8 @@ def test_update_rfc_review(client, monkeypatch):
         async def fail_rfc(self, sys_id, message):
             calls.append(("fail", sys_id, message))
 
-    import sys as _sys, types
+    import sys as _sys
+    import types
     m = types.ModuleType("agents.devops.servicenow_client")
     fake_sn = FakeSn()
     m.is_configured = fake_sn.is_configured
@@ -147,12 +160,12 @@ def test_update_rfc_review(client, monkeypatch):
     monkeypatch.setitem(_sys.modules, "agents.devops.servicenow_client", m)
 
     body = {"result": "review", "message": "Failed verification"}
-    resp = client.patch("/api/camael/rfc/SN-456", json=body, headers=AUTH_HEADER)
+    resp = client.patch("/api/camael/rfc/SN-456", json=body, headers=_auth_header())
     assert resp.status_code == 200
     assert calls == [("fail", "SN-456", "Failed verification")]
 
 
 def test_update_rfc_invalid_result(client):
     body = {"result": "pancake", "message": "..."}
-    resp = client.patch("/api/camael/rfc/SN-789", json=body, headers=AUTH_HEADER)
+    resp = client.patch("/api/camael/rfc/SN-789", json=body, headers=_auth_header())
     assert resp.status_code == 422  # Pydantic validation error

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import UTC
 
 from agents.trader.models import AccountSnapshot
 
@@ -72,13 +73,13 @@ def get_account_snapshot() -> AccountSnapshot:
 
 def get_recent_bars(symbols: list[str], days: int = 14) -> dict[str, list[dict]]:
     """Barras diarias recientes por símbolo (contexto para el LLM)."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from alpaca.data.historical import CryptoHistoricalDataClient, StockHistoricalDataClient
     from alpaca.data.requests import CryptoBarsRequest, StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
 
-    start = datetime.now(timezone.utc) - timedelta(days=days + 3)
+    start = datetime.now(UTC) - timedelta(days=days + 3)
     out: dict[str, list[dict]] = {}
 
     stocks = [s for s in symbols if not is_crypto(s)]
@@ -112,13 +113,13 @@ def get_recent_bars(symbols: list[str], days: int = 14) -> dict[str, list[dict]]
 
 def get_intraday_bars(symbols: list[str], hours: int = 6) -> dict[str, list[dict]]:
     """Barras de 15 min de las últimas `hours` horas — señal intradía para el LLM."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from alpaca.data.historical import CryptoHistoricalDataClient, StockHistoricalDataClient
     from alpaca.data.requests import CryptoBarsRequest, StockBarsRequest
     from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
-    start = datetime.now(timezone.utc) - timedelta(hours=hours)
+    start = datetime.now(UTC) - timedelta(hours=hours)
     tf = TimeFrame(15, TimeFrameUnit.Minute)
     out: dict[str, list[dict]] = {}
 
@@ -208,7 +209,7 @@ def get_fees_summary(days: int = 7) -> dict:
     """
     import json as _json
     import urllib.request
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     cache_key = f"trader:fees:{days}d"
     try:
@@ -219,7 +220,7 @@ def get_fees_summary(days: int = 7) -> dict:
     except Exception:
         pass
 
-    after = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    after = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
     base = "https://paper-api.alpaca.markets" if is_paper() else "https://api.alpaca.markets"
     url = f"{base}/v2/account/activities?activity_types=CFEE,FEE&after={after}&page_size=100"
     req = urllib.request.Request(url, headers={
