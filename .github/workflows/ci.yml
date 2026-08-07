@@ -56,7 +56,10 @@ jobs:
           cache: pip
 
       - name: Instalar pip-audit
-        run: pip install pip-audit --quiet
+        # setuptools se actualiza porque pip-audit audita el ENTORNO completo:
+        # el 79.0.1 que trae el toolcache del runner carga PYSEC-2026-3447
+        # (fix: 83.0.0) y tumbaba el job sin que fuera dependencia del proyecto.
+        run: pip install pip-audit "setuptools>=83.0.0" --quiet
 
       - name: Instalar dependencias del proyecto
         run: pip install -e ".[all]" --quiet
