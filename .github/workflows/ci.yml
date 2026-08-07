@@ -158,8 +158,8 @@ jobs:
           REDIS_HOST:          localhost
           QDRANT_URL:          http://localhost:6333
           OLLAMA_BASE_URL:     http://localhost:11434
-          JWT_SECRET_KEY:      ci-test-secret
-          INTERNAL_API_SECRET: ci-internal-secret
+          JWT_SECRET_KEY:      ci-test-secret-0000000000000000000000
+          INTERNAL_API_SECRET: ci-internal-secret-00000000000000000000
 
   # ── 2. Build & Push (solo en merge/push a main) ───────────────────────────────
   # Corre en self-hosted para que el push llegue directo a registry.richardx.dev
