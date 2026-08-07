@@ -134,36 +134,37 @@ spec:
                             # duplicaba el KV (+0.6 GiB) y dejaba al qwen3:14b
                             # justo en el límite de VRAM. Ver Historial.
         - name: OLLAMA_CONTEXT_LENGTH
-          value: "4096"     # = el default. Explícito para que quede claro que
-                            # es una restricción de VRAM, no un descuido.
-        # ⛔ OLLAMA_FLASH_ATTENTION desactivado — mismo patrón que KV_CACHE_TYPE:
-        # es global y Ollama pasa --flash-attn on también a nomic-embed-text
-        # (arch nomic-bert), que entonces arranca con -ngl 0 → 100% CPU.
-        # En el baseline original no existía esta variable y los embeddings
-        # daban 199 chunks/s. Ollama 0.32 ya activa flash attention por defecto
-        # en los modelos que lo soportan, así que forzarlo no aportaba nada.
+          value: "8192"     # A2 (7-ago-2026): posible gracias a KV q8_0.
+                            # Con f16 el tope era 4096 y el prompt del trader
+                            # (4.3k tokens tras 1.0.30/31) se truncaba POR EL
+                            # FRENTE: el system prompt moría y el LLM contestaba
+                            # {"error": "entrada no válida"} → holds conf=0.
+                            # OJO: el contexto EFECTIVO es del runner cargado —
+                            # ningún cliente debe mandar num_ctx propio o cada
+                            # alternancia recarga el modelo (~10-20 s).
+        # A2 — FLASH_ATTENTION y KV q8_0 son seguros AQUÍ desde que los
+        # embeddings viven en ollama-cpu (OLLAMA_EMBED_URL en los consumidores).
+        # El ⛔ histórico de abajo era correcto para el servidor mixto: ambas
+        # variables son GLOBALES y a nomic-embed-text (arch nomic-bert) lo
+        # tiraban a -ngl 0 → embeddings de 29 ms a 3,100 ms. Ese modelo ya no
+        # se sirve desde aquí, así que la mina desapareció CON los embeddings.
+        # Si algún día un embedder vuelve a este servidor, estas dos variables
+        # deben salir primero.
+        - name: OLLAMA_FLASH_ATTENTION
+          value: "1"        # prerequisito de KV cuantizada; suele mejorar decode
+        - name: OLLAMA_KV_CACHE_TYPE
+          value: "q8_0"     # KV a mitad de VRAM: 8192 tokens ≈ 0.65 GB vs 1.3
+                            # en f16. Pérdida de calidad ~nula (es la caché de
+                            # atención, no los pesos).
         - name: OLLAMA_KEEP_ALIVE
           value: "24h"      # ver Historial: solo es seguro desde
                             # que se retiró qwen3:1.7b. Evita ~6 recargas/hora.
-        # ⛔ NO activar OLLAMA_KV_CACHE_TYPE=q8_0
-        #    Es un ajuste GLOBAL: Ollama pasa --cache-type-k/v a TODOS los
-        #    modelos, incluido nomic-embed-text (arch nomic-bert, atención no
-        #    causal, sin KV cache). El servidor lo arranca con -ngl 0 → 100% CPU
-        #    y los embeddings caen de ~29 ms a ~3,100 ms por batch.
-        #    Con KV en f16 (160 KiB/token en qwen3:14b) el presupuesto de VRAM
-        #    solo alcanza para 4096 × 2 slots dejando sitio al embedder.
-        # ── Calentamiento del embedder ───────────────────────────────────
-        # nomic-embed-text CABE en GPU (pide 268 MiB y sobran ~1.7 GB), pero
-        # Ollama decide la ubicacion AL CARGAR y no la revisa despues. Si el
-        # qwen3:14b entra primero y se ancla (keep_alive=24h), el embedder ya no
-        # encuentra sitio para sus buffers (-b 2048 -ub 2048) y cae a CPU:
-        # 27 ms -> 400 ms por embedding, y de 180 ms a 12 s en batch de 32.
-        #
-        # postStart corre antes de que llegue cualquier peticion de chat, asi
-        # que el embedder gana la carrera y ambos quedan en GPU.
-        # La imagen de Ollama no trae curl/wget/python - solo sh y el CLI, de
-        # ahi `ollama run` en vez de una llamada HTTP.
-        # Verificar tras cada reinicio: `ollama ps` debe decir 100% GPU en ambos.
+        # (Histórico 5-ago: KV q8_0 estaba vetado porque este servidor
+        #  también hospedaba nomic-embed-text — ver la nota A2 arriba.)
+        # A2: el calentamiento del embedder se fue con él a ollama-cpu. El
+        # postStart que corría aquí la carrera nomic-vs-14b ya no tiene objeto
+        # (y de hecho la carrera se perdía tras cada reinicio de containerd:
+        # el 7-ago nomic amaneció en CPU pese al postStart).
         lifecycle:
           postStart:
             exec:
@@ -176,7 +177,7 @@ spec:
                   ollama list >/dev/null 2>&1 && break
                   i=$((i+1)); sleep 2
                 done
-                ollama run nomic-embed-text "warmup" >/dev/null 2>&1 || true
+                ollama run qwen3:14b "" >/dev/null 2>&1 || true
         volumeMounts:
         - name: ollama-storage
           mountPath: /root/.ollama

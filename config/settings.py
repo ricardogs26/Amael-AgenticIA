@@ -87,6 +87,16 @@ class Settings(BaseSettings):
         alias="EMBED_NUM_GPU",
     )
 
+    # A2 (7-ago-2026): los embeddings viven en el Ollama de CPU. El cómputo ya
+    # era CPU (embed_num_gpu=0); moverlos de SERVIDOR libera al de GPU de
+    # hospedar nomic-embed-text, elimina la carrera del postStart y permite
+    # FLASH_ATTENTION + KV q8_0 globales sin romper al embedder (la mina
+    # documentada en k8s/infrastructure/05-ollama.yaml).
+    ollama_embed_url: str = Field(
+        default="http://ollama-cpu-service:11434",
+        alias="OLLAMA_EMBED_URL",
+    )
+
     # ── Agents split — Phase 1 (feature flag) ────────────────────────────────
     # Controla si agents/sre/ y agents/devops/ corren in-process dentro del
     # backend o se delegan por HTTP a raphael-service y camael-service.

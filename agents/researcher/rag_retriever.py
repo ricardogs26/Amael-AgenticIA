@@ -18,6 +18,9 @@ logger = logging.getLogger("agents.researcher.rag")
 
 _QDRANT_URL   = os.environ.get("QDRANT_URL",     "http://qdrant-service:6333")
 _OLLAMA_URL   = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
+# A2: los embeddings tienen su propio servidor (CPU). Fallback al generativo
+# solo si la env no existe (compat con despliegues viejos).
+_EMBED_URL    = os.environ.get("OLLAMA_EMBED_URL", "http://ollama-cpu-service:11434")
 _EMBED_MODEL  = "nomic-embed-text"
 _VECTOR_SIZE  = 768  # nomic-embed-text output dimension
 
@@ -50,7 +53,7 @@ def _get_embeddings():
                 # num_gpu=0 → embeddings en CPU, VRAM libre para el generativo.
                 _embeddings = OllamaEmbeddings(
                     model=_EMBED_MODEL,
-                    base_url=_OLLAMA_URL,
+                    base_url=_EMBED_URL,
                     num_gpu=embed_num_gpu(),
                 )
     return _embeddings

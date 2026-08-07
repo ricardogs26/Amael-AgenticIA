@@ -34,6 +34,7 @@ _QDRANT_URL        = os.environ.get("QDRANT_URL", "http://qdrant-service:6333")
 _QDRANT_COLLECTION = "sre_runbooks"
 _EMBED_MODEL       = "nomic-embed-text"
 _OLLAMA_BASE_URL   = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
+_OLLAMA_EMBED_URL = os.environ.get("OLLAMA_EMBED_URL", "http://ollama-cpu-service:11434")
 
 # ── Singleton LLM ─────────────────────────────────────────────────────────────
 
@@ -187,7 +188,7 @@ def init_runbooks_qdrant() -> None:
         if _QDRANT_COLLECTION not in existing:
             # Obtener dimensión del modelo
             probe = _req.post(
-                f"{_OLLAMA_BASE_URL}/api/embeddings",
+                f"{_OLLAMA_EMBED_URL}/api/embeddings",
                 json=embed_payload(_EMBED_MODEL, "probe"),
                 timeout=15,
             )
@@ -244,7 +245,7 @@ def init_runbooks_qdrant() -> None:
             try:
                 text = open(path).read()
                 resp = _req.post(
-                    f"{_OLLAMA_BASE_URL}/api/embeddings",
+                    f"{_OLLAMA_EMBED_URL}/api/embeddings",
                     json=embed_payload(_EMBED_MODEL, text[:2000]),
                     timeout=30,
                 )

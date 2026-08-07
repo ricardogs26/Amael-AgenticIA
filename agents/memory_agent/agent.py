@@ -428,7 +428,7 @@ def _embed_text(text: str) -> list[float]:
 
     from config.settings import settings
     resp = _req.post(
-        f"{settings.ollama_base_url}/api/embeddings",
+        f"{settings.ollama_embed_url}/api/embeddings",
         json=embed_payload(settings.llm_embed_model, text),
         timeout=15,
     )

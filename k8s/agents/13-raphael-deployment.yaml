@@ -32,6 +32,8 @@ data:
   # ── LLM ──────────────────────────────────────────────────────────────────
   # Valores verificados contra el env real de amael-agentic-deployment (2026-04-22).
   OLLAMA_BASE_URL:  "http://ollama-service:11434"
+  # A2: embeddings en el Ollama de CPU — ver k8s/infrastructure/05-ollama.yaml
+  OLLAMA_EMBED_URL: "http://ollama-cpu-service:11434"
   LLM_PROVIDER:     "ollama"
   # 5-ago-2026: era qwen3:1.7b. Raphael era el ÚLTIMO consumidor del modelo
   # chico, y cada diagnóstico del loop SRE (~cada 11 min) desalojaba al

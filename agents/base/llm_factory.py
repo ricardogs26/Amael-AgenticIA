@@ -221,6 +221,7 @@ def _build_embeddings(settings: Any) -> Any:
         # íntegra para el modelo generativo. Ver settings.embed_num_gpu.
         return OllamaEmbeddings(
             model=model,
-            base_url=settings.ollama_base_url,
+            # Servidor de embeddings dedicado (A2) — no el Ollama generativo.
+            base_url=settings.ollama_embed_url,
             num_gpu=settings.embed_num_gpu,
         )

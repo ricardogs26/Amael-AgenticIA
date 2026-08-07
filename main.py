@@ -537,16 +537,18 @@ def _warmup_ollama_models() -> None:
     import urllib.request
 
     ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
+    # A2: los embeddings viven en su servidor CPU — calentar cada modelo donde vive.
+    embed_url  = os.environ.get("OLLAMA_EMBED_URL", "http://ollama-cpu-service:11434")
     llm_model  = os.environ.get("LLM_MODEL",       "qwen2.5:14b")
     embed_model = os.environ.get("LLM_EMBED_MODEL", "nomic-embed-text")
 
-    for model, endpoint, payload in [
-        (llm_model,   "/api/generate",   f'{{"model":"{llm_model}","prompt":"","stream":false}}'),
-        (embed_model, "/api/embeddings",  f'{{"model":"{embed_model}","prompt":"warmup"}}'),
+    for model, base, endpoint, payload in [
+        (llm_model,   ollama_url, "/api/generate",   f'{{"model":"{llm_model}","prompt":"","stream":false}}'),
+        (embed_model, embed_url,  "/api/embeddings",  f'{{"model":"{embed_model}","prompt":"warmup"}}'),
     ]:
         try:
             req = urllib.request.Request(
-                f"{ollama_url}{endpoint}",
+                f"{base}{endpoint}",
                 data=payload.encode(),
                 headers={"Content-Type": "application/json"},
                 method="POST",
