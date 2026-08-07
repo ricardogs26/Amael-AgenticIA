@@ -153,6 +153,8 @@ def _help_text() -> str:
         "• `silent <dur>` — silence the quoted alert (e.g. 2h)\n"
         "• `maintenance on <min>` — start maintenance window\n"
         "• `maintenance off` — stop maintenance window\n"
+        "• `skills` — list proposed and active procedural skills\n"
+        "• `skill show|approve|reject <name>` — review the agent's proposals\n"
         f"\n🔧 Current mode: *{get_agent_mode().upper()}*"
     )
 
@@ -434,6 +436,62 @@ def _cmd_mode(cmd: str) -> str:
 
 # ── Dispatcher principal ──────────────────────────────────────────────────────
 
+def _cmd_skills(cmd: str) -> str:
+    """
+    Gestión de skills procedurales (C1). El gate humano es ESTE comando: las
+    skills que los agentes proponen no entran al diagnóstico hasta que alguien
+    las aprueba aquí.
+
+      skills                 — lista propuestas y activas
+      skill show <name>      — SKILL.md completo de la propuesta (o activa)
+      skill approve <name>   — activa la propuesta
+      skill reject <name>    — la elimina
+    """
+    from skills.procedural import store
+
+    partes = cmd.split()
+    if partes[0] == "skills":
+        propuestas = store.list_skills(status="proposed")
+        activas    = store.list_skills(status="active")
+        lineas = []
+        if propuestas:
+            lineas.append("⏳ *Propuestas pendientes:*")
+            lineas += [f"  • `{s['name']}` — {s.get('description','')[:80]} "
+                       f"(de {s.get('owner_agent','?')})" for s in propuestas]
+        if activas:
+            lineas.append("✅ *Activas:*")
+            lineas += [f"  • `{s['name']}` v{s.get('version','1')} — "
+                       f"{s.get('description','')[:80]}" for s in activas]
+        if not lineas:
+            return "No hay skills propuestas ni activas."
+        return "\n".join(lineas)
+
+    if len(partes) < 3:
+        return "Uso: skill show|approve|reject <name>"
+    accion, name = partes[1], partes[2]
+
+    if accion == "show":
+        skill = store.get_skill(name, status="proposed") or store.get_skill(name)
+        if not skill:
+            return f"No existe ninguna skill llamada `{name}`."
+        texto = skill.get("text", "")
+        # WhatsApp corta mensajes larguísimos; 3500 chars muestran una skill
+        # completa razonable sin reventar el límite.
+        return (f"[{skill.get('status')}] de {skill.get('owner_agent','?')}\n"
+                f"{texto[:3500]}")
+    if accion in ("approve", "aprobar"):
+        try:
+            r = store.approve(name)
+        except store.SkillFormatError as exc:
+            return f"❌ {exc}"
+        extra = " (reemplazó a la versión activa anterior)" if r["replaced_active"] else ""
+        return f"✅ Skill `{name}` aprobada y activa{extra}."
+    if accion in ("reject", "rechazar"):
+        return (f"🗑 Propuesta `{name}` eliminada." if store.reject(name)
+                else f"No hay propuesta pendiente llamada `{name}`.")
+    return f"Acción desconocida: {accion}. Usa show | approve | reject."
+
+
 def handle_command(command: str, quoted_text: str | None = None) -> str:
     """
     Procesa un comando `/sre <cmd>` y retorna la respuesta para WhatsApp.
@@ -481,6 +539,8 @@ def handle_command(command: str, quoted_text: str | None = None) -> str:
             return _cmd_audit()
         if cmd in ("mode", "modo") or cmd.startswith(("mode ", "modo ")):
             return _cmd_mode(cmd)
+        if cmd == "skills" or cmd.startswith("skill "):
+            return _cmd_skills(cmd)
         return f"❓ Unknown command: '{cmd}'. Type `help` to see the options."
     except Exception as exc:
         logger.error(f"[commands] Error procesando '{cmd}': {exc}", exc_info=True)

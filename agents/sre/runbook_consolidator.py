@@ -418,3 +418,125 @@ def run_consolidation() -> None:
     logger.info(
         f"[consolidator] Consolidación completada: {consolidated_count} tipos procesados."
     )
+    if consolidated_count:
+        _propose_skills_from_consolidated()
+
+
+# ── C1: propuestas de skills desde el conocimiento consolidado ────────────────
+
+# Tope de propuestas por corrida: el consolidador corre a las 03:00 y cada
+# propuesta manda un WhatsApp — despertar al admin con 8 avisos de golpe es la
+# forma más rápida de que apague el gate completo.
+MAX_SKILL_PROPOSALS_PER_RUN = int(os.environ.get("SRE_SKILL_PROPOSALS_PER_RUN", "2"))
+
+_SKILL_PROMPT = """Convierte este runbook consolidado en una SKILL procedural. Responde SOLO con el archivo SKILL.md, sin explicación.
+
+Formato EXACTO (el parser rechaza cualquier desviación):
+---
+name: {name}
+description: una línea con cuándo y para qué sirve
+scope: sre
+version: 1
+---
+
+## Cuándo usar
+(condiciones observables que disparan esta skill)
+
+## Procedimiento
+(pasos numerados, comandos kubectl concretos)
+
+## Peligros comunes
+(qué NO hacer y por qué, sacado de los incidentes reales)
+
+## Verificación
+(cómo confirmar que la remediación funcionó, con comandos)
+
+Runbook consolidado fuente:
+{runbook}"""
+
+
+def _propose_skills_from_consolidated() -> None:
+    """
+    Nivel 4 del ciclo de runbooks: el conocimiento consolidado se destila en
+    skills procedurales — como PROPUESTA. La activación es humana, siempre
+    (/sre skill approve); este código ni siquiera importa store.approve.
+    """
+    try:
+        from skills.procedural.manage import skill_manage
+        from skills.procedural.store import ensure_collection, get_skill
+        ensure_collection()   # el dedup hace scroll antes del primer propose
+    except Exception as exc:
+        logger.warning(f"[consolidator] skills no disponibles: {exc}")
+        return
+
+    propuestas = 0
+    for issue_type in _consolidated_types_snapshot():
+        if propuestas >= MAX_SKILL_PROPOSALS_PER_RUN:
+            logger.info(
+                f"[consolidator] Tope de {MAX_SKILL_PROPOSALS_PER_RUN} propuestas "
+                f"de skill por corrida — el resto espera a mañana."
+            )
+            break
+        name = f"sre-{issue_type.lower().replace('_', '-')}"
+        # Dedup: ni re-proponer lo pendiente ni duplicar lo activo.
+        if get_skill(name, status="proposed") or get_skill(name, status="active"):
+            continue
+        consolidado = _fetch_previous_consolidated(issue_type)
+        if not consolidado:
+            continue
+        skill_md = _generate_skill_md(name, consolidado["text"])
+        if not skill_md:
+            continue
+        r = skill_manage(
+            action="create", owner_agent="raphael", skill_md=skill_md,
+            reason=(f"destilada del runbook consolidado de {issue_type} "
+                    f"({consolidado.get('consolidated_from', '?')} incidentes)"),
+        )
+        if r.get("ok"):
+            propuestas += 1
+        else:
+            logger.warning(f"[consolidator] skill {name} rechazada por formato: "
+                           f"{r.get('detail')}")
+
+
+def _consolidated_types_snapshot() -> list[str]:
+    """issue_types que hoy tienen un runbook consolidado en Qdrant."""
+    try:
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        client = QdrantClient(url=_QDRANT_URL)
+        result, _ = client.scroll(
+            collection_name=_SRE_RUNBOOKS_COLLECTION,
+            scroll_filter=Filter(must=[
+                FieldCondition(key="consolidated", match=MatchValue(value=True)),
+            ]),
+            limit=100, with_payload=["issue_type"], with_vectors=False,
+        )
+        return sorted({(p.payload or {}).get("issue_type", "") for p in result} - {""})
+    except Exception as exc:
+        logger.warning(f"[consolidator] snapshot de consolidados falló: {exc}")
+        return []
+
+
+def _generate_skill_md(name: str, runbook_text: str) -> str:
+    """LLM del tier profundo → SKILL.md. La validación dura la hace el store."""
+    try:
+        import concurrent.futures
+        llm = _get_llm()
+        prompt = _SKILL_PROMPT.format(name=name, runbook=runbook_text[:4000])
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(llm.invoke, prompt)
+        try:
+            raw = future.result(timeout=_SYNTHESIS_TIMEOUT_S)
+        finally:
+            executor.shutdown(wait=False)
+        texto = raw.content if hasattr(raw, "content") else str(raw)
+        # El LLM a veces envuelve en ```: quitar fences si vinieron.
+        texto = texto.strip()
+        if texto.startswith("```"):
+            texto = texto.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        return texto
+    except Exception as exc:
+        logger.warning(f"[consolidator] generación de skill {name} falló: {exc}")
+        return ""

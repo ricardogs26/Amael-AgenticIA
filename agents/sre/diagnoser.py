@@ -117,6 +117,19 @@ def diagnose_with_llm(anomaly, vault_knowledge: str = "", metrics_knowledge: str
 
     runbook = search_runbooks(anomaly.issue_type, anomaly.details)
 
+    # Skills procedurales APROBADAS (C1). Solo status=active llega aquí — las
+    # propuestas de los agentes no tocan un diagnóstico hasta que un humano
+    # las aprueba por /sre skill approve.
+    skill_ctx = ""
+    try:
+        from skills.procedural.store import search_active
+        skills = search_active(f"{anomaly.issue_type}: {anomaly.details}",
+                               scope="sre", k=1)
+        if skills:
+            skill_ctx = skills[0].get("text", "")[:1200]
+    except Exception:
+        pass
+
     prompt = (
         f"Eres un SRE experto. Analiza esta anomalía en Kubernetes:\n\n"
         f"Tipo: {anomaly.issue_type}\n"
@@ -125,6 +138,8 @@ def diagnose_with_llm(anomaly, vault_knowledge: str = "", metrics_knowledge: str
         f"Recurso: {anomaly.resource_name} ({anomaly.resource_type})\n"
         f"Detalles: {anomaly.details}\n\n"
     )
+    if skill_ctx:
+        prompt += f"Skill aprobada aplicable (síguela si encaja):\n{skill_ctx}\n\n"
     if runbook:
         prompt += f"Runbook relevante:\n{runbook[:1000]}\n\n"
 
