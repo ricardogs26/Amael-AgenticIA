@@ -15,7 +15,7 @@ POST /api/chat  (frontend Next.js · WhatsApp bridge — ambos canales convergen
   → memoria episódica (recuperada por similitud)
   → AgentRouter.route()  (keywords → LLM fallback)
   → AgentDispatcher.dispatch()
-       ├─ Ruta rápida (charla) ────────── qwen3:1.7b, ~0.6 s
+       ├─ Ruta rápida (charla) ────────── qwen3:14b sin thinking, ~0.6 s
        ├─ Directo por intent ──────────── Raphael · Haniel · Sandalphon · Raziel ·
        │                                  Gabriel · Uriel · Jophiel · Camael* ·
        │                                  Phanuel (QA) · Cassiel · Zaphkiel
@@ -36,7 +36,7 @@ de conocimiento (runbooks por tipo + colecciones Qdrant).
 
 | Servidor | Modelos | Rol |
 |---|---|---|
-| `ollama-service` (GPU) | `qwen3:14b` (ctx **8192**, KV `q8_0`, 100 % VRAM) · `qwen3:1.7b` (ruta rápida) · `qwen2.5vl:3b` (visión) | interactivo — **solo modelos causales** |
+| `ollama-service` (GPU) | `qwen3:14b` (ctx **8192**, KV `q8_0`, 100 % VRAM, anclado — atiende también la ruta rápida sin thinking) · `qwen2.5vl:3b` (visión) | interactivo — **solo modelos causales** |
 | `ollama-cpu-service` | `qwen3:30b-a3b` (tier profundo) · `nomic-embed-text` (**embeddings de toda la plataforma**, `OLLAMA_EMBED_URL`) | trabajo nocturno + embeddings |
 
 Regla de oro: **ningún cliente manda `num_ctx`** — el contexto efectivo es del
@@ -117,7 +117,7 @@ Detalle completo en [`CLAUDE.md`](./CLAUDE.md).
 | Capa | Tecnología |
 |------|-----------|
 | Orquestación | LangGraph StateGraph + AgentRegistry/SkillRegistry/ToolRegistry |
-| LLM | Ollama — `qwen3:14b` (GPU, ctx 8192 + KV q8_0) · `qwen3:1.7b` (rápida) · `qwen3:30b-a3b` (CPU, profundo) · `nomic-embed-text` (CPU) |
+| LLM | Ollama — `qwen3:14b` (GPU, ctx 8192 + KV q8_0) · `qwen3:30b-a3b` (CPU, profundo) · `nomic-embed-text` (CPU) |
 | API | FastAPI |
 | Storage | PostgreSQL · Redis · Qdrant · MinIO |
 | Infra | MicroK8s · RTX 5070 · MetalLB · NGINX Ingress · cert-manager · Vault |

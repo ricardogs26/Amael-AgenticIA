@@ -26,7 +26,7 @@
 | Modelo | Tamaño | Cuant. | Uso real |
 |---|---|---|---|
 | `qwen3:14b` | 9.3 GB | Q4_K_M | principal — residente 24/7 |
-| `qwen3:1.7b` | 1.4 GB | Q4_K_M | ruta rápida (fast_chat, `keep_alive=-1`) |
+| `qwen3:1.7b` | 1.4 GB | Q4_K_M | **retirado** — la ruta rápida usa el 14b sin thinking (`LLM_MODEL_FAST=qwen3:14b`); solo ocupa disco |
 | `qwen2.5vl:3b` | 3.2 GB | Q4_K_M | visión (/grafana) |
 | `nomic-embed-text` | 0.3 GB | F16 | embeddings — **ya corre 100 % en CPU** |
 | `qwen2.5:14b` | 9.0 GB | Q4_K_M | **legacy, sin consumidores** |
@@ -68,9 +68,10 @@ KV cache fp16 de qwen3:14b ≈ 160 KB/token:
 | **6144 + KV q8_0** | **+0.45 GB** | **~10.0 GB** | **✓ estimado — verificar al aplicar** |
 | 8192 + KV q8_0 | +0.65 GB | ~10.2 GB | límite; probable pero justo |
 
-Además: `qwen3:14b` (9.6) + `qwen3:1.7b` (1.4) = 11.0 GB → **no coexisten**;
-hoy se desalojan mutuamente (la ruta rápida paga recarga tras cada uso del 14b
-pesado, y viceversa). La visión (3.2 GB) desaloja todavía más.
+Corrección (8-ago): el 1.7b está RETIRADO (`LLM_MODEL_FAST=qwen3:14b`) — la
+ruta rápida y el pipeline comparten el mismo runner del 14b, así que el
+desalojo mutuo que preocupaba aquí no existe. La visión (3.2 GB) sí desaloja
+al 14b cuando se usa /grafana.
 
 ### H3 — El estado actual funciona *por suerte*
 
