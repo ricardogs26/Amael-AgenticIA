@@ -1,141 +1,155 @@
 # Amael-AgenticIA
 
-Plataforma multi-agente modular basada en LangGraph, FastAPI y Ollama para automatización inteligente en entornos empresariales. Corre como `amael-agentic-backend` en Kubernetes (MicroK8s, single-node, GPU RTX 5070).
+Plataforma multi-agente modular basada en LangGraph, FastAPI y Ollama para automatización inteligente. Corre como `amael-agentic-backend` en Kubernetes (MicroK8s, single-node, GPU RTX 5070), acompañada de los servicios standalone `raphael-service` (SRE) y `camael-service` (GitOps); el trader vive en su propio repo (`trader-service`).
 
-**Versión actual:** `1.10.24`
+**Versión actual:** `1.15.4` — desplegada por el pipeline de CI (push a `main` = deploy).
 
 ---
 
-## Arquitectura del pipeline
+## Arquitectura
 
 ```
-POST /api/chat
+POST /api/chat  (frontend Next.js · WhatsApp bridge — ambos canales convergen aquí)
   → JWT auth → rate limit (Redis) → validate_prompt()
-  → AgentRouter.route()
+  → perfil del usuario (hechos destilados, inyectados SIEMPRE)
+  → memoria episódica (recuperada por similitud)
+  → AgentRouter.route()  (keywords → LLM fallback)
   → AgentDispatcher.dispatch()
-       ├─ Directo: sre / productivity / research
-       └─ Pipeline LangGraph:
-            planner → grouper → batch_executor (loop) → supervisor
-                ↑                                            │
-                └──────── REPLAN (max 1 retry) ─────────────┘
+       ├─ Ruta rápida (charla) ────────── qwen3:1.7b, ~0.6 s
+       ├─ Directo por intent ──────────── Raphael · Haniel · Sandalphon · Raziel ·
+       │                                  Gabriel · Uriel · Jophiel · Camael* ·
+       │                                  Phanuel (QA) · Cassiel · Zaphkiel
+       └─ Pipeline LangGraph (general/k8s/monitoring):
+            Sariel → Grouper → Batch Executor (loop) → Remiel
+                ↑                                         │
+                └────────── REPLAN (max 1 retry) ─────────┘
+
+  * Camael corre remoto en camael-service:8003 (CAMAEL_MODE=remote)
 ```
 
----
+La topología ya no se documenta a mano: se **deriva del código** y se sirve en
+`GET /api/graph` — visible como grafo interactivo (estilo Obsidian) en
+`/admin/graph`, con el tráfico real medido (`amael_agent_edge_total`) y la capa
+de conocimiento (runbooks por tipo + colecciones Qdrant).
 
-## Agentes
+### Tiers de LLM (A2, ago-2026)
 
-| Agente | Estado | Descripción |
-|--------|--------|-------------|
-| `planner` | ✅ Producción | Descompone requests en planes ejecutables (max 8 pasos) |
-| `executor` | ✅ Producción | Ejecuta pasos en paralelo con ThreadPoolExecutor |
-| `supervisor` | ✅ Producción | Evalúa calidad 0-10, decide ACCEPT/REPLAN |
-| `researcher` | ✅ Producción | RAG sobre documentos del usuario + DuckDuckGo |
-| `productivity` | ✅ Producción | Google Calendar / Gmail via OAuth + Vault |
-| `sre` | ✅ Producción | Loop autónomo 60s: Observe → Detect → Diagnose → Decide → Act |
-| `coder` | Roadmap | Generación y refactor de código (Gabriel) |
-| `devops` | Roadmap | CI/CD, pipelines |
-| `qa` | Roadmap | Validación y pruebas |
+| Servidor | Modelos | Rol |
+|---|---|---|
+| `ollama-service` (GPU) | `qwen3:14b` (ctx **8192**, KV `q8_0`, 100 % VRAM) · `qwen3:1.7b` (ruta rápida) · `qwen2.5vl:3b` (visión) | interactivo — **solo modelos causales** |
+| `ollama-cpu-service` | `qwen3:30b-a3b` (tier profundo) · `nomic-embed-text` (**embeddings de toda la plataforma**, `OLLAMA_EMBED_URL`) | trabajo nocturno + embeddings |
 
----
-
-## SRE Agent — Observabilidad completa
-
-El agente SRE implementa **6 capas de observación** ejecutadas cada 60 segundos:
-
-| Capa | Función | Anomalías detectadas |
-|------|---------|---------------------|
-| `observe_cluster()` | Pods y nodos vía K8s API | CRASH_LOOP, OOM_KILLED, IMAGE_PULL_ERROR, POD_FAILED, POD_PENDING_STUCK, HIGH_RESTARTS, NODE_NOT_READY |
-| `observe_infrastructure()` | Infraestructura K8s completa | LOADBALANCER_NO_IP, SERVICE_NO_ENDPOINTS, PVC_PENDING, PVC_MOUNT_ERROR, DEPLOYMENT_DEGRADED, NODE_PRESSURE, K8S_EVENT_WARNING, VAULT_SEALED |
-| `observe_metrics()` | Prometheus CPU/memoria/errores | HIGH_CPU, HIGH_MEMORY, HIGH_ERROR_RATE |
-| `observe_trends()` | Predicción con predict_linear + deriv | DISK_EXHAUSTION_PREDICTED, MEMORY_LEAK_PREDICTED, ERROR_RATE_ESCALATING |
-| `observe_slo()` | Error budget burn rate | SLO_BUDGET_BURNING |
-| Vault health check | HTTP `/v1/sys/health` | VAULT_SEALED |
-
-**Acciones autónomas:**
-- `ROLLOUT_RESTART` — CRASH_LOOP, OOM_KILLED, POD_FAILED, HIGH_RESTARTS, HIGH_MEMORY, MEMORY_LEAK_PREDICTED, DEPLOYMENT_DEGRADED
-- `ROLLOUT_UNDO` — auto-rollback si verificación post-restart falla y hay deploy reciente (< 30 min)
-- `NOTIFY_HUMAN` — resto de anomalías (WhatsApp + PostgreSQL)
-
-**Runbooks indexados en Qdrant:** 15 archivos markdown en `runbooks/`
+Regla de oro: **ningún cliente manda `num_ctx`** — el contexto efectivo es del
+runner cargado, y un cliente divergente fuerza una recarga del modelo en cada
+alternancia (la «ruleta del runner», 7-ago-2026).
 
 ---
 
-## Skills y Tools
+## Agentes (14 registrados)
 
-| Nombre | Tipo | Estado |
-|--------|------|--------|
-| `kubernetes` | Skill | ✅ |
-| `rag` | Skill | ✅ |
-| `llm` | Skill | ✅ |
-| `vault` | Skill | ✅ |
-| `web` | Skill | ✅ |
-| `whatsapp` | Tool | ✅ |
-| `grafana` | Tool | ✅ |
-| `github` | Tool | ✅ |
-| `piper` | Tool | ✅ (TTS) |
-| `cosyvoice` | Tool | ✅ (TTS) |
+| Agente | Nombre | Rol |
+|--------|--------|-----|
+| `planner` | Sariel | Descompone requests en planes JSON (max 8 pasos) |
+| `executor` | — | Ejecuta pasos: tools en paralelo, REASONING secuencial |
+| `supervisor` | Remiel | Evalúa calidad 0–10, decide ACCEPT/REPLAN |
+| `researcher` | Sandalphon | RAG por usuario (Qdrant) + DuckDuckGo |
+| `productivity` | Haniel | Google Calendar / Gmail vía OAuth + Vault |
+| `sre` | Raphael | Loop autónomo 60 s + skills procedurales aprobadas (standalone :8002) |
+| `cto` | Raziel | Estrategia técnica |
+| `dev` | Gabriel | Código, commits y PRs (GitHub) |
+| `arch` | Uriel | Arquitectura y ADRs |
+| `coder` | Jophiel | Generación/análisis de código en memoria |
+| `devops` | Camael | GitOps: PR + RFC ServiceNow (standalone :8003) |
+| `qa` | Phanuel | Ejecución de tests y reporte CI |
+| `memory` | Zaphkiel | Memoria episódica + búsqueda de historial (`pg_trgm`, mensajes crudos) |
+| `reminder` | Cassiel | **Scheduler conversacional** — «recuérdame X cada lunes» → `user_jobs` |
+
+## El bucle de aprendizaje (plan Hermes, ago-2026)
+
+```
+conversación → Zaphkiel guarda episodios (cada turno)
+      ↓ 03:30 · consolidador (tier profundo)
+hechos estables («prefiere respuestas cortas») → inyectados COMPLETOS al prompt
+```
+```
+incidente → runbook (N1) → consolidado con fusión (N3, 03:00)
+      ↓ máx 2/noche
+propuesta de SKILL.md → aprobación humana por WhatsApp (/sre skill approve)
+      ↓
+entra al diagnóstico de la siguiente anomalía (catálogo breve + cuerpo bajo demanda)
+```
+
+El gate de las skills es **estructural**: `skill_manage` solo puede proponer;
+la activación existe únicamente en el comando humano.
 
 ---
 
-## Capacidades multimedia
+## SRE Agent — Raphael
 
-- **Audio (WhatsApp):** Transcripción de notas de voz con `faster-whisper` (`base`, CPU, int8). Modelo persistido en PVC `whisper-cache-pvc` (1Gi).
-- **Visión:** Análisis de imágenes con `qwen2.5vl:3b` via Ollama native API. Se activa cuando el mensaje incluye `image` (base64).
+Loop **Observe → Detect → Diagnose → Decide → Act → Report** cada 60 s, con
+21 tipos de anomalía (cluster, Prometheus, tendencias, SLO, certificados, VRAM
+del LLM), verificación post-acción a T+5 min, auto-rollback, postmortems LLM y
+handoff GitOps a Camael. Watchdog externo independiente por si Raphael cae.
+Detalle completo en [`CLAUDE.md`](./CLAUDE.md).
 
 ---
 
-## Stack tecnológico
+## Capacidades de plataforma
+
+- **Scheduler conversacional**: `user_jobs` en Postgres, tick 60 s, claim con
+  `FOR UPDATE SKIP LOCKED` (HPA corre 2 réplicas), entrega por WhatsApp.
+- **Memoria destilada**: episodios → hechos (03:30, tier profundo); bloque de
+  perfil con tope duro en código (900 chars), caché Redis invalidado por
+  consolidación y GDPR-wipe.
+- **Búsqueda de historial**: `pg_trgm` sobre `messages.content` — citas crudas
+  con fecha y autor, ~0.1 s, 0 tokens.
+- **DM pairing**: alta de números WhatsApp con códigos `AMAEL-XXXXXXXX` (1 h,
+  canje atómico) — sin tocar ConfigMaps.
+- **Ledger de entrega** (bridge 1.7.0): salientes persistidos en el PVC antes
+  del send, reentrega al arrancar.
+- **Multimedia**: transcripción (faster-whisper), visión (`qwen2.5vl:3b`), TTS
+  (CosyVoice3 con voz clonada / Piper).
+
+---
+
+## Stack
 
 | Capa | Tecnología |
 |------|-----------|
-| Orquestación | LangGraph StateGraph |
-| LLM | Ollama — `qwen2.5:14b` (chat), `nomic-embed-text` (embeddings), `qwen2.5vl:3b` (visión) |
-| API | FastAPI + SSE streaming |
+| Orquestación | LangGraph StateGraph + AgentRegistry/SkillRegistry/ToolRegistry |
+| LLM | Ollama — `qwen3:14b` (GPU, ctx 8192 + KV q8_0) · `qwen3:1.7b` (rápida) · `qwen3:30b-a3b` (CPU, profundo) · `nomic-embed-text` (CPU) |
+| API | FastAPI |
 | Storage | PostgreSQL · Redis · Qdrant · MinIO |
-| Infraestructura | Kubernetes MicroK8s · GPU RTX 5070 · MetalLB · NGINX Ingress · cert-manager |
-| Secretos | HashiCorp Vault (Shamir 3-of-5, Kubernetes Auth) |
-| Observabilidad | Prometheus · Grafana (9 dashboards) · OpenTelemetry · Tempo |
-| Audio | faster-whisper (base, CPU, int8) |
-
----
-
-## Grafana Dashboards (9)
-
-| # | UID | Descripción |
-|---|-----|-------------|
-| 1 | `amael-llm` | LLM & HTTP — latencia, tokens, throughput |
-| 2 | `amael-agent` | Pipeline de Agente — pasos, herramientas, REPLAN rate |
-| 3 | `amael-rag` | RAG Performance — hit/miss, latencia de búsqueda |
-| 4 | `amael-infra` | Infraestructura & GPU — VRAM, CPU, pods |
-| 5 | `amael-supervisor` | Supervisor & Calidad — quality scores, accept/replan |
-| 6 | `amael-security` | Seguridad & Rate Limiting — blocks, rate limits |
-| 7 | `amael-service-map` | Service Map — topología OTel en tiempo real |
-| 8 | `amael-sre-agent` | SRE Autónomo — loop runs, acciones, confianza |
-| 9 | `amael-backend` | Backend Overview — golden signals, RAG, REASONING |
+| Infra | MicroK8s · RTX 5070 · MetalLB · NGINX Ingress · cert-manager · Vault |
+| Observabilidad | Prometheus · Grafana (12 dashboards) · OpenTelemetry · Tempo |
+| CI/CD | GitHub Actions (self-hosted): Gitleaks · pip-audit · Checkov · Bandit · pytest/ruff · build → deploy → hook a Raphael |
 
 ---
 
 ## Despliegue
 
+**El backend se despliega por CI**: push a `main` con la versión actualizada en
+`k8s/agents/05-backend-deployment.yaml` → el pipeline construye, pushea el tag,
+aplica el manifest y notifica a Raphael (monitoreo intensificado 10 min).
+
 ```bash
-# 1. Build & Push
-docker build -t registry.richardx.dev/amael-agentic-backend:<version> .
-docker push registry.richardx.dev/amael-agentic-backend:<version>
-
-# 2. Actualizar versión en el manifest
-# k8s/agents/05-backend-deployment.yaml
-
-# 3. Aplicar
-kubectl set image deployment/amael-agentic-deployment \
-  amael-agentic-backend=registry.richardx.dev/amael-agentic-backend:<version> -n amael-ia
-kubectl rollout status deployment/amael-agentic-deployment -n amael-ia
+# 1. Subir la versión en el manifest (single source of truth)
+#    k8s/agents/05-backend-deployment.yaml
+# 2. Commit + push a main → CI hace build, push, deploy y verificación
+git push origin main
+gh run watch   # opcional
 ```
+
+Raphael/Camael se construyen del mismo repo con build args
+(`APP_MODULE`/`APP_PORT`, ver CLAUDE.md § Build) y se aplican con `kubectl` —
+nunca `kubectl set image` sin actualizar el manifest primero.
 
 ---
 
 ## Documentación
 
-- [`CLAUDE.md`](./CLAUDE.md) — guía para Claude Code (arquitectura, gotchas, workflows)
-- [`TECHNICAL_DESIGN_DOCUMENT.md`](./TECHNICAL_DESIGN_DOCUMENT.md) — diseño técnico detallado
-- [`runbooks/`](./runbooks/) — 15 runbooks de remediación indexados en Qdrant
-- [`k8s/`](./k8s/) — manifiestos de Kubernetes (deployment, configmap, RBAC, ingress, PVCs)
+- [`CLAUDE.md`](./CLAUDE.md) — arquitectura detallada, gotchas, workflows
+- [`docs/ANALISIS-HERMES-VS-AMAEL.md`](./docs/ANALISIS-HERMES-VS-AMAEL.md) — el plan del bucle de aprendizaje
+- [`docs/ANALISIS-INFRA-LLM.md`](./docs/ANALISIS-INFRA-LLM.md) — presupuesto de VRAM y tuning de Ollama
+- [`runbooks/`](./runbooks/) — 18 runbooks estáticos + consolidados autogenerados en Qdrant
+- [`k8s/`](./k8s/) — manifiestos (agents, infrastructure, ingress, config)
