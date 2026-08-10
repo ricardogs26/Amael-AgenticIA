@@ -7,6 +7,8 @@ el backend (compatibilidad con el comportamiento previo de un solo repo).
 """
 from __future__ import annotations
 
+import pytest
+
 import agents.qa.agent as qa
 
 
@@ -83,3 +85,30 @@ def test_el_modo_run_se_detecta():
     assert agente._detect_mode("corre los tests del trader") == "run"
     assert agente._detect_mode("¿cuál es el estado de los tests?") == "status"
     assert agente._detect_mode("qué cubre el test del analyzer") == "conversational"
+
+
+# ── Ruteo (regresión 10-ago: «tests» plural caía a general) ────────────────────
+
+@pytest.mark.parametrize("frase", [
+    "Phanuel, toqué el analyzer del trader, qué tests debo correr?",
+    "corre los tests del trader",
+    "ejecuta las pruebas del backend",
+    "cuál es la cobertura de la suite del backend",
+    "run tests",
+    "qué cubre el pytest del analyzer",
+])
+async def test_las_frases_de_qa_rutean_a_phanuel(frase):
+    from orchestration.agent_router import AgentRouter
+    d = await AgentRouter().route(frase)
+    assert d.intent == "qa", f"{frase!r} ruteó a {d.intent!r}, no a qa"
+
+
+@pytest.mark.parametrize("frase,intent", [
+    # No robar de vecinos: estas NO son QA.
+    ("recuérdame revisar el PR el lunes", "reminder"),
+    ("agenda una reunión el jueves", "productivity"),
+    ("qué pods están en crashloop", "sre"),
+])
+async def test_no_roba_a_otros_intents(frase, intent):
+    from orchestration.agent_router import AgentRouter
+    assert (await AgentRouter().route(frase)).intent == intent

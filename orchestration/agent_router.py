@@ -69,8 +69,11 @@ _KEYWORD_RULES = [
     # Memoria / historial
     (r"\b(remember|recall|history|last\s*time|previously|recuerda|recordar)\b",
      "memory", ["memory"]),
-    # QA / validación
-    (r"\b(validate|test|check|verify|assert|validar|verificar|probar)\b",
+    # QA / validación — Phanuel. `tests?` cubre singular Y plural: la regla
+    # vieja pedía `\btest\b` y «qué tests debo correr» caía a general (10-ago).
+    # También rutea por nombre («Phanuel…») y por vocabulario de QA.
+    (r"\b(phanuel|validate|tests?|checks?|verify|assert|validar|verificar|"
+     r"probar|pruebas?|pytest|qa|cobertura|coverage|suite\s+de\s+tests?)\b",
      "qa", ["qa"]),
     # Charla social — DEBE ir al final: solo aplica si NINGUNA regla técnica matcheó.
     # Saludos, agradecimientos y despedidas → ruta rápida con modelo chico.
@@ -110,7 +113,7 @@ Reglas:
 - arch: diseño de sistema, ADR, patrones de diseño, arquitectura hexagonal, contrato API
 - research: buscar, documentos, PDF, explicar, investigar, búsqueda web
 - memory: recordar, historial, conversación anterior
-- qa: validar, probar, verificar, test
+- qa: Phanuel — tests, pruebas, pytest, cobertura, «qué tests correr», ejecutar la suite de un componente
 - general: cualquier otra cosa o preguntas generales
 
 Pregunta: {question}
