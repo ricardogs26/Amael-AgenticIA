@@ -54,6 +54,36 @@ _REJECT_REASONS = frozenset({
 })
 
 
+# Un OOM cuyo pod ya lleva más de esto corriendo sano está RESUELTO: el
+# reinicio ocurrió y estabilizó, no hay nada que remediar. La lápida en
+# last_state persiste para siempre; esta ventana la deja de contar.
+_OOM_RESOLVED_AFTER_S = int(os.environ.get("SRE_OOM_RESOLVED_AFTER_S", "600"))
+
+
+def _oom_still_relevant(cs) -> bool:
+    """
+    True solo si el OOM del `last_state` sigue siendo accionable.
+
+    No lo es cuando el pod está `running` y lleva vivo más que la ventana de
+    gracia: el OOM ya pasó y el reinicio se estabilizó. Sí lo es si el pod NO
+    está corriendo (waiting/terminated — el OOM está activo) o si acaba de
+    reiniciar (el reinicio aún no demuestra estabilidad).
+    """
+    import time as _time
+
+    running = getattr(cs.state, "running", None) if cs.state else None
+    if running is None:
+        return True  # no está sano ahora → el OOM es actual
+    started = getattr(running, "started_at", None)
+    if started is None:
+        return True
+    try:
+        age = _time.time() - started.replace(tzinfo=UTC).timestamp()
+    except Exception:
+        return True
+    return age < _OOM_RESOLVED_AFTER_S
+
+
 def _is_reject_reason(reason: str | None) -> bool:
     """True si `reason` indica rechazo/desalojo del kubelet (no fallo de la app)."""
     if not reason:
@@ -198,9 +228,17 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                             ),
                         ))
 
-                    # OOM_KILLED
+                    # OOM_KILLED — SOLO si sigue vigente. `last_state.terminated`
+                    # es una LÁPIDA: un pod que hizo OOM una vez la arrastra para
+                    # siempre, aunque lleve horas Running. Sin este guard, Raphael
+                    # re-reportaba el mismo OOM cada ciclo (7 avisos de 1 evento el
+                    # 10-ago: frontend murió a las 08:00, se recuperó, y se notificó
+                    # hasta las 14:03). Se reporta solo si el pod NO está corriendo
+                    # sano, o si lleva vivo menos que la ventana de gracia (el OOM
+                    # acaba de pasar y el reinicio aún no estabiliza).
                     elif (cs.last_state and cs.last_state.terminated
-                          and cs.last_state.terminated.reason == "OOMKilled"):
+                          and cs.last_state.terminated.reason == "OOMKilled"
+                          and _oom_still_relevant(cs)):
                         anomalies.append(Anomaly(
                             issue_type=AnomalyType.OOM_KILLED,
                             severity=Severity.HIGH,
