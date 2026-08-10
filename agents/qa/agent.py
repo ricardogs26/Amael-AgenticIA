@@ -110,8 +110,15 @@ class QAAgent(BaseAgent):
     ]
 
     def _detect_mode(self, query: str) -> str:
-        q = query.lower()
-        if any(kw in q for kw in _RUN_TRIGGERS):
+        q = query.lower().strip()
+        # Una PREGUNTA nunca dispara el CI, aunque diga «correr»: «¿qué tests
+        # debo correr?» pide recomendación desde el catálogo, no una ejecución
+        # real de 5 min de polling (10-ago: por WhatsApp eso es inaceptable).
+        # Solo el imperativo claro ejecuta.
+        es_pregunta = q.startswith(("¿", "que ", "qué ", "cual", "cuál", "como",
+                                    "cómo", "recomien", "deberia", "debería",
+                                    "debo ", "cuales", "cuáles")) or q.endswith("?")
+        if any(kw in q for kw in _RUN_TRIGGERS) and not es_pregunta:
             return "run"
         if any(kw in q for kw in _STATUS_TRIGGERS):
             return "status"

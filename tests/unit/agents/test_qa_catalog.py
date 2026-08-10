@@ -82,7 +82,13 @@ def test_todos_los_componentes_del_registro_apuntan_a_repos_reales():
 
 def test_el_modo_run_se_detecta():
     agente = _agente()
+    # Imperativo claro → ejecuta el CI.
     assert agente._detect_mode("corre los tests del trader") == "run"
+    assert agente._detect_mode("ejecuta las pruebas del backend") == "run"
+    # PREGUNTA con «correr» → recomienda, NO dispara CI (5 min de polling).
+    # Regresión del E2E del 10-ago: por WhatsApp era inaceptable.
+    assert agente._detect_mode("¿qué tests debo correr si toco el analyzer?") == "conversational"
+    assert agente._detect_mode("qué pruebas corro tras cambiar policy.py") == "conversational"
     assert agente._detect_mode("¿cuál es el estado de los tests?") == "status"
     assert agente._detect_mode("qué cubre el test del analyzer") == "conversational"
 
