@@ -31,14 +31,44 @@ _WORKFLOW_FILE = "ci.yml"
 _POLL_INTERVAL = 10   # segundos entre polls
 _POLL_TIMEOUT  = 300  # máximo 5 min esperando resultado
 
-_SYSTEM_CONVERSATIONAL = """Eres Phanuel, el agente de QA de Amael-IA. Tu especialidad es:
-- Estrategias de testing (unit, integration, e2e)
-- pytest, pytest-asyncio, httpx TestClient
-- Cobertura de código y métricas de calidad
-- Diseño de casos de prueba para sistemas multi-agente
-- Análisis de fallos en CI/CD
+# Componentes con CI disparable. Cada uno resuelve a (owner, repo, rama default).
+# Los sinónimos son lo que el usuario dice en lenguaje natural.
+_COMPONENTS: dict[str, tuple[str, str, str]] = {
+    "backend":  (_DEFAULT_OWNER, "Amael-AgenticIA", "main"),
+    "amael":    (_DEFAULT_OWNER, "Amael-AgenticIA", "main"),
+    "agentic":  (_DEFAULT_OWNER, "Amael-AgenticIA", "main"),
+    "raphael":  (_DEFAULT_OWNER, "Amael-AgenticIA", "main"),  # comparte suite
+    "camael":   (_DEFAULT_OWNER, "Amael-AgenticIA", "main"),  # comparte suite
+    "trader":   (_DEFAULT_OWNER, "trader-service",  "main"),
+}
 
-Responde siempre en el mismo idioma que la pregunta. Sé conciso y directo."""
+
+def _load_kb(filename: str) -> str:
+    """Carga la base de conocimiento de QA (catálogo de tests). Patrón _load_kb
+    de Raphael: llaves escapadas para no romper PromptTemplate de LangChain."""
+    path = os.path.join(os.path.dirname(__file__), filename)
+    try:
+        content = open(path).read().replace("{", "{{").replace("}", "}}")
+        logger.info(f"[qa] Catálogo de tests cargado desde {path} ({len(content)} chars)")
+        return content
+    except Exception as exc:
+        logger.warning(f"[qa] No se pudo cargar {filename}: {exc}")
+        return ""
+
+
+_QA_KNOWLEDGE = _load_kb("qa_knowledge.md")
+
+_SYSTEM_CONVERSATIONAL = """Eres Phanuel, el agente de QA de Amael-IA. Conoces el catálogo COMPLETO de pruebas del cluster (abajo). Tu trabajo:
+- Recomendar QUÉ tests correr tras un cambio concreto (usa la sección «cuándo correr qué»).
+- Dar el comando EXACTO de ejecución del componente/suite que aplique.
+- Explicar qué cubre cada suite y los gotchas conocidos.
+- Para disparar tests de verdad, el usuario dice «corre los tests de <componente>».
+
+Responde en el idioma de la pregunta, conciso y con comandos copiables. Si el usuario menciona un archivo o módulo que tocó, mapéalo al subconjunto de tests que lo cubre — no mandes a correr todo salvo que sea antes de un merge.
+
+═══════════ CATÁLOGO DE PRUEBAS (tu memoria) ═══════════
+{kb}
+═══════════════════════════════════════════════════════""".replace("{kb}", _QA_KNOWLEDGE)
 
 _RUN_TRIGGERS = (
     "ejecuta", "ejecutar", "corre", "correr", "lanza", "lanzar",
@@ -68,13 +98,14 @@ class QAAgent(BaseAgent):
     """
 
     name         = "qa"
-    role         = "QA: ejecución de tests y reporte de calidad vía GitHub Actions"
-    version      = "1.0.0"
+    role         = "QA: catálogo de pruebas del cluster + ejecución multi-repo de tests"
+    version      = "1.1.0"
     capabilities = [
-        "run_tests",
+        "run_tests",          # dispara el CI del componente pedido (backend | trader)
         "poll_ci_results",
         "test_status",
-        "test_strategy",
+        "test_catalog",       # conoce todos los tests del cluster (qa_knowledge.md)
+        "test_recommendation", # recomienda qué correr tras un cambio concreto
         "coverage_analysis",
     ]
 
@@ -98,11 +129,22 @@ class QAAgent(BaseAgent):
 
     # ── Modo: ejecutar tests ───────────────────────────────────────────────────
 
+    def _resolve_component(self, query: str) -> tuple[str, str, str]:
+        """Del texto del usuario saca (owner, repo, rama). Default: backend."""
+        q = query.lower()
+        for alias, target in _COMPONENTS.items():
+            if alias in q:
+                return target
+        return _COMPONENTS["backend"]
+
     async def _run_tests(self, task: dict[str, Any]) -> AgentResult:
         query  = task.get("query", "")
-        owner  = task.get("github_owner", _DEFAULT_OWNER)
-        repo   = task.get("github_repo",  _DEFAULT_REPO)
-        ref    = task.get("ref", "develop")
+        # El componente se infiere del texto («corre los tests del trader»); un
+        # override explícito en el task gana. Antes solo existía un repo.
+        c_owner, c_repo, c_ref = self._resolve_component(query)
+        owner  = task.get("github_owner", c_owner)
+        repo   = task.get("github_repo",  c_repo)
+        ref    = task.get("ref", c_ref)
 
         if not _GITHUB_TOKEN:
             return AgentResult(
@@ -219,9 +261,10 @@ class QAAgent(BaseAgent):
     # ── Modo: status de última ejecución ──────────────────────────────────────
 
     async def _get_status(self, task: dict[str, Any]) -> AgentResult:
-        owner = task.get("github_owner", _DEFAULT_OWNER)
-        repo  = task.get("github_repo",  _DEFAULT_REPO)
-        ref   = task.get("ref", "develop")
+        c_owner, c_repo, c_ref = self._resolve_component(task.get("query", ""))
+        owner = task.get("github_owner", c_owner)
+        repo  = task.get("github_repo",  c_repo)
+        ref   = task.get("ref", c_ref)
 
         if not _GITHUB_TOKEN:
             return AgentResult(
