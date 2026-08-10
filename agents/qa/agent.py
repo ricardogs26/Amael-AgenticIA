@@ -110,16 +110,27 @@ class QAAgent(BaseAgent):
     ]
 
     def _detect_mode(self, query: str) -> str:
+        """
+        Disparar el CI (5 min de polling) SOLO ante un imperativo inequívoco.
+        La regla robusta es la POSICIÓN, no la presencia: la frase debe EMPEZAR
+        con un verbo de ejecución. Buscar «correr» en cualquier parte confundía
+        «recomiéndame qué correr» y «¿qué debo correr?» con una ejecución real
+        (10-ago: 3 timeouts seguidos por WhatsApp). Ante la duda, conversacional
+        — recomendar es barato y seguro; ejecutar de más cuesta 5 min y un run
+        de CI.
+        """
+        import re
+
         q = query.lower().strip()
-        # Una PREGUNTA nunca dispara el CI, aunque diga «correr»: «¿qué tests
-        # debo correr?» pide recomendación desde el catálogo, no una ejecución
-        # real de 5 min de polling (10-ago: por WhatsApp eso es inaceptable).
-        # Solo el imperativo claro ejecuta.
-        es_pregunta = q.startswith(("¿", "que ", "qué ", "cual", "cuál", "como",
-                                    "cómo", "recomien", "deberia", "debería",
-                                    "debo ", "cuales", "cuáles")) or q.endswith("?")
-        if any(kw in q for kw in _RUN_TRIGGERS) and not es_pregunta:
+        # Quitar un vocativo inicial: «phanuel, corre los tests» → «corre...».
+        q = re.sub(r"^(phanuel|oye|hey|por\s+favor)[\s,]+", "", q)
+
+        if q.startswith(("¿",)):   # una pregunta jamás ejecuta
+            pass
+        elif re.match(r"(corre|corran|ejecuta|ejecut[ae]n|lanza|dispara|run\b|"
+                      r"vuelve\s+a\s+correr|re-?corre)", q):
             return "run"
+
         if any(kw in q for kw in _STATUS_TRIGGERS):
             return "status"
         return "conversational"

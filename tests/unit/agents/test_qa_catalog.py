@@ -80,17 +80,26 @@ def test_todos_los_componentes_del_registro_apuntan_a_repos_reales():
 
 # ── Modo ───────────────────────────────────────────────────────────────────────
 
-def test_el_modo_run_se_detecta():
-    agente = _agente()
-    # Imperativo claro → ejecuta el CI.
-    assert agente._detect_mode("corre los tests del trader") == "run"
-    assert agente._detect_mode("ejecuta las pruebas del backend") == "run"
-    # PREGUNTA con «correr» → recomienda, NO dispara CI (5 min de polling).
-    # Regresión del E2E del 10-ago: por WhatsApp era inaceptable.
-    assert agente._detect_mode("¿qué tests debo correr si toco el analyzer?") == "conversational"
-    assert agente._detect_mode("qué pruebas corro tras cambiar policy.py") == "conversational"
-    assert agente._detect_mode("¿cuál es el estado de los tests?") == "status"
-    assert agente._detect_mode("qué cubre el test del analyzer") == "conversational"
+def test_el_modo_run_solo_con_imperativo_al_inicio():
+    """
+    Ejecutar CI (5 min) solo si la frase EMPIEZA con verbo de ejecución. La
+    presencia de «correr» en cualquier parte NO basta — «recomiéndame qué
+    correr» y «¿qué debo correr?» son preguntas (3 timeouts el 10-ago).
+    """
+    a = _agente()
+    # Imperativo al inicio → run (incluso con vocativo «Phanuel,»).
+    assert a._detect_mode("corre los tests del trader") == "run"
+    assert a._detect_mode("ejecuta las pruebas del backend") == "run"
+    assert a._detect_mode("Phanuel, corre los tests") == "run"
+    assert a._detect_mode("vuelve a correr los tests del backend") == "run"
+    # «correr» presente pero NO al inicio → conversacional (recomienda).
+    assert a._detect_mode("recomiéndame qué correr si modifico el analyzer") == "conversational"
+    assert a._detect_mode("¿qué tests debo correr tras tocar policy.py?") == "conversational"
+    assert a._detect_mode("Phanuel, qué corro si cambio el observer") == "conversational"
+    # Status.
+    assert a._detect_mode("¿cuál es el estado de los tests?") == "status"
+    # Pregunta sobre cobertura → conversacional.
+    assert a._detect_mode("qué cubre el test del analyzer") == "conversational"
 
 
 # ── Ruteo (regresión 10-ago: «tests» plural caía a general) ────────────────────
