@@ -20,7 +20,7 @@ metadata:
     app: postgres-backup
     app.kubernetes.io/part-of: amael-ia
 spec:
-  schedule: "0 3 * * *"          # Diariamente a las 3:00am UTC
+  schedule: "0 5 * * *"          # 5:00am México — movido del apilamiento de las 3am (pico de nodo del 10-ago que OOMeó al frontend)
   timeZone: "America/Mexico_City" # 3am hora México
   concurrencyPolicy: Forbid       # No ejecutar si el anterior aún corre
   successfulJobsHistoryLimit: 3

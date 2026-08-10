@@ -20,7 +20,7 @@ metadata:
     app: qdrant-backup
     app.kubernetes.io/part-of: amael-ia
 spec:
-  schedule: "30 3 * * *"          # 3:30am (después del backup de postgres)
+  schedule: "0 4 * * *"          # 4:00am México — escalonado: 3:00 consolidador runbooks · 3:30 consolidador memoria · 4:00 qdrant · 5:00 postgres
   timeZone: "America/Mexico_City"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
