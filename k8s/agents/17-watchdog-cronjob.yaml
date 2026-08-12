@@ -81,7 +81,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: watchdog
-              image: registry.richardx.dev/raphael-service:1.1.27
+              image: registry.richardx.dev/raphael-service:1.1.29
               imagePullPolicy: IfNotPresent
               command: ["python", "-m", "agents.sre.watchdog"]
               env:
@@ -108,6 +108,22 @@ spec:
                 # faltaban credenciales de Google. Vaciar para desactivar.
                 - name: WATCHDOG_VAULT_ADDR
                   value: "http://vault.vault.svc.cluster.local:8200"
+                # El PAT del runner también es el de Camael (PRs del flujo
+                # GitOps) y el del deploy del CI. Cuando expiró el 12-ago-2026
+                # se cayeron los tres a la vez y el único síntoma fue el runner
+                # en CrashLoop cinco días — no lo vigilamos por réplicas porque
+                # el runner efímero pasa por 0 réplicas por diseño. `optional`
+                # para que el watchdog arranque aunque el Secret no exista:
+                # sin token el chequeo se apaga solo.
+                - name: WATCHDOG_GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: github-runner-secret
+                      key: ACCESS_TOKEN
+                      optional: true
+                # Avisar con una semana es lo que hace la rotación barata.
+                - name: WATCHDOG_GH_EXPIRY_DAYS
+                  value: "7"
                 - name: REDIS_HOST
                   value: "redis-service"
                 - name: REDIS_PORT
