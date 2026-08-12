@@ -26,6 +26,12 @@ _WHISPER_MODEL_SIZE  = os.environ.get("WHISPER_MODEL", "base")
 _WHISPER_DEVICE      = "cpu"
 _WHISPER_COMPUTE     = "int8"
 _WHISPER_CACHE_DIR   = os.environ.get("WHISPER_CACHE_DIR", "/app/whisper-cache")
+# Idioma de las notas de voz. "auto" (o vacío) devuelve la autodetección de
+# whisper — que en audios cortos es una apuesta: el 12-ago-2026 un «hola, ¿cómo
+# estás? buenos días» de 2.2 s salió como alemán con probabilidad 0.48 y se
+# transcribió «Hola, como ist das bei uns die Sammeln?». Amael contestó que no
+# entendía la pregunta, y el fallo se leía como del agente y no del audio.
+_WHISPER_LANGUAGE    = os.environ.get("WHISPER_LANGUAGE", "es")
 
 # ── Singleton lazy del modelo ─────────────────────────────────────────────────
 _model: WhisperModelType | None = None
@@ -85,10 +91,12 @@ def transcribe_audio_base64(
             tmp_path = tmp.name
 
         model = _get_model()
+        idioma = _WHISPER_LANGUAGE.strip().lower()
         segments, info = model.transcribe(
             tmp_path,
             beam_size=5,
-            language=None,          # auto-detección de idioma
+            # Fijo por defecto; "auto"/"" delega en la detección de whisper.
+            language=None if idioma in ("", "auto") else idioma,
             vad_filter=True,        # filtra silencios
             vad_parameters={"min_silence_duration_ms": 500},
         )
