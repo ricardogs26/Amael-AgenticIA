@@ -103,7 +103,32 @@ def create_calendar_event(
         return None
 
 
-def sync_plan_to_calendar(credentials, plan_data: dict[str, Any]) -> int:
+def _clave_evento(titulo: str, inicio_hhmm: str) -> tuple[str, str]:
+    """
+    Identidad de un evento para detectar duplicados: título normalizado + hora
+    de inicio. El mismo título a otra hora es legítimo — «Bloque de
+    concentración» se repite varias veces al día a propósito.
+    """
+    return (" ".join(str(titulo).lower().split()), inicio_hhmm)
+
+
+def _hora_de(evento: dict[str, Any]) -> str:
+    """
+    'HH:MM' del inicio de un evento ya existente. `get_todays_events` normaliza
+    `dateTime` y `date` al mismo campo, así que un evento de día completo llega
+    como '2026-08-12' pelado y aquí devuelve '' — no colisiona con nada.
+    """
+    inicio = str(evento.get("start", ""))
+    if "T" not in inicio:
+        return ""
+    return inicio.split("T", 1)[1][:5]
+
+
+def sync_plan_to_calendar(
+    credentials,
+    plan_data: dict[str, Any],
+    existentes: list[dict[str, Any]] | None = None,
+) -> int:
     """
     Sincroniza un plan de día (generado por LLM) al calendario del usuario.
 
@@ -124,11 +149,26 @@ def sync_plan_to_calendar(credentials, plan_data: dict[str, Any]) -> int:
     date  = plan_data.get("date") or datetime.now().strftime("%Y-%m-%d")
     created = 0
 
+    # El prompt le pide al LLM «respetar los eventos ya agendados» y el modelo
+    # los incluye en el plan; como todo lo del plan se escribe, se duplicaban.
+    # Caso real (12-ago-2026): el brief recreó un «Checkpoint lectura Rewired»
+    # recurrente que el usuario ya tenía desde abril.
+    ya_agendados = {
+        _clave_evento(e.get("summary", ""), _hora_de(e))
+        for e in (existentes or [])
+    }
+    omitidos = 0
+
     for task in tasks:
         title       = task.get("title", "(tarea)")
         start_time  = task.get("start", "09:00")
         end_time    = task.get("end", "09:30")
         description = task.get("description", "")
+
+        if _clave_evento(title, start_time) in ya_agendados:
+            omitidos += 1
+            logger.info(f"[calendar] '{title}' {start_time} ya está en el calendario — no se recrea.")
+            continue
 
         start_iso = f"{date}T{start_time}:00"
         end_iso   = f"{date}T{end_time}:00"
@@ -143,5 +183,8 @@ def sync_plan_to_calendar(credentials, plan_data: dict[str, Any]) -> int:
         if event:
             created += 1
 
-    logger.info(f"[calendar] {created}/{len(tasks)} tareas sincronizadas al calendario.")
+    logger.info(
+        f"[calendar] {created}/{len(tasks)} tareas sincronizadas al calendario"
+        + (f" ({omitidos} ya existían)." if omitidos else ".")
+    )
     return created

@@ -94,7 +94,11 @@ class HanielAgent(BaseAgent):
             return "get_events"
         if any(kw in q for kw in ["organiza", "plan", "planifica", "día", "dia"]):
             return "organize_day"
-        return "organize_day"
+        # Ante la duda, LEER. `organize_day` escribe eventos en el calendario
+        # del usuario, y un «¿qué tengo pendiente?» —que no trae ninguna
+        # palabra clave— le llenaba el día de bloques que nunca pidió.
+        # Reorganizar el día ahora exige decirlo.
+        return "get_events"
 
     async def _handle_organize_day(self, user_email: str) -> AgentResult:
         """Genera y sincroniza el plan del día completo."""

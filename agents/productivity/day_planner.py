@@ -9,6 +9,7 @@ También disponible para el agente conversacional vía PRODUCTIVITY_TOOL.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -16,6 +17,11 @@ from datetime import datetime
 from typing import Any
 
 logger = logging.getLogger("agents.productivity.planner")
+
+# Zona horaria por defecto cuando el perfil del usuario no dice otra cosa. El
+# planner corría con la hora del POD (UTC): a las 7:00 de México ya era el día
+# siguiente en UTC durante parte del año, así que el plan podía fecharse mal.
+_TZ_DEFAULT = "America/Mexico_City"
 
 # Singleton LLM
 _planner_llm = None
@@ -59,7 +65,7 @@ Eres un asistente de productividad experto. Analiza los eventos del calendario y
 no leídos del usuario y genera un plan de día optimizado.
 
 Fecha: {date}
-
+{profile}
 EVENTOS DE HOY:
 {events}
 
@@ -82,9 +88,86 @@ Reglas:
 - Bloques de concentración: mínimo 90 minutos
 - Incluir descansos de 15 min cada 2 horas
 - Priorizar emails urgentes que requieran respuesta hoy
-- Respetar los eventos ya agendados en el calendario
+- Cada bloque de concentración debe decir en su título A QUÉ objetivo o proyecto
+  del usuario sirve. Un título genérico como "Bloque de concentración" no ayuda
+  a nadie: usa el nombre real del trabajo que toca.
+- NO inventes objetivos que no estén en el contexto del usuario. Si no hay
+  ninguno listado, deja los bloques genéricos.
+- Los eventos ya agendados NO se repiten en el plan: ya existen en el
+  calendario. Planifica ALREDEDOR de ellos.
 - Responde ÚNICAMENTE con el JSON, sin explicaciones adicionales.
 """.strip()
+
+
+def _build_planning_prompt(date: str, events: list, emails: list, perfil: str = "") -> str:
+    """
+    Arma el prompt del plan. `perfil` son los hechos que la memoria destiló del
+    usuario (proyectos en curso, preferencias); sin ellos el LLM solo puede
+    producir "Bloque de concentración" en abstracto, que es lo que llenaba el
+    calendario de bloques idénticos e inútiles.
+
+    Cuando no hay hechos, la sección se OMITE entera: un encabezado
+    "OBJETIVOS:" en blanco es una invitación a inventarlos.
+    """
+    bloque = (
+        f"\nOBJETIVOS Y CONTEXTO DEL USUARIO:\n{perfil.strip()}\n"
+        if perfil and perfil.strip()
+        else ""
+    )
+    return _PLANNING_PROMPT.format(
+        date=date,
+        profile=bloque,
+        events=_format_events(events),
+        emails=_format_emails(emails),
+    )
+
+
+def _render_profile_block(user_email: str) -> str:
+    """Indirección para poder sustituirla en las pruebas."""
+    from agents.memory_agent.profile import render_profile_block
+    return render_profile_block(user_email)
+
+
+def _zona_horaria_de(user_email: str) -> str:
+    """Zona horaria del perfil del usuario; el default si no hay o falla."""
+    try:
+        from storage.postgres.client import get_connection
+
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT timezone FROM user_profile WHERE user_id = %s", (user_email,))
+            fila = cur.fetchone()
+        if fila and fila[0]:
+            return fila[0]
+    except Exception as exc:
+        logger.warning(f"[planner] No se pudo leer la zona horaria de {user_email}: {exc}")
+    return _TZ_DEFAULT
+
+
+def _hoy_para(user_email: str) -> datetime:
+    """
+    «Hoy» en la zona del usuario, no en la del pod. El plan se escribe con la
+    fecha que el usuario ve en su calendario.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo(_zona_horaria_de(user_email)))
+    except Exception as exc:
+        logger.warning(f"[planner] Zona horaria inválida para {user_email}: {exc}")
+        return datetime.now()
+
+
+def _perfil_de(user_email: str) -> str:
+    """
+    Hechos del usuario, best-effort. Esto corre en un cron a las 7:00 am: si la
+    memoria falla, el brief tiene que salir de todos modos — degradado, no
+    ausente.
+    """
+    try:
+        return _render_profile_block(user_email) or ""
+    except Exception as exc:
+        logger.warning(f"[planner] No se pudo leer el perfil de {user_email}: {exc}")
+        return ""
 
 
 def _format_events(events: list) -> str:
@@ -147,13 +230,11 @@ async def organize_day_for_user(user_email: str) -> dict[str, Any]:
             "tasks_created": 0,
         }
 
-    # 3. Generar plan con LLM
-    today  = datetime.now().strftime("%Y-%m-%d (%A)")
-    prompt = _PLANNING_PROMPT.format(
-        date=today,
-        events=_format_events(events),
-        emails=_format_emails(emails),
-    )
+    # 3. Generar plan con LLM, con los hechos que la memoria sabe del usuario
+    perfil = await asyncio.to_thread(_perfil_de, user_email)
+    hoy    = _hoy_para(user_email)
+    today  = hoy.strftime("%Y-%m-%d (%A)")
+    prompt = _build_planning_prompt(date=today, events=events, emails=emails, perfil=perfil)
 
     try:
         import concurrent.futures
@@ -177,9 +258,9 @@ async def organize_day_for_user(user_email: str) -> dict[str, Any]:
             "error": str(exc),
         }
 
-    # 4. Sincronizar al calendario
-    plan_data["date"] = datetime.now().strftime("%Y-%m-%d")
-    tasks_created = sync_plan_to_calendar(credentials, plan_data)
+    # 4. Sincronizar al calendario, sin recrear lo que el usuario ya tiene
+    plan_data["date"] = hoy.strftime("%Y-%m-%d")
+    tasks_created = sync_plan_to_calendar(credentials, plan_data, existentes=events)
 
     # 5. Resumen
     summary      = plan_data.get("summary", "Plan generado.")
