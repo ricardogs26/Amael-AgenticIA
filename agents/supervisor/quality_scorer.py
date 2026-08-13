@@ -38,11 +38,13 @@ def _get_llm() -> ChatOllama:
     global _chat_llm
     if _chat_llm is None:
         from config.settings import settings
+        # request_timeout no existe en ChatOllama (extra="ignore" lo tragaba):
+        # el timeout real va en client_kwargs, como en la fábrica central.
         _chat_llm = ChatOllama(
             model=settings.llm_model,
             base_url=settings.ollama_base_url,
             temperature=0,
-            request_timeout=60,
+            client_kwargs={"timeout": 60},
         )
     return _chat_llm
 

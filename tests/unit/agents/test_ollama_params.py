@@ -26,6 +26,9 @@ _CHAT_OLLAMA_SITES = [
     "orchestration/fast_chat.py",
     "agents/planner/agent.py",
     "agents/base/llm_factory.py",
+    # 13-ago-2026: estos dos pasaban request_timeout (ignorado) — corrían sin timeout.
+    "agents/executor/batch_runner.py",
+    "agents/supervisor/quality_scorer.py",
 ]
 
 
@@ -61,6 +64,16 @@ def test_chatollama_silently_ignores_unknown_kwargs():
     assert ChatOllama.model_config.get("extra") == "ignore"
     llm = ChatOllama(model="x", think=False, request_timeout=99)
     assert not hasattr(llm, "think")
+
+
+@pytest.mark.parametrize("rel", [
+    "agents/executor/batch_runner.py",
+    "agents/supervisor/quality_scorer.py",
+])
+def test_reasoning_and_scorer_have_real_timeout(rel):
+    """El timeout debe viajar en client_kwargs, no en un kwarg fantasma."""
+    src = _source(rel)
+    assert 'client_kwargs={"timeout"' in src, f"{rel}: sin timeout real"
 
 
 def test_trader_disables_reasoning_and_sets_timeout():

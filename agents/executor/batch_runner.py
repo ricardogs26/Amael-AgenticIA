@@ -79,10 +79,13 @@ def _get_llm_reasoning() -> ChatOllama:
     global _llm_reasoning
     if _llm_reasoning is None:
         from config.settings import settings
+        # OJO: langchain_ollama ignora kwargs desconocidos (extra="ignore") —
+        # request_timeout se descartaba en silencio y esta ruta corría SIN
+        # timeout. El timeout real viaja en client_kwargs al cliente httpx.
         _llm_reasoning = ChatOllama(
             model=settings.llm_model,
             base_url=settings.ollama_base_url,
-            request_timeout=_LLM_REASONING_TIMEOUT,
+            client_kwargs={"timeout": _LLM_REASONING_TIMEOUT},
         )
     return _llm_reasoning
 
