@@ -46,7 +46,7 @@ data:
   #     qwen3:14b  -> 1.6 s de generación + 0 s (ya residente) = ~1.6 s
   # Con un solo modelo grande en la GPU no hay a quién desalojar.
   LLM_MODEL:        "qwen3.5:9b"
-  LLM_VISION_MODEL: "qwen2.5vl:3b"
+  LLM_VISION_MODEL: "qwen3.5:9b"  # 13-ago: visión en el causal, ver 01-configmap
   LLM_EMBED_MODEL:  "nomic-embed-text"
 
   # ── Tier profundo (ollama-cpu, sin GPU) ──────────────────────────────────

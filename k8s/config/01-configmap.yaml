@@ -40,7 +40,12 @@ data:
   OLLAMA_BASE_URL:  "http://ollama-service:11434"
   # A2: embeddings en el Ollama de CPU
   OLLAMA_EMBED_URL: "http://ollama-cpu-service:11434"
-  LLM_VISION_MODEL: "qwen2.5vl:3b"
+  # 13-ago-2026: la visión pasa al modelo causal — qwen3.5:9b es multimodal.
+  # Medido vs qwen2.5vl:3b sobre un screenshot real de Grafana: el 9b distingue
+  # panel vacío de valor 0 y diagnostica; el 3b leyó "0 s" en paneles vacíos y
+  # concluyó «estado normal» con RAG Hit Rate 0%×5. Además el 3b ya ni cabía
+  # entero junto al 9b (57% GPU) y cada uso pagaba swap; con el 9b es cero.
+  LLM_VISION_MODEL: "qwen3.5:9b"
 
   # ── Servicios internos ────────────────────────────────────────────────────
   # Fase B agents-split: raphael-service absorbió el endpoint conversacional
