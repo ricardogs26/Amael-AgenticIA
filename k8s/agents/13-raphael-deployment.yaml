@@ -45,7 +45,7 @@ data:
   #     qwen3:1.7b -> 0.3 s de generación + 3.3 s de carga = ~3.6 s
   #     qwen3:14b  -> 1.6 s de generación + 0 s (ya residente) = ~1.6 s
   # Con un solo modelo grande en la GPU no hay a quién desalojar.
-  LLM_MODEL:        "qwen3:14b"
+  LLM_MODEL:        "qwen3.5:9b"
   LLM_VISION_MODEL: "qwen2.5vl:3b"
   LLM_EMBED_MODEL:  "nomic-embed-text"
 
@@ -68,7 +68,7 @@ data:
   # corre 100% en CPU por diseño y no debe alertar nunca. Solo se consulta
   # OLLAMA_BASE_URL (la instancia con GPU).
   # Vaciar SRE_LLM_WATCH_MODELS desactiva la comprobación.
-  SRE_LLM_WATCH_MODELS:  "qwen3:14b"
+  SRE_LLM_WATCH_MODELS:  "qwen3.5:9b"
   SRE_LLM_GPU_MIN_RATIO: "0.99"
 
   # ── PostgreSQL (user/db reales: amael_user / amael_db) ──────────────────

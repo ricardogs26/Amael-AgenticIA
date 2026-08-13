@@ -130,9 +130,17 @@ spec:
         - name: OLLAMA_HOST
           value: "0.0.0.0"
         - name: OLLAMA_NUM_PARALLEL
-          value: "1"        # Estuvo en 2 unas horas el 5-ago-2026 y se revirtió:
-                            # duplicaba el KV (+0.6 GiB) y dejaba al qwen3:14b
-                            # justo en el límite de VRAM. Ver Historial.
+          value: "2"        # 13-ago-2026: ⚠️ HOY ES INERTE con qwen3.5 — ollama
+                            # 0.32.5 loguea "model architecture does not currently
+                            # support parallel requests" (arch qwen35) y fuerza
+                            # n_seq_max=1: las peticiones SE ENCOLAN igual que con
+                            # parallel=1 (medido: 2 gens largas = wall suma, no
+                            # solape). El fix upstream es ollama/ollama PR #17144
+                            # (abierto; issue #14621). Se deja en 2 para que al
+                            # actualizar la imagen a una versión con el PR
+                            # mergeado el segundo slot se active — la VRAM ya
+                            # alcanza (9b usa 5.4 GiB + ~2.3 de compute/KV,
+                            # quedan ~4.5 GiB medidos con nvidia-smi).
         - name: OLLAMA_CONTEXT_LENGTH
           value: "8192"     # A2 (7-ago-2026): posible gracias a KV q8_0.
                             # Con f16 el tope era 4096 y el prompt del trader
@@ -177,7 +185,7 @@ spec:
                   ollama list >/dev/null 2>&1 && break
                   i=$((i+1)); sleep 2
                 done
-                ollama run qwen3:14b "" >/dev/null 2>&1 || true
+                ollama run qwen3.5:9b "" >/dev/null 2>&1 || true
         volumeMounts:
         - name: ollama-storage
           mountPath: /root/.ollama

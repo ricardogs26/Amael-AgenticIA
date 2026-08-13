@@ -27,7 +27,7 @@ metadata:
 data:
   OLLAMA_BASE_URL:  "http://ollama-service:11434"
   LLM_PROVIDER:     "ollama"
-  LLM_MODEL:        "qwen3:14b"
+  LLM_MODEL:        "qwen3.5:9b"
   LLM_EMBED_MODEL:  "nomic-embed-text"
 
   # ── Tier profundo (ollama-cpu, sin GPU) ──────────────────────────────────

@@ -240,7 +240,7 @@ spec:
             - name: SRE_NAMESPACE
               value: "amael-ia"
             - name: NW_WATCH_MODELS
-              value: "qwen3:14b"
+              value: "qwen3.5:9b"
             - name: INTERNAL_API_SECRET
               valueFrom:
                 secretKeyRef:
