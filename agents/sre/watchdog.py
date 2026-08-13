@@ -55,6 +55,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from datetime import UTC
 
 logging.basicConfig(
     level=logging.INFO,
@@ -174,7 +175,7 @@ def _dias_para_expirar(header: str) -> float | None:
     -0700`. Un header ilegible devuelve None y el chequeo calla: el token
     respondió 200, no hay problema que reportar.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     raw = header.strip()
     for fmt in ("%Y-%m-%d %H:%M:%S %z", "%Y-%m-%d %H:%M:%S UTC"):
@@ -183,8 +184,8 @@ def _dias_para_expirar(header: str) -> float | None:
         except ValueError:
             continue
         if fecha.tzinfo is None:
-            fecha = fecha.replace(tzinfo=timezone.utc)
-        return (fecha - datetime.now(timezone.utc)).total_seconds() / 86400
+            fecha = fecha.replace(tzinfo=UTC)
+        return (fecha - datetime.now(UTC)).total_seconds() / 86400
     return None
 
 
