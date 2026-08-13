@@ -260,7 +260,13 @@ async def organize_day_for_user(user_email: str) -> dict[str, Any]:
 
     # 4. Sincronizar al calendario, sin recrear lo que el usuario ya tiene
     plan_data["date"] = hoy.strftime("%Y-%m-%d")
-    tasks_created = sync_plan_to_calendar(credentials, plan_data, existentes=events)
+    # `reemplazar`: el plan del día es UNO. Si el brief ya escribió hoy (cron
+    # repetido, o el usuario pidiendo replanificar), su plan anterior se borra
+    # antes de escribir el nuevo en vez de apilarse — solo se tocan los eventos
+    # que llevan la marca del planner, nunca los del usuario.
+    tasks_created = sync_plan_to_calendar(
+        credentials, plan_data, existentes=events, reemplazar=True
+    )
 
     # 5. Resumen
     summary      = plan_data.get("summary", "Plan generado.")

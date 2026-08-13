@@ -62,6 +62,42 @@ def get_todays_events(credentials) -> list[dict[str, Any]]:
         return []
 
 
+_MARCA_PLANNER = "amael_planner"
+
+
+def delete_planner_events(credentials, date: str) -> int:
+    """
+    Borra los eventos que el brief creó ese día. Devuelve cuántos borró.
+
+    El filtro por la marca se le pide a GOOGLE (`privateExtendedProperty`), no
+    se decide en el cliente: traer todos los eventos del día y elegir aquí cuál
+    borrar es una manera de acabar borrando algo del usuario por un bug de
+    comparación. Si el filtro falla, la API devuelve vacío y no se borra nada.
+    """
+    try:
+        service = _build_calendar_service(credentials)
+        result = (
+            service.events()
+            .list(
+                calendarId="primary",
+                timeMin=f"{date}T00:00:00Z",
+                timeMax=f"{date}T23:59:59Z",
+                singleEvents=True,
+                privateExtendedProperty=f"{_MARCA_PLANNER}=1",
+            )
+            .execute()
+        )
+        items = result.get("items", [])
+        for ev in items:
+            service.events().delete(calendarId="primary", eventId=ev["id"]).execute()
+        if items:
+            logger.info(f"[calendar] {len(items)} eventos del plan anterior de {date} borrados.")
+        return len(items)
+    except Exception as exc:
+        logger.error(f"[calendar] delete_planner_events error: {exc}")
+        raise
+
+
 def create_calendar_event(
     credentials,
     summary: str,
@@ -94,6 +130,11 @@ def create_calendar_event(
             "location":    location,
             "start": {"dateTime": start_iso, "timeZone": timezone_id},
             "end":   {"dateTime": end_iso,   "timeZone": timezone_id},
+            # Marca de autoría, invisible en la UI de Google Calendar. Sin ella
+            # no hay forma de distinguir lo que escribió el brief de lo que puso
+            # el usuario, y cada corrida se apila sobre la anterior: el dedup
+            # por título+hora no cubre nada cuando el LLM reescribe los títulos.
+            "extendedProperties": {"private": {_MARCA_PLANNER: "1"}},
         }
         created = service.events().insert(calendarId="primary", body=event).execute()
         logger.info(f"[calendar] Evento creado: {summary!r} ({start_iso})")
@@ -128,6 +169,7 @@ def sync_plan_to_calendar(
     credentials,
     plan_data: dict[str, Any],
     existentes: list[dict[str, Any]] | None = None,
+    reemplazar: bool = False,
 ) -> int:
     """
     Sincroniza un plan de día (generado por LLM) al calendario del usuario.
@@ -158,6 +200,15 @@ def sync_plan_to_calendar(
         for e in (existentes or [])
     }
     omitidos = 0
+
+    if reemplazar:
+        # Un fallo limpiando no puede dejar al usuario sin el plan del día: en
+        # el peor caso quedan eventos viejos, que es recuperable; quedarse sin
+        # brief a las 7 am no lo es.
+        try:
+            delete_planner_events(credentials, date)
+        except Exception as exc:
+            logger.warning(f"[calendar] No se pudo borrar el plan anterior de {date}: {exc}")
 
     for task in tasks:
         title       = task.get("title", "(tarea)")
