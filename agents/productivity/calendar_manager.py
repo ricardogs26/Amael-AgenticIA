@@ -12,7 +12,22 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from agents.productivity.errors import GoogleAuthRevocada
+
 logger = logging.getLogger("agents.productivity.calendar")
+
+# Google no expone un código limpio para «este refresh token ya no sirve»: viene
+# como texto dentro de un RefreshError. Se reconoce por marca en el mensaje.
+_MARCAS_AUTH_REVOCADA = ("invalid_grant", "token has been expired or revoked")
+
+
+def _es_auth_revocada(exc: Exception) -> bool:
+    """
+    ¿El fallo es «tus credenciales ya no sirven»? Solo eso amerita interrumpir:
+    ningún reintento lo arregla, hace falta que el usuario reautorice.
+    """
+    mensaje = str(exc).lower()
+    return any(marca in mensaje for marca in _MARCAS_AUTH_REVOCADA)
 
 
 def _build_calendar_service(credentials):
@@ -59,6 +74,10 @@ def get_todays_events(credentials) -> list[dict[str, Any]]:
         ]
     except Exception as exc:
         logger.error(f"[calendar] get_todays_events error: {exc}")
+        if _es_auth_revocada(exc):
+            raise GoogleAuthRevocada(detalle=str(exc)[:200]) from exc
+        # Un fallo pasajero de la API sí devuelve vacío: no vale la pena tumbar
+        # el brief entero por un 503 de Google.
         return []
 
 

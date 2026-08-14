@@ -64,7 +64,7 @@ spec:
 
       containers:
       - name: amael-agentic-backend
-        image: registry.richardx.dev/amael-agentic-backend:1.16.6
+        image: registry.richardx.dev/amael-agentic-backend:1.16.8
         imagePullPolicy: Always
         ports:
         - name: http

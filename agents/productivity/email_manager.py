@@ -12,6 +12,9 @@ import base64
 import logging
 from typing import Any
 
+from agents.productivity.calendar_manager import _es_auth_revocada
+from agents.productivity.errors import GoogleAuthRevocada
+
 logger = logging.getLogger("agents.productivity.email")
 
 
@@ -79,4 +82,6 @@ def get_unread_emails(credentials, max_results: int = 10) -> list[dict[str, Any]
 
     except Exception as exc:
         logger.error(f"[email] get_unread_emails error: {exc}")
+        if _es_auth_revocada(exc):
+            raise GoogleAuthRevocada(detalle=str(exc)[:200]) from exc
         return []

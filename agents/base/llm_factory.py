@@ -56,6 +56,8 @@ def get_chat_llm(
     temperature: float | None = None,
     timeout: int = 90,
     tier: str = "default",
+    reasoning: bool | None = None,
+    fmt: str | None = None,
 ) -> Any:
     """
     Retorna una instancia de BaseChatModel cacheada según la configuración activa.
@@ -63,6 +65,14 @@ def get_chat_llm(
     Args:
         temperature: Override de temperatura. None usa el default del provider (0.7).
         timeout:     Timeout en segundos para llamadas LLM (default 90s).
+        reasoning:   `False` apaga el thinking de qwen3. Para respuestas que
+                     DEBEN ser JSON es obligatorio: razonando, el modelo agota
+                     la generación pensando y devuelve `content` VACÍO (medido
+                     el 14-ago-2026 en el plan diario: 83 s y cero caracteres).
+                     `None` deja el default del modelo. OJO: el campo de
+                     ChatOllama se llama `reasoning`; `think` es el nombre de la
+                     API de Ollama y langchain lo DESCARTA en silencio.
+        fmt:         `"json"` fuerza salida JSON del modelo.
         tier:        "default" → instancia GPU (ruta interactiva).
                      "deep"    → instancia ollama-cpu, para trabajo asíncrono que
                                  no debe desalojar el modelo interactivo de la
@@ -95,12 +105,12 @@ def get_chat_llm(
     temp = temperature if temperature is not None else 0.7
 
     # base_url va en la clave: dos tiers pueden compartir nombre de modelo.
-    key = (provider, model, base_url, temp, timeout)
+    key = (provider, model, base_url, temp, timeout, reasoning, fmt)
     if key not in _chat_cache:
         with _chat_lock:
             if key not in _chat_cache:
                 instance = _build_chat_llm(
-                    provider, model, temp, timeout, settings, base_url
+                    provider, model, temp, timeout, settings, base_url, reasoning, fmt
                 )
                 _chat_cache[key] = instance
                 logger.info(
@@ -118,6 +128,8 @@ def _build_chat_llm(
     timeout: int,
     settings: Any,
     base_url: str | None = None,
+    reasoning: bool | None = None,
+    fmt: str | None = None,
 ) -> Any:
     if provider == "openai":
         from langchain_openai import ChatOpenAI
@@ -166,11 +178,21 @@ def _build_chat_llm(
         # El timeout va en client_kwargs: ChatOllama no tiene request_timeout y
         # langchain_ollama descarta los kwargs desconocidos sin avisar, así que
         # hasta ahora estas llamadas no tenían límite de tiempo.
+        # Solo se mandan los que se pidieron explícitamente. El nombre del
+        # campo importa: ChatOllama lo llama `reasoning`, y `think` —el nombre
+        # en la API de Ollama— se descarta sin avisar, que fue exactamente cómo
+        # el brief pasó de un fallo a otro sin cambiar nada de verdad.
+        extra: dict[str, Any] = {}
+        if reasoning is not None:
+            extra["reasoning"] = reasoning
+        if fmt is not None:
+            extra["format"] = fmt
         return ChatOllama(
             model=model,
             base_url=base_url or settings.ollama_base_url,
             temperature=temperature,
             client_kwargs={"timeout": timeout},
+            **extra,
         )
 
 

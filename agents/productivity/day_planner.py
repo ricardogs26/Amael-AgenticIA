@@ -46,6 +46,15 @@ def _parse_plan(raw: Any) -> dict:
         text = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in text)
     if not isinstance(text, str):
         text = str(text)
+    # Una respuesta vacía es un fallo DISTINTO de una respuesta sin JSON, y hay
+    # que decirlo: es la firma de qwen3 razonando (todo va a `thinking` y
+    # `content` queda en blanco). Confundirla con un timeout llevó a subir el
+    # reloj cuando lo que había que apagar era el thinking.
+    if not text.strip():
+        raise ValueError(
+            "el LLM devolvió una respuesta vacía (¿thinking activado?, "
+            "el contenido se va al campo 'thinking' y 'content' queda vacío)"
+        )
     m = re.search(r"\{.*\}", text, re.DOTALL)
     if not m:
         raise ValueError(f"sin JSON en la respuesta del LLM: {text[:200]}")
@@ -53,10 +62,29 @@ def _parse_plan(raw: Any) -> dict:
 
 
 def _get_llm():
+    """
+    LLM del plan diario: SIN thinking y con timeout holgado.
+
+    Medido el 14-ago-2026 con el prompt real: razonando, qwen3.5:9b tarda ~83 s
+    y devuelve `content` VACÍO — agota la generación pensando y nunca emite la
+    respuesta. El brief moría con «sin JSON» o, si el reloj llegaba antes, con
+    «el LLM tardó demasiado»; subir el timeout solo habría cambiado el mensaje.
+
+    El nombre del parámetro importa y costó una iteración: ChatOllama lo llama
+    `reasoning`. `think` es el nombre en la API de Ollama y langchain lo
+    DESCARTA sin avisar — con `think=False` el modelo seguía razonando y la
+    única razón de que una prueba saliera bien fue el azar de la temperatura.
+
+    `fmt="json"` es el segundo cinturón: el plan DEBE ser JSON. Es el mismo
+    patrón que ya usa Cassiel para traducir intención a JSON.
+
+    El timeout de 60 s original tampoco daba margen; 180 s es holgado para un
+    cron de las 7 am donde nadie espera frente a la pantalla.
+    """
     global _planner_llm
     if _planner_llm is None:
         from agents.base.llm_factory import get_chat_llm
-        _planner_llm = get_chat_llm(timeout=60)
+        _planner_llm = get_chat_llm(timeout=180, reasoning=False, fmt="json")
     return _planner_llm
 
 
@@ -206,6 +234,7 @@ async def organize_day_for_user(user_email: str) -> dict[str, Any]:
     """
     from agents.productivity.calendar_manager import get_todays_events, sync_plan_to_calendar
     from agents.productivity.email_manager import get_unread_emails
+    from agents.productivity.errors import GoogleAuthRevocada
     from agents.productivity.vault_credentials import get_user_credentials
 
     # 1. Credenciales
@@ -220,9 +249,25 @@ async def organize_day_for_user(user_email: str) -> dict[str, Any]:
             "error": "no_credentials",
         }
 
-    # 2. Datos
-    events = get_todays_events(credentials)
-    emails = get_unread_emails(credentials)
+    # 2. Datos. Si la autorización de Google está revocada hay que DECIRLO: el
+    # lector devolvía [] y el brief concluía «tu día está libre» con el
+    # calendario lleno (14-ago-2026). Y no se escribe nada en un calendario que
+    # no se pudo leer — sin saber qué hay, cualquier bloque pisa algo.
+    try:
+        events = get_todays_events(credentials)
+        emails = get_unread_emails(credentials)
+    except GoogleAuthRevocada as exc:
+        logger.error(f"[planner] Credenciales revocadas para {user_email}: {exc}")
+        return {
+            "summary": (
+                "🔑 Tu autorización de Google caducó o fue revocada, así que no "
+                "pude leer tu calendario ni tu correo. No es que no tengas nada "
+                "hoy: no puedo verlo. Vuelve a autorizar el acceso en "
+                "/api/auth/calendar y el brief de mañana sale normal."
+            ),
+            "tasks_created": 0,
+            "error": "auth_revocada",
+        }
 
     if not events and not emails:
         return {
