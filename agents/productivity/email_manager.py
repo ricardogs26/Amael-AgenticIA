@@ -31,9 +31,28 @@ def _decode_body(data: str) -> str:
         return ""
 
 
-def get_unread_emails(credentials, max_results: int = 10) -> list[dict[str, Any]]:
+# Categorías de Gmail que no son trabajo. El brief planifica el día a partir de
+# estos correos, y el 14-ago-2026 los 10 «no leídos» del usuario eran Medium,
+# Aeroméxico, Reddit, Disney+, Cinépolis, Pinterest y Skyscanner: el LLM,
+# obedeciendo la regla de «priorizar emails urgentes», agendó ~4 h de trabajo
+# entre ellas «parchear el CVE-2026-43499» sacado de un post de Reddit sobre
+# rootear un Galaxy S22. La clasificación ya la hace Gmail; solo hay que pedirla.
+_CATEGORIAS_RUIDO = ("promotions", "social", "forums", "updates")
+_FILTRO_RELEVANTES = " ".join(f"-category:{c}" for c in _CATEGORIAS_RUIDO)
+
+
+def get_unread_emails(
+    credentials,
+    max_results: int = 10,
+    solo_relevantes: bool = True,
+) -> list[dict[str, Any]]:
     """
     Recupera los últimos N emails no leídos del inbox del usuario.
+
+    Args:
+        solo_relevantes: excluye promociones, redes sociales, foros y
+            notificaciones automáticas. `False` devuelve el inbox tal cual —
+            para cuando el usuario pide ver su correo, no para planificar.
 
     Returns:
         Lista de dicts con keys: subject, from, date, snippet, body_preview.
@@ -48,6 +67,7 @@ def get_unread_emails(credentials, max_results: int = 10) -> list[dict[str, Any]
                 userId="me",
                 labelIds=["INBOX", "UNREAD"],
                 maxResults=max_results,
+                q=_FILTRO_RELEVANTES if solo_relevantes else "",
             )
             .execute()
         )
