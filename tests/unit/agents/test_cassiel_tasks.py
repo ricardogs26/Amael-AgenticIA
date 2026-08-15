@@ -170,3 +170,31 @@ class TestApply:
                            "u@x.com", "America/Mexico_City")
         assert "vitaminas" in out and "#2" in out
         assert "informe mensual" not in out and "#1" not in out
+
+
+class TestRuteo:
+    @pytest.mark.parametrize("frase", [
+        "recuérdame comprar café el día de súper",
+        "tengo que revisar el contrato de la renta",
+        "anota: colgar el cuadro del vision board",
+        "/pendientes",
+        "/pendientes laboral",
+        "¿qué tengo pendiente?",
+        "ya compré el café",
+        "ya lo hice",
+        "cancela la del café",
+    ])
+    async def test_frases_de_tarea_rutean_a_reminder(self, frase):
+        from orchestration.agent_router import AgentRouter
+        decision = await AgentRouter().route(frase)
+        assert decision.intent == "reminder", f"{frase!r} → {decision.intent!r}"
+
+    @pytest.mark.parametrize("frase,intent", [
+        ("recuerda lo que te dije del proyecto", "memory"),
+        ("agenda una reunión con Marco el jueves", "productivity"),
+        ("necesito el estado del cluster", "kubernetes"),
+    ])
+    async def test_no_se_come_otros_intents(self, frase, intent):
+        from orchestration.agent_router import AgentRouter
+        decision = await AgentRouter().route(frase)
+        assert decision.intent == intent

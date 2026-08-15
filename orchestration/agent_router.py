@@ -40,6 +40,10 @@ _KEYWORD_RULES = [
     (r"\b(recu[eé]rdame|recordatorio|record[aá]rmelo|"
      r"(m[aá]ndame|env[ií]ame|avisame|av[ií]same)\s+.*\b(cada|todos\s+los|diario|a\s+las)|"
      r"cada\s+(hora|d[ií]a|semana|mes|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)|"
+     r"tengo\s+que\b|anota(me)?\b|apunta\b|/?pendientes?\b|"
+     r"ya\s+lo\s+hice|ya\s+(compr[eé]|pagu[eé]|termin[eé]|fui)\b|"
+     r"cancela\s+la\s+del?\b|"
+     r"necesito\s+(agendar|comprar|llamar|pagar|revisar|renovar|llevar|recoger)\b|"
      r"todos\s+los\s+d[ií]as|tareas?\s+programadas?|mis\s+recordatorios)\b",
      "reminder", ["scheduler"]),
     # SRE / incidentes
