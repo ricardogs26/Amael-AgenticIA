@@ -159,3 +159,66 @@ def sort_key(task: Task, today: date) -> tuple:
 
 def sorted_pending(tasks: list[Task], today: date) -> list[Task]:
     return sorted(tasks, key=lambda t: sort_key(t, today))
+
+
+def match_tasks(tasks: list[Task], ref: str) -> list[Task]:
+    """Busca tareas por ID numérico exacto o substring case-insensitive en
+    título. Devuelve lista (0, 1, o más matches — ambigüedad resuelta arriba)."""
+    ref = ref.strip()
+    if ref.isdigit():
+        return [t for t in tasks if t.id == int(ref)]
+    return [t for t in tasks if ref.lower() in t.title.lower()]
+
+
+def find_task(user_id: str, ref: str) -> Task | None:
+    """Busca UNA tarea por ref (ID numérico o substring en título).
+
+    - 1 candidato → Task
+    - 0 → None
+    - 2+ → ValueError con opciones (adivinar cuál cerrar es peor que preguntar,
+            patrón de find_job en storage.py)
+    """
+    candidatos = match_tasks(list_pending(user_id), ref)
+    if len(candidatos) > 1:
+        opciones = ", ".join(f"#{t.id} {t.title!r}" for t in candidatos)
+        raise ValueError(
+            f"Hay varias pendientes que coinciden con {ref!r}: {opciones}"
+        )
+    return candidatos[0] if candidatos else None
+
+
+def set_status(task_id: int, user_id: str, status: str) -> bool:
+    """Fija el estado de una tarea. Si es 'done', también fija completed_at al
+    NOW() actual."""
+    validate_task_fields("personal", "media", status)  # solo valida status
+    from storage.postgres.client import get_connection
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE user_tasks SET status = %s, "
+                "completed_at = CASE WHEN %s = 'done' THEN NOW() "
+                "ELSE completed_at END "
+                "WHERE id = %s AND user_id = %s AND status = 'pending'",
+                (status, status, task_id, user_id),
+            )
+            cambiado = cur.rowcount > 0
+        conn.commit()
+    return cambiado
+
+
+def postpone_task(task_id: int, user_id: str, new_due: date) -> bool:
+    """Cambia la due_date de una tarea a new_due y resetea last_nudge_at a NULL
+    (para que el scheduler la considere nuevamente)."""
+    from storage.postgres.client import get_connection
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE user_tasks SET due_date = %s, last_nudge_at = NULL "
+                "WHERE id = %s AND user_id = %s AND status = 'pending'",
+                (new_due, task_id, user_id),
+            )
+            cambiado = cur.rowcount > 0
+        conn.commit()
+    return cambiado

@@ -57,3 +57,22 @@ class TestOrden:
             _task(id=3, priority="media"),
         ]
         assert [t.id for t in ts.sorted_pending(tareas, hoy)] == [2, 3, 1]
+
+
+class TestMatch:
+    def test_id_numerico(self):
+        tareas = [_task(id=7, title="comprar café")]
+        assert ts.match_tasks(tareas, "7") == tareas
+
+    def test_substring_case_insensitive(self):
+        tareas = [_task(id=1, title="Revisar contrato de renta"),
+                  _task(id=2, title="Comprar café")]
+        assert [t.id for t in ts.match_tasks(tareas, "café")] == [2]
+
+    def test_ambiguedad_devuelve_todos(self):
+        tareas = [_task(id=1, title="llamar al banco"),
+                  _task(id=2, title="pagar el banco")]
+        assert len(ts.match_tasks(tareas, "banco")) == 2
+
+    def test_sin_coincidencia_lista_vacia(self):
+        assert ts.match_tasks([_task(id=1, title="x")], "zzz") == []
