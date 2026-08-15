@@ -134,6 +134,11 @@ def create_task(
             task = _row_to_task(cur.fetchone())
         conn.commit()
     logger.info(f"[tasks] Tarea #{task.id} creada para {user_id}: {task.title!r}")
+    try:
+        from observability.metrics import TASKS_TOTAL
+        TASKS_TOTAL.labels(status="pending").inc()
+    except Exception:
+        pass
     return task
 
 
@@ -204,6 +209,12 @@ def set_status(task_id: int, user_id: str, status: str) -> bool:
             )
             cambiado = cur.rowcount > 0
         conn.commit()
+    if cambiado:
+        try:
+            from observability.metrics import TASKS_TOTAL
+            TASKS_TOTAL.labels(status=status).inc()
+        except Exception:
+            pass
     return cambiado
 
 

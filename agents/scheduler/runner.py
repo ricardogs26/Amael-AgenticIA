@@ -136,6 +136,11 @@ async def _task_nudges() -> None:
             deliver_whatsapp(user_id, "Pendientes", _format_nudge(sel, hoy))
             for t in sel:
                 tasks_storage.mark_nudged(t.id)
+                try:
+                    from observability.metrics import TASK_NUDGES_TOTAL
+                    TASK_NUDGES_TOTAL.inc()
+                except Exception:
+                    pass
         except Exception as exc:
             # Un usuario sin WhatsApp no debe tumbar los nudges de los demás.
             logger.warning(f"[scheduler] Nudge a {user_id} falló: {exc}")

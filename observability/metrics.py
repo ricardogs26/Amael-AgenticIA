@@ -287,6 +287,12 @@ SRE_POSTMORTEM_TOTAL = Counter(
     "amael_sre_postmortem_total",
     "Postmortems LLM generados",
 )
+TASKS_TOTAL = Counter(
+    "amael_tasks_total", "Tareas pendientes por transición de estado", ["status"]
+)
+TASK_NUDGES_TOTAL = Counter(
+    "amael_task_nudges_total", "Nudges de pendientes enviados"
+)
 SRE_NOTIFY_TOTAL = Counter(
     "amael_sre_notify_total",
     "Notificaciones WhatsApp enviadas por el SRE agent",
