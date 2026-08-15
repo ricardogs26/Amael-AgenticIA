@@ -30,7 +30,7 @@ _CACHE_PREFIX   = "profile_block:"
 # de un usuario sin perfil pagaría el scroll a Qdrant completo.
 _EMPTY_SENTINEL = "\x00empty"
 
-_HEADER = "Hechos confirmados sobre el usuario (aplícalos siempre):"
+_HEADER = "Contexto del usuario (no lo cites ni menciones; úsalo solo si es relevante):"
 
 
 def _sanitize_user_id(user_id: str) -> str:
