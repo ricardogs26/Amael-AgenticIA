@@ -222,3 +222,51 @@ def postpone_task(task_id: int, user_id: str, new_due: date) -> bool:
             cambiado = cur.rowcount > 0
         conn.commit()
     return cambiado
+
+
+def nudge_eligible(task: Task, today: date) -> bool:
+    """Spec §3: el día del due SIEMPRE avisa; vencidas: alta diario,
+    media cada 3 días, baja solo brief (nunca nudge suelto).
+    Máx 1 nudge por tarea al día vía last_nudge_at."""
+    if task.status != "pending" or task.due_date is None or task.due_date > today:
+        return False
+    if task.last_nudge_at is not None and task.last_nudge_at.date() >= today:
+        return False
+    if task.due_date == today:
+        return True
+    dias_vencida = (today - task.due_date).days
+    if task.priority == "alta":
+        return True
+    if task.priority == "media":
+        return dias_vencida % 3 == 0
+    return False
+
+
+def select_nudges(tasks: list[Task], today: date, cap: int = 3) -> list[Task]:
+    elegibles = [t for t in tasks if nudge_eligible(t, today)]
+    return sorted_pending(elegibles, today)[:cap]
+
+
+def mark_nudged(task_id: int) -> None:
+    from storage.postgres.client import get_connection
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE user_tasks SET last_nudge_at = NOW() WHERE id = %s",
+                (task_id,),
+            )
+        conn.commit()
+
+
+_ALL_DUE_SQL = f"""
+    SELECT {_COLS} FROM user_tasks
+    WHERE status = 'pending' AND due_date IS NOT NULL
+"""  # nosec B608
+
+
+def all_pending_with_due() -> list[Task]:
+    from storage.postgres.client import get_connection
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(_ALL_DUE_SQL)
+            return [_row_to_task(r) for r in cur.fetchall()]

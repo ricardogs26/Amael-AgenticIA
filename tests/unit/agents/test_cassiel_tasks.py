@@ -76,3 +76,43 @@ class TestMatch:
 
     def test_sin_coincidencia_lista_vacia(self):
         assert ts.match_tasks([_task(id=1, title="x")], "zzz") == []
+
+
+class TestNudges:
+    HOY = date(2026, 8, 15)
+
+    def test_alta_vencida_elegible_cada_dia(self):
+        t = _task(priority="alta", due_date=date(2026, 8, 10))
+        assert ts.nudge_eligible(t, self.HOY)
+
+    def test_media_cada_3_dias(self):
+        t3 = _task(priority="media", due_date=date(2026, 8, 12))  # 3 días
+        t2 = _task(priority="media", due_date=date(2026, 8, 13))  # 2 días
+        hoy_mismo = _task(priority="media", due_date=self.HOY)
+        assert ts.nudge_eligible(t3, self.HOY)
+        assert not ts.nudge_eligible(t2, self.HOY)
+        assert ts.nudge_eligible(hoy_mismo, self.HOY)   # el día que toca, siempre
+
+    def test_baja_nunca_nudge_salvo_hoy(self):
+        vencida = _task(priority="baja", due_date=date(2026, 8, 1))
+        hoy = _task(priority="baja", due_date=self.HOY)
+        assert not ts.nudge_eligible(vencida, self.HOY)
+        assert ts.nudge_eligible(hoy, self.HOY)
+
+    def test_ya_nudgeada_hoy_no_repite(self):
+        t = _task(priority="alta", due_date=date(2026, 8, 10),
+                  last_nudge_at=datetime(2026, 8, 15, 9, 0, tzinfo=UTC))
+        assert not ts.nudge_eligible(t, self.HOY)
+
+    def test_sin_fecha_no_nudge(self):
+        assert not ts.nudge_eligible(_task(priority="alta", due_date=None), self.HOY)
+
+    def test_cap_gana_lo_prioritario(self):
+        tareas = [
+            _task(id=1, priority="baja", due_date=self.HOY),
+            _task(id=2, priority="alta", due_date=date(2026, 8, 1)),
+            _task(id=3, priority="alta", due_date=date(2026, 8, 5)),
+            _task(id=4, priority="media", due_date=self.HOY),
+        ]
+        sel = ts.select_nudges(tareas, self.HOY, cap=3)
+        assert [t.id for t in sel] == [2, 3, 4]
