@@ -143,3 +143,19 @@ def list_pending(user_id: str) -> list[Task]:
         with conn.cursor() as cur:
             cur.execute(_LIST_SQL, (user_id,))
             return [_row_to_task(r) for r in cur.fetchall()]
+
+
+def sort_key(task: Task, today: date) -> tuple:
+    """Orden EFECTIVO (spec §1): vencida/hoy > alta > media > baja;
+    desempate por due_date más próxima, luego created_at."""
+    overdue = task.due_date is not None and task.due_date <= today
+    return (
+        0 if overdue else 1,
+        PRIORITIES.index(task.priority),
+        task.due_date or date.max,
+        task.created_at,
+    )
+
+
+def sorted_pending(tasks: list[Task], today: date) -> list[Task]:
+    return sorted(tasks, key=lambda t: sort_key(t, today))

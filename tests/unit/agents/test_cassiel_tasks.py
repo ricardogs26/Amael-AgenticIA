@@ -2,7 +2,7 @@
 se prueba PURA (sin DB): validación, orden, matching, nudges."""
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -32,3 +32,28 @@ class TestValidacion:
     def test_valores_inventados_lanzan(self, cat, prio, status):
         with pytest.raises(ValueError):
             ts.validate_task_fields(cat, prio, status)
+
+
+class TestOrden:
+    def test_vencida_gana_a_alta_sin_fecha(self):
+        hoy = date(2026, 8, 15)
+        vencida_baja = _task(id=1, priority="baja", due_date=date(2026, 8, 10))
+        alta_sin_fecha = _task(id=2, priority="alta", due_date=None)
+        orden = ts.sorted_pending([alta_sin_fecha, vencida_baja], hoy)
+        assert [t.id for t in orden] == [1, 2]
+
+    def test_desempate_por_fecha_mas_proxima(self):
+        hoy = date(2026, 8, 15)
+        lejana = _task(id=1, priority="media", due_date=date(2026, 8, 30))
+        proxima = _task(id=2, priority="media", due_date=date(2026, 8, 20))
+        orden = ts.sorted_pending([lejana, proxima], hoy)
+        assert [t.id for t in orden] == [2, 1]
+
+    def test_prioridad_ordena_sin_fechas(self):
+        hoy = date(2026, 8, 15)
+        tareas = [
+            _task(id=1, priority="baja"),
+            _task(id=2, priority="alta"),
+            _task(id=3, priority="media"),
+        ]
+        assert [t.id for t in ts.sorted_pending(tareas, hoy)] == [2, 3, 1]
