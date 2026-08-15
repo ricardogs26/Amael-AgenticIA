@@ -44,17 +44,10 @@ _ACTION_LABELS = {
 }
 
 _GRAFANA_DASHBOARDS = [
-    ("amael-llm",          "LLM & HTTP — latencia, tokens, throughput"),
-    ("amael-agent",        "Pipeline de Agente — pasos, herramientas, REPLAN"),
-    ("amael-rag",          "RAG Performance — hit/miss, latencia"),
-    ("amael-infra",        "Infraestructura & GPU — VRAM, CPU, pods"),
-    ("amael-supervisor",   "Supervisor & Calidad — quality scores"),
-    ("amael-security",     "Seguridad & Rate Limiting"),
-    ("amael-service-map",  "Service Map — topología OTel"),
-    ("amael-sre-agent",    "SRE Autónomo — loop runs, anomalías, acciones"),
-    ("amael-backend",      "Backend Overview — golden signals completos"),
-    ("amael-poc-overview", "POC Overview"),
-    ("amael-agent-comm",   "Comunicación entre Agentes"),
+    ("amael-infra",     "Infraestructura & GPU — nodo, VRAM, pods, réplicas"),
+    ("amael-backend",   "Amael Plataforma — HTTP/SLO, pipeline, RAG, tokens LLM"),
+    ("amael-sre-agent", "SRE Autónomo & GitOps — loop, anomalías, PRs de Camael"),
+    ("amael-trader",    "Trader Agent — equity, órdenes, confianza LLM"),
 ]
 
 

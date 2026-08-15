@@ -2,7 +2,7 @@
 GrafanaTool — consultas e imágenes de dashboards Grafana.
 
 Capacidades:
-  list_dashboards()              — lista los 8 dashboards Amael
+  list_dashboards()              — lista los 4 dashboards Amael (más aliases legacy)
   get_dashboard(uid)             — metadata + URL del dashboard
   screenshot(dashboard_key)      — captura PNG vía whatsapp-bridge /screenshot
   search_dashboards(query)       — búsqueda por nombre (Grafana API)
@@ -37,14 +37,17 @@ _WA_BRIDGE_URL = os.environ.get(
 # ── Mapa de dashboards Amael ──────────────────────────────────────────────────
 # Keyed by alias amigable → uid (Grafana) + título
 _AMAEL_DASHBOARDS: dict[str, dict[str, str]] = {
-    "llm":        {"uid": "amael-llm",        "title": "LLM & HTTP"},
-    "agent":      {"uid": "amael-agent",      "title": "Pipeline de Agente"},
-    "rag":        {"uid": "amael-rag",        "title": "RAG Performance"},
-    "infra":      {"uid": "amael-infra",      "title": "Infraestructura & GPU"},
-    "supervisor": {"uid": "amael-supervisor", "title": "Supervisor & Calidad"},
-    "security":   {"uid": "amael-security",   "title": "Seguridad & Rate Limiting"},
-    "service_map":{"uid": "amael-service-map","title": "Service Map"},
-    "sre":        {"uid": "amael-sre-agent",  "title": "SRE Autónomo"},
+    "infra":      {"uid": "amael-infra",     "title": "Infraestructura & GPU"},
+    "plataforma": {"uid": "amael-backend",   "title": "Amael — Plataforma"},
+    "sre":        {"uid": "amael-sre-agent", "title": "SRE Autónomo & GitOps"},
+    "trader":     {"uid": "amael-trader",    "title": "Trader Agent"},
+    # Aliases legacy (consolidación 14-ago-2026) → dashboard que los absorbió
+    "llm":        {"uid": "amael-backend",   "title": "Amael — Plataforma"},
+    "agent":      {"uid": "amael-backend",   "title": "Amael — Plataforma"},
+    "rag":        {"uid": "amael-backend",   "title": "Amael — Plataforma"},
+    "supervisor": {"uid": "amael-backend",   "title": "Amael — Plataforma"},
+    "security":   {"uid": "amael-backend",   "title": "Amael — Plataforma"},
+    "service_map":{"uid": "amael-backend",   "title": "Amael — Plataforma"},
 }
 
 
@@ -95,7 +98,7 @@ class GrafanaTool(BaseTool):
         )
 
     async def list_dashboards(self, input: ListDashboardsInput) -> ToolOutput:
-        """Lista los 8 dashboards predefinidos de Amael con sus URLs."""
+        """Lista los 4 dashboards predefinidos de Amael (más aliases legacy) con sus URLs."""
         result = []
         for alias, info in _AMAEL_DASHBOARDS.items():
             result.append({

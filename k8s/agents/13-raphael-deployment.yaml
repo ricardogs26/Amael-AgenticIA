@@ -216,7 +216,7 @@ spec:
 
       containers:
         - name: raphael
-          image: registry.richardx.dev/raphael-service:1.1.29
+          image: registry.richardx.dev/raphael-service:1.1.30
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
