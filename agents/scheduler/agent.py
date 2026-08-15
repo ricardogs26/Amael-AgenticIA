@@ -269,7 +269,8 @@ class CassielAgent(BaseAgent):
                              "🟡" if t.due_date == hoy else "•")
                     fecha = f" — para {t.due_date}" if t.due_date else ""
                     mins = f" (~{t.estimated_minutes}m)" if t.estimated_minutes else ""
-                    lineas.append(f"{marca} #{t.id} {t.title}{mins}{fecha}")
+                    lineas.append(f"{marca} #{t.id} {t.title} [{t.category}/"
+                                  f"{t.priority}]{mins}{fecha}")
                 return "Tus pendientes:\n" + "\n".join(lineas)
 
             # task_done / task_cancel / task_postpone

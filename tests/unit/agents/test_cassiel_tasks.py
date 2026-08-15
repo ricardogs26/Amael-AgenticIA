@@ -161,9 +161,12 @@ class TestApply:
         assert "varias" in out.lower()
 
     def test_task_list_ordena_y_filtra(self, agent, monkeypatch):
-        tareas = [_task(id=1, title="a", category="laboral", priority="baja"),
-                  _task(id=2, title="b", category="personal", priority="alta")]
+        tareas = [_task(id=1, title="informe mensual", category="laboral",
+                        priority="baja"),
+                  _task(id=2, title="vitaminas", category="personal",
+                        priority="alta")]
         monkeypatch.setattr(ts, "list_pending", lambda u: tareas)
         out = agent._apply({"action": "task_list", "filter": "personal"},
                            "u@x.com", "America/Mexico_City")
-        assert "b" in out and "a" not in out
+        assert "vitaminas" in out and "#2" in out
+        assert "informe mensual" not in out and "#1" not in out
