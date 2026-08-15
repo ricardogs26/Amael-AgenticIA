@@ -134,6 +134,8 @@ async def chat(
     )
 
     # Transcripción de audio (si viene nota de voz de WhatsApp)
+    # was_audio sobrevive al model_copy de abajo: quien habla por voz recibe voz.
+    was_audio = bool(body.audio_base64)
     if body.audio_base64:
         try:
             from audio.transcriber import transcribe_audio_base64
@@ -274,7 +276,9 @@ async def chat(
             effective_user if _is_whatsapp_user(effective_user) else None
         )
     )
-    if _is_voice_request(question) and voice_phone:
+    # Nota de voz cuando: (a) el mensaje LLEGÓ como audio — se responde en el
+    # mismo canal, sin exigir keywords — o (b) el texto la pide explícitamente.
+    if (was_audio or _is_voice_request(question)) and voice_phone:
         asyncio.create_task(_send_voice_note(phone=voice_phone, text=answer))
 
     # Almacenar episodio en memoria Zaphkiel (fire-and-forget)

@@ -264,6 +264,8 @@ def run_reasoning_step(
 
     system_prompt = (
         f"Eres un asistente inteligente. {lang_rule}\n"
+        "La plataforma puede sintetizar tu respuesta como nota de voz (WhatsApp): "
+        "NUNCA digas que no puedes generar audio — responde el contenido y ya.\n"
         "REGLAS DE FORMATO:\n"
         "1. Si el contexto contiene un bloque ```bash o ```yaml, CÓPIALO EXACTAMENTE sin modificarlo.\n"
         "2. NUNCA pongas análisis ni texto dentro de un bloque ```bash o ```yaml.\n"

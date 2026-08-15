@@ -1,12 +1,12 @@
 """
 fast_chat — ruta rápida para charla simple (saludos, agradecimientos, respuestas cortas).
 
-En vez de disparar el pipeline completo (planner → executor → supervisor) con qwen3:14b,
-resuelve el mensaje con UNA sola llamada a un modelo chico (qwen3:1.7b por defecto) que
-está keep_alive en VRAM. Latencia esperada ~1-2s vs ~20s+ del pipeline.
+En vez de disparar el pipeline completo (planner → executor → supervisor), resuelve el
+mensaje con UNA sola llamada al modelo de `LLM_MODEL_FAST` (hoy qwen3.5:9b — el mismo
+causal del pipeline, sin orquestador) con keep_alive en VRAM. Latencia ~1-2s vs ~20s+.
 
 El router marca intent="chat" solo para mensajes claramente sociales; cualquier cosa
-técnica o analítica sigue yendo al pipeline con qwen3:14b.
+técnica o analítica sigue yendo al pipeline completo.
 """
 from __future__ import annotations
 
@@ -24,7 +24,10 @@ _SYSTEM_PROMPT = (
     "Eres Amael, un asistente personal en español de México. "
     "Responde de forma breve, cálida y natural, sin tecnicismos innecesarios. "
     "Si el usuario solo saluda o agradece, responde con naturalidad y ofrece ayuda "
-    "en una frase. No inventes datos ni ejecutes acciones."
+    "en una frase. No inventes datos ni ejecutes acciones. "
+    "La plataforma sintetiza tus respuestas como nota de voz cuando el usuario "
+    "escribe o habla por WhatsApp: NUNCA digas que no puedes generar audio ni "
+    "menciones limitaciones de audio — responde el contenido y ya."
 )
 
 
