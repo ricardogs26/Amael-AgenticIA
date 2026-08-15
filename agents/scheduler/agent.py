@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -36,13 +36,24 @@ _SYSTEM = """Eres Cassiel, el planificador de tareas de Amael. Traduce la petici
 
 Esquema:
 {
-  "action": "create" | "list" | "pause" | "resume" | "delete" | "unclear",
+  "action": "create" | "list" | "pause" | "resume" | "delete" | "unclear" | "task_create" | "task_list" | "task_done" | "task_cancel" | "task_postpone",
   "title": "nombre corto de la tarea (solo create)",
   "prompt": "instrucción que se ejecutará en cada corrida, autocontenida (solo create)",
   "schedule": "cron de 5 campos O timestamp ISO local (solo create)",
   "delivery": "whatsapp" | "none",
   "job_ref": "id o parte del título de la tarea (pause/resume/delete)",
-  "clarification": "pregunta al usuario (solo unclear)"
+  "clarification": "pregunta al usuario (solo unclear)",
+  "task": {                        // solo task_create
+    "title": "corto", "description": "",
+    "category": "personal" | "laboral",
+    "priority": "alta" | "media" | "baja",
+    "estimated_minutes": 30,
+    "due_date": "YYYY-MM-DD" | null,
+    "needs_scheduling": false
+  },
+  "task_ref": "id o parte del título",   // done/cancel/postpone
+  "new_due": "YYYY-MM-DD",               // solo task_postpone
+  "filter": "personal" | "laboral" | "hoy" | null   // task_list
 }
 
 Reglas:
@@ -51,7 +62,14 @@ Reglas:
 - Si el usuario pregunta qué tareas tiene → action=list.
 - Si falta el cuándo o el qué → action=unclear con una clarification concreta.
 - NUNCA inventes fechas: si el usuario no dio hora, pregunta.
-- delivery=whatsapp por default."""
+- delivery=whatsapp por default.
+- Tarea pendiente SIN horario recurrente («tengo que», «necesito», «anota»,
+  «recuérdame X» sin cuándo) → task_create. Con cron/hora explícita → create (job).
+- Infiere category/priority/estimated_minutes con sentido común; due_date SOLO
+  si el usuario dio fecha — no la inventes.
+- «ya lo hice / ya compré X» → task_done con task_ref. «cancela» → task_cancel.
+  «mejor el lunes» → task_postpone con new_due.
+- «/pendientes» o «qué tengo pendiente» → task_list (filter si lo dijo)."""
 
 
 @AgentRegistry.register
@@ -77,8 +95,16 @@ class CassielAgent(BaseAgent):
         from agents.scheduler import storage
 
         tz_name = storage.user_timezone(user_email)
+        pending = self._pop_pending_question(user_email)
+        extra_context = None
+        if pending:
+            extra_context = (
+                f"Pregunta pendiente al usuario: fecha para la tarea "
+                f"#{pending.get('task_id')}. Si este mensaje la responde, "
+                f"action=task_postpone con task_ref={pending.get('task_id')} y new_due."
+            )
         try:
-            parsed = self._parse_intent(query, tz_name)
+            parsed = self._parse_intent(query, tz_name, extra_context)
         except Exception as exc:
             logger.warning(f"[cassiel] parseo LLM falló: {exc}")
             return AgentResult(
@@ -101,7 +127,7 @@ class CassielAgent(BaseAgent):
 
     # ── LLM: intención → JSON ─────────────────────────────────────────────────
 
-    def _parse_intent(self, query: str, tz_name: str) -> dict:
+    def _parse_intent(self, query: str, tz_name: str, extra_context: str | None = None) -> dict:
         from langchain_core.messages import HumanMessage, SystemMessage
         from langchain_ollama import ChatOllama
 
@@ -118,6 +144,8 @@ class CassielAgent(BaseAgent):
             f"Ahora es {ahora.strftime('%A %Y-%m-%d %H:%M')} en {tz_name}.\n"
             f"Petición del usuario: {query}"
         )
+        if extra_context:
+            contexto = f"{contexto}\n{extra_context}"
         resp = llm.invoke([
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=contexto),
@@ -186,4 +214,101 @@ class CassielAgent(BaseAgent):
             return (f"▶️ Tarea #{job.id} *{job.title}* reanudada. "
                     f"Próxima ejecución: {pub['next_run']}.")
 
+        if action in ("task_create", "task_list", "task_done", "task_cancel",
+                      "task_postpone"):
+            return self._apply_task(action, parsed, user_email, tz_name)
+
         return f"Acción desconocida del parser: {action!r}. Reformula la petición."
+
+    def _apply_task(self, action: str, parsed: dict, user_email: str, tz_name: str) -> str:
+        from agents.scheduler import tasks_storage
+
+        try:
+            if action == "task_create":
+                t = parsed.get("task") or {}
+                titulo = str(t.get("title") or "").strip()
+                if not titulo:
+                    return "¿Qué tarea anoto? Dímela en una frase corta."
+                due = None
+                if t.get("due_date"):
+                    due = date.fromisoformat(str(t["due_date"]))   # ValueError → legible
+                task = tasks_storage.create_task(
+                    user_id=user_email, title=titulo,
+                    description=str(t.get("description") or ""),
+                    category=str(t.get("category") or "personal"),
+                    priority=str(t.get("priority") or "media"),
+                    estimated_minutes=(int(t["estimated_minutes"])
+                                       if t.get("estimated_minutes") else None),
+                    due_date=due,
+                    needs_scheduling=bool(t.get("needs_scheduling")),
+                )
+                extra = ""
+                if due is None and task.priority == "alta":
+                    self._set_pending_question(user_email, task.id, "due_date")
+                    extra = " ¿Para cuándo la necesitas?"
+                mins = f", ~{task.estimated_minutes} min" if task.estimated_minutes else ""
+                return (f"📝 Anotada #{task.id}: *{task.title}* — {task.category}, "
+                        f"prioridad {task.priority}{mins}."
+                        f"{f' Fecha: {due}.' if due else ''}{extra}")
+
+            if action == "task_list":
+                tareas = tasks_storage.list_pending(user_email)
+                filtro = str(parsed.get("filter") or "").lower() or None
+                hoy = datetime.now(ZoneInfo(tz_name)).date()
+                if filtro in ("personal", "laboral"):
+                    tareas = [t for t in tareas if t.category == filtro]
+                elif filtro == "hoy":
+                    tareas = [t for t in tareas
+                              if t.due_date is not None and t.due_date <= hoy]
+                if not tareas:
+                    return "No tienes pendientes. 🎉" if not filtro else \
+                           f"Sin pendientes con filtro {filtro!r}."
+                lineas = []
+                for t in tasks_storage.sorted_pending(tareas, hoy):
+                    marca = ("🔴" if t.due_date and t.due_date < hoy else
+                             "🟡" if t.due_date == hoy else "•")
+                    fecha = f" — para {t.due_date}" if t.due_date else ""
+                    mins = f" (~{t.estimated_minutes}m)" if t.estimated_minutes else ""
+                    lineas.append(f"{marca} #{t.id} {t.title}{mins}{fecha}")
+                return "Tus pendientes:\n" + "\n".join(lineas)
+
+            # task_done / task_cancel / task_postpone
+            ref = str(parsed.get("task_ref") or "").strip()
+            if not ref:
+                return "¿Cuál pendiente? Dame su número o parte del nombre."
+            task = tasks_storage.find_task(user_email, ref)   # ValueError si 2+
+            if not task:
+                return f"No encontré ningún pendiente que coincida con {ref!r}."
+            if action == "task_done":
+                tasks_storage.set_status(task.id, user_email, "done")
+                return f"✅ Cerrada #{task.id}: *{task.title}*."
+            if action == "task_cancel":
+                tasks_storage.set_status(task.id, user_email, "cancelled")
+                return f"🗑 Cancelada #{task.id}: *{task.title}*."
+            nueva = date.fromisoformat(str(parsed.get("new_due") or ""))
+            tasks_storage.postpone_task(task.id, user_email, nueva)
+            return f"⏭ #{task.id} *{task.title}* pospuesta al {nueva}."
+        except ValueError as exc:
+            # Errores de validación en código (categoría inválida, ambigüedad,
+            # fecha inválida): el mensaje ya es legible.
+            return str(exc)
+
+    _PENDING_TTL_S = 600
+
+    def _set_pending_question(self, user: str, task_id: int, field: str) -> None:
+        try:
+            from storage.redis.client import get_redis_client
+            get_redis_client().setex(
+                f"task:pending_question:{user}", self._PENDING_TTL_S,
+                json.dumps({"task_id": task_id, "field": field}),
+            )
+        except Exception as exc:
+            logger.debug(f"[cassiel] pending_question no guardada: {exc}")
+
+    def _pop_pending_question(self, user: str) -> dict | None:
+        try:
+            from storage.redis.client import get_redis_client
+            raw = get_redis_client().getdel(f"task:pending_question:{user}")
+            return json.loads(raw) if raw else None
+        except Exception:
+            return None

@@ -116,3 +116,54 @@ class TestNudges:
         ]
         sel = ts.select_nudges(tareas, self.HOY, cap=3)
         assert [t.id for t in sel] == [2, 3, 4]
+
+
+class TestApply:
+    @pytest.fixture
+    def agent(self, monkeypatch):
+        from agents.scheduler.agent import CassielAgent
+        a = CassielAgent.__new__(CassielAgent)   # sin __init__: solo se usa _apply
+        return a
+
+    def test_task_create_valida_y_confirma(self, agent, monkeypatch):
+        creado = {}
+        def fake_create(user_id, title, **kw):
+            creado.update(user_id=user_id, title=title, **kw)
+            return _task(id=9, title=title, **{k: v for k, v in kw.items()
+                                               if k in ("category", "priority")})
+        monkeypatch.setattr(ts, "create_task", fake_create)
+        out = agent._apply(
+            {"action": "task_create",
+             "task": {"title": "comprar café", "category": "personal",
+                      "priority": "baja", "estimated_minutes": 15}},
+            "u@x.com", "America/Mexico_City",
+        )
+        assert creado["user_id"] == "u@x.com" and "café" in out
+
+    def test_task_create_categoria_inventada_no_revienta(self, agent, monkeypatch):
+        # El LLM inventó "trabajo": create_task lanza ValueError y _apply
+        # la convierte en respuesta legible (patrón execute() actual).
+        def boom(*a, **k):
+            raise ValueError("Categoría inválida: 'trabajo'")
+        monkeypatch.setattr(ts, "create_task", boom)
+        out = agent._apply(
+            {"action": "task_create", "task": {"title": "x", "category": "trabajo"}},
+            "u@x.com", "America/Mexico_City",
+        )
+        assert "inválida" in out.lower() or "categoría" in out.lower()
+
+    def test_task_done_ambiguo_pregunta(self, agent, monkeypatch):
+        def ambiguo(user_id, ref):
+            raise ValueError("Hay varias pendientes que coinciden con 'banco': …")
+        monkeypatch.setattr(ts, "find_task", ambiguo)
+        out = agent._apply({"action": "task_done", "task_ref": "banco"},
+                           "u@x.com", "America/Mexico_City")
+        assert "varias" in out.lower()
+
+    def test_task_list_ordena_y_filtra(self, agent, monkeypatch):
+        tareas = [_task(id=1, title="a", category="laboral", priority="baja"),
+                  _task(id=2, title="b", category="personal", priority="alta")]
+        monkeypatch.setattr(ts, "list_pending", lambda u: tareas)
+        out = agent._apply({"action": "task_list", "filter": "personal"},
+                           "u@x.com", "America/Mexico_City")
+        assert "b" in out and "a" not in out
