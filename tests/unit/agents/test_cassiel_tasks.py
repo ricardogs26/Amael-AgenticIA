@@ -172,6 +172,19 @@ class TestApply:
         assert "informe mensual" not in out and "#1" not in out
 
 
+class TestNudgeMessage:
+    def test_formato_agrupa_por_usuario(self):
+        from agents.scheduler.runner import _format_nudge
+        hoy = date(2026, 8, 15)
+        tareas = [_task(id=1, title="contrato renta", priority="alta",
+                        due_date=date(2026, 8, 12)),
+                  _task(id=2, title="comprar café", priority="media",
+                        due_date=hoy)]
+        msg = _format_nudge(tareas, hoy)
+        assert "contrato renta" in msg and "3 día" in msg   # días de atraso
+        assert "comprar café" in msg and "hoy" in msg
+
+
 class TestRuteo:
     @pytest.mark.parametrize("frase", [
         "recuérdame comprar café el día de súper",
