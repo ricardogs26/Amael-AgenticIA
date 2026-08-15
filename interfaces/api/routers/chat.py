@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import urllib.request
 import uuid
 from typing import Annotated
@@ -709,6 +710,27 @@ def _is_whatsapp_user(user_id: str) -> bool:
     return user_id.replace("+", "").replace("-", "").isdigit()
 
 
+_TTS_STRIP_RE = re.compile(
+    "["
+    "\U0001F000-\U0001FAFF"   # emojis, pictogramas, símbolos suplementarios
+    "⌀-⏿"           # misc técnicos (⏰⌛⏳…)
+    "☀-➿"           # símbolos misc y dingbats (☀✅…)
+    "⬀-⯿"           # flechas y símbolos misc
+    "←-⇿"           # flechas
+    "️‍⃣"      # variation selector, ZWJ, keycap
+    "*_`#"                    # énfasis/encabezados markdown que el TTS leería
+    "]+"
+)
+
+
+def _strip_for_tts(text: str) -> str:
+    """Limpia el texto para síntesis: emojis y marcas markdown fuera.
+    El texto original se conserva en el mensaje de WhatsApp — esto solo
+    afecta lo que la voz pronuncia."""
+    clean = _TTS_STRIP_RE.sub("", text)
+    return re.sub(r"[ \t]{2,}", " ", clean).strip()
+
+
 async def _send_voice_note(phone: str, text: str) -> None:
     """
     Sintetiza el texto y lo envía como nota de voz PTT.
@@ -720,7 +742,9 @@ async def _send_voice_note(phone: str, text: str) -> None:
       2. CosyVoice voz por defecto (último recurso).
     Fire-and-forget: nunca lanza excepción ni bloquea la respuesta de texto.
     """
-    truncated = text[:500]
+    truncated = _strip_for_tts(text)[:500]
+    if not truncated:
+        return
 
     # 0. Voz clonada del usuario si hay referencia registrada
     try:
