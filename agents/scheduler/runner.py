@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from datetime import datetime
 
 logger = logging.getLogger("agents.scheduler.runner")
 
@@ -49,6 +50,13 @@ def start_scheduler_loop() -> None:
         _memory_consolidation, "cron", hour=3, minute=30,
         timezone="America/Mexico_City",
         id="memory_consolidation", replace_existing=True,
+        max_instances=1,
+    )
+    # Nudges diarios de pendientes (spec §3) — 9:00 hora de México.
+    _scheduler.add_job(
+        _task_nudges, "cron", hour=9, minute=0,
+        timezone="America/Mexico_City",
+        id="task_nudges", replace_existing=True,
         max_instances=1,
     )
     _scheduler.start()
@@ -104,6 +112,51 @@ async def _memory_consolidation() -> None:
         logger.error(f"[scheduler] Consolidación de memoria falló: {exc}")
 
 
+async def _task_nudges() -> None:
+    """Nudges diarios de pendientes (spec §3). Cron 9:00 México; el lock evita
+    doble envío con 2 réplicas (mismo patrón que la consolidación)."""
+    if not _acquire_daily_lock("task_nudges"):
+        logger.info("[scheduler] Nudges: otra réplica los tomó.")
+        return
+    from collections import defaultdict
+    from zoneinfo import ZoneInfo
+
+    from agents.scheduler import tasks_storage
+
+    hoy = datetime.now(ZoneInfo("America/Mexico_City")).date()
+    por_usuario: dict[str, list] = defaultdict(list)
+    for t in tasks_storage.all_pending_with_due():
+        por_usuario[t.user_id].append(t)
+
+    for user_id, tareas in por_usuario.items():
+        sel = tasks_storage.select_nudges(tareas, hoy)
+        if not sel:
+            continue
+        try:
+            deliver_whatsapp(user_id, "Pendientes", _format_nudge(sel, hoy))
+            for t in sel:
+                tasks_storage.mark_nudged(t.id)
+                try:
+                    from observability.metrics import TASK_NUDGES_TOTAL
+                    TASK_NUDGES_TOTAL.inc()
+                except Exception:
+                    pass
+        except Exception as exc:
+            # Un usuario sin WhatsApp no debe tumbar los nudges de los demás.
+            logger.warning(f"[scheduler] Nudge a {user_id} falló: {exc}")
+
+
+def _format_nudge(tareas, hoy) -> str:
+    lineas = []
+    for t in tareas:
+        atraso = (hoy - t.due_date).days
+        cuando = "para hoy" if atraso == 0 else f"{atraso} día(s) de atraso"
+        mins = f" (~{t.estimated_minutes}m)" if t.estimated_minutes else ""
+        lineas.append(f"• #{t.id} {t.title}{mins} — {cuando}")
+    return "Tienes pendientes que necesitan atención:\n" + "\n".join(lineas) + \
+           "\n\nResponde «ya lo hice» o «pospón la de X al lunes»."
+
+
 async def _tick() -> None:
     from agents.scheduler import storage
     try:
@@ -156,6 +209,12 @@ async def _run_job(job) -> None:
 
 
 def _deliver_whatsapp(job, text: str) -> None:
+    """Delegación — ver `deliver_whatsapp()` (extraída para compartirla con
+    los nudges, que no tienen un `job`)."""
+    deliver_whatsapp(job.user_id, job.title, text)
+
+
+def deliver_whatsapp(user_id: str, title: str, text: str) -> None:
     """
     Entrega por el bridge, resolviendo el número igual que el brief diario
     (planner.py): identity_type='whatsapp', ORDER BY id, y SIN fallback — el
@@ -175,22 +234,22 @@ def _deliver_whatsapp(job, text: str) -> None:
                 WHERE canonical_user_id = %s AND identity_type = 'whatsapp'
                 ORDER BY id LIMIT 1
                 """,
-                (job.user_id,),
+                (user_id,),
             )
             row = cur.fetchone()
             if row:
                 phone = row[0]
     if not phone:
         raise RuntimeError(
-            f"{job.user_id} no tiene WhatsApp registrado — resultado no entregado"
+            f"{user_id} no tiene WhatsApp registrado — resultado no entregado"
         )
 
     wa_url = getattr(settings, "whatsapp_bridge_url", "http://whatsapp-bridge-service:3000")
     resp = httpx.post(
         f"{wa_url}/send",
-        json={"phoneNumber": phone, "text": f"⏰ *{job.title}*\n\n{text}"},
+        json={"phoneNumber": phone, "text": f"⏰ *{title}*\n\n{text}"},
         timeout=20.0,
     )
     if resp.status_code != 200:
         raise RuntimeError(f"bridge /send respondió {resp.status_code}")
-    logger.info(f"[scheduler] Job #{job.id} entregado a {phone}.")
+    logger.info(f"[scheduler] Entregado a {phone}.")
