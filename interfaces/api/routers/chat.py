@@ -207,11 +207,24 @@ async def chat(
 
     # Routing + dispatch
     try:
-        from orchestration import AgentRouter, dispatch
+        from agents.scheduler.agent import merge_followup, pop_followup
+        from orchestration import AgentRouter, RoutingDecision, dispatch
 
-        router_inst = AgentRouter()
-        decision    = await router_inst.route(question)
-        tools_map   = _build_tools_map(effective_user)
+        # Continuidad conversacional de Cassiel: si el turno anterior dejó una
+        # pregunta abierta (followup en Redis, GETDEL = un solo uso), este
+        # mensaje es la respuesta — va directo a Cassiel con la petición previa
+        # como contexto, sin pasar por el router. Si el usuario cambió de tema,
+        # Cassiel responde normal o vuelve a preguntar (action=unclear).
+        prev_followup = pop_followup(effective_user)
+        if prev_followup:
+            question = merge_followup(question, prev_followup)
+            decision = RoutingDecision(
+                intent="reminder", agents=["scheduler"], confidence=1.0,
+                routing_reason="cassiel_followup",
+            )
+        else:
+            decision = await AgentRouter().route(question)
+        tools_map = _build_tools_map(effective_user)
 
         # Enriquecer con memoria (best-effort, no bloquea si falla).
         # Dos capas con reglas distintas (B2 del plan Hermes):

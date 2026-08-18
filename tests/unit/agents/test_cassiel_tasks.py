@@ -185,6 +185,79 @@ class TestNudgeMessage:
         assert "comprar café" in msg and "hoy" in msg
 
 
+class TestFollowup:
+    """Fix 1 — continuidad conversacional: cuando Cassiel pregunta, guarda
+    followup para que la siguiente respuesta del usuario vuelva a él."""
+
+    @pytest.fixture
+    def agent(self, monkeypatch):
+        from agents.scheduler.agent import CassielAgent
+        a = CassielAgent.__new__(CassielAgent)
+        a._last_query = "recuérdame lo de la casa"
+        return a
+
+    def _spy(self, agent, monkeypatch):
+        llamadas = []
+        monkeypatch.setattr(
+            agent, "_set_followup",
+            lambda user, prev: llamadas.append((user, prev)),
+        )
+        return llamadas
+
+    def test_unclear_guarda_followup(self, agent, monkeypatch):
+        llamadas = self._spy(agent, monkeypatch)
+        out = agent._apply(
+            {"action": "unclear", "clarification": "¿Para cuándo?"},
+            "u@x.com", "America/Mexico_City",
+        )
+        assert out == "¿Para cuándo?"
+        assert llamadas == [("u@x.com", "recuérdame lo de la casa")]
+
+    def test_create_incompleto_guarda_followup(self, agent, monkeypatch):
+        llamadas = self._spy(agent, monkeypatch)
+        out = agent._apply({"action": "create", "title": "x"},
+                           "u@x.com", "America/Mexico_City")
+        assert "falta" in out.lower()
+        assert llamadas
+
+    def test_task_ref_ambiguo_guarda_followup(self, agent, monkeypatch):
+        llamadas = self._spy(agent, monkeypatch)
+        def ambiguo(user_id, ref):
+            raise ValueError("Hay varias pendientes que coinciden con 'banco': …")
+        monkeypatch.setattr(ts, "find_task", ambiguo)
+        out = agent._apply({"action": "task_done", "task_ref": "banco"},
+                           "u@x.com", "America/Mexico_City")
+        assert "varias" in out.lower()
+        assert llamadas
+
+    def test_task_sin_ref_guarda_followup(self, agent, monkeypatch):
+        llamadas = self._spy(agent, monkeypatch)
+        out = agent._apply({"action": "task_done"},
+                           "u@x.com", "America/Mexico_City")
+        assert "cuál" in out.lower()
+        assert llamadas
+
+    def test_create_completo_no_guarda_followup(self, agent, monkeypatch):
+        llamadas = self._spy(agent, monkeypatch)
+        monkeypatch.setattr(ts, "create_task",
+                            lambda user_id, title, **kw: _task(id=3, title=title))
+        agent._apply({"action": "task_create", "task": {"title": "comprar café",
+                                                        "priority": "baja"}},
+                     "u@x.com", "America/Mexico_City")
+        assert not llamadas
+
+    def test_merge_followup_formato(self):
+        from agents.scheduler.agent import merge_followup
+        out = merge_followup("mañana", "recuérdame lo de la casa")
+        assert out == ("[Contexto: el usuario respondía a Cassiel sobre: "
+                       "recuérdame lo de la casa]\nmañana")
+
+    def test_pop_followup_sin_redis_devuelve_none(self, monkeypatch):
+        # Sin Redis alcanzable, pop_followup jamás lanza: devuelve None.
+        from agents.scheduler.agent import pop_followup
+        assert pop_followup("nadie@x.com") is None
+
+
 class TestRuteo:
     @pytest.mark.parametrize("frase", [
         "recuérdame comprar café el día de súper",
