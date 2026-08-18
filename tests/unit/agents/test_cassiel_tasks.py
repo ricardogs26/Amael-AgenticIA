@@ -187,21 +187,31 @@ class TestNudgeMessage:
 
 class TestFollowup:
     """Fix 1 — continuidad conversacional: cuando Cassiel pregunta, guarda
-    followup para que la siguiente respuesta del usuario vuelva a él."""
+    followup para que la siguiente respuesta del usuario vuelva a él.
+
+    Fix 2 (loop infinito) — tres cambios deterministas:
+    1. El texto guardado nunca reenvuelve un wrapper previo y se trunca a
+       1500 chars (el inicio del aviso, donde viven las fechas).
+    2. Tope de 2 rondas: a la tercera, Cassiel corta con una salida fija en
+       vez de volver a preguntar.
+    3. El merge pone la RESPUESTA del usuario primero y el contexto después.
+    """
 
     @pytest.fixture
     def agent(self, monkeypatch):
         from agents.scheduler.agent import CassielAgent
         a = CassielAgent.__new__(CassielAgent)
         a._last_query = "recuérdame lo de la casa"
+        a._next_followup_round = 1
         return a
 
     def _spy(self, agent, monkeypatch):
         llamadas = []
-        monkeypatch.setattr(
-            agent, "_set_followup",
-            lambda user, prev: llamadas.append((user, prev)),
-        )
+
+        def fake(user, prev, round_n=1):
+            llamadas.append((user, prev, round_n))
+            return True
+        monkeypatch.setattr(agent, "_set_followup", fake)
         return llamadas
 
     def test_unclear_guarda_followup(self, agent, monkeypatch):
@@ -211,7 +221,7 @@ class TestFollowup:
             "u@x.com", "America/Mexico_City",
         )
         assert out == "¿Para cuándo?"
-        assert llamadas == [("u@x.com", "recuérdame lo de la casa")]
+        assert llamadas == [("u@x.com", "recuérdame lo de la casa", 1)]
 
     def test_create_incompleto_guarda_followup(self, agent, monkeypatch):
         llamadas = self._spy(agent, monkeypatch)
@@ -246,29 +256,89 @@ class TestFollowup:
                      "u@x.com", "America/Mexico_City")
         assert not llamadas
 
-    def test_merge_followup_formato(self):
+    def test_unclear_ronda_excede_tope_devuelve_escape(self, agent, monkeypatch):
+        # round_n=3 (tope=2): no se guarda followup y Cassiel corta el loop
+        # con una salida fija en vez de volver a preguntar.
+        from agents.scheduler.agent import _FOLLOWUP_ESCAPE_MSG
+        agent._next_followup_round = 3
+        out = agent._apply(
+            {"action": "unclear", "clarification": "¿Para cuándo?"},
+            "u@x.com", "America/Mexico_City",
+        )
+        assert out == _FOLLOWUP_ESCAPE_MSG
+        # y en Redis no debería quedar nada (sin mock: sin Redis, no lanza)
+
+    def test_merge_followup_respuesta_primero_contexto_despues(self):
+        # Orden: la respuesta corta del usuario va PRIMERO (es la señal),
+        # el contexto del followup queda de referencia al final.
+        from agents.scheduler.agent import merge_followup
+        out = merge_followup("mañana", {"q": "recuérdame lo de la casa", "n": 1})
+        assert out.index("mañana") < out.index("recuérdame lo de la casa")
+        assert out.endswith("recuérdame lo de la casa]")
+
+    def test_merge_followup_acepta_string_legado(self):
+        # Backward-compat: un valor viejo (string crudo, sin ronda) se trata
+        # como ronda 1.
         from agents.scheduler.agent import merge_followup
         out = merge_followup("mañana", "recuérdame lo de la casa")
-        assert out == ("[Contexto: el usuario respondía a Cassiel sobre: "
-                       "recuérdame lo de la casa]\nmañana")
+        assert "[[CASSIEL_FOLLOWUP:n=1]]" in out
+        assert "recuérdame lo de la casa" in out
 
     def test_pop_followup_sin_redis_devuelve_none(self, monkeypatch):
         # Sin Redis alcanzable, pop_followup jamás lanza: devuelve None.
         from agents.scheduler.agent import pop_followup
         assert pop_followup("nadie@x.com") is None
 
+    # ── Fix 2: helpers puros (unwrap, tope de rondas) ─────────────────────
+
+    def test_strip_wrapper_anidado_se_queda_con_el_nucleo(self):
+        # Forma real que tomaba el texto guardado ANTES del fix: cada ronda
+        # reenvolvía la ronda anterior completa (pregunta + wrapper).
+        from agents.scheduler.agent import _strip_followup_wrapper
+        marker = "[Contexto: el usuario respondía a Cassiel sobre: "
+        nested = (f"pregunta2\n\n{marker}pregunta1\n\n{marker}"
+                  "aviso escolar del 22 de agosto]]")
+        assert _strip_followup_wrapper(nested) == "aviso escolar del 22 de agosto"
+
+    def test_strip_wrapper_sin_wrapper_no_cambia(self):
+        from agents.scheduler.agent import _strip_followup_wrapper
+        assert _strip_followup_wrapper("texto normal") == "texto normal"
+
+    def test_followup_payload_trunca_1500_desde_el_inicio(self):
+        from agents.scheduler.agent import _followup_payload
+        texto = "A" * 3000
+        payload = _followup_payload(texto, 1)
+        assert payload["q"] == "A" * 1500
+
+    def test_followup_payload_ronda_1_y_2_se_guardan(self):
+        from agents.scheduler.agent import _followup_payload
+        assert _followup_payload("x", 1) == {"q": "x", "n": 1}
+        assert _followup_payload("x", 2) == {"q": "x", "n": 2}
+
+    def test_followup_payload_ronda_3_no_se_guarda(self):
+        from agents.scheduler.agent import _followup_payload
+        assert _followup_payload("x", 3) is None
+
+    def test_followup_payload_desenvuelve_antes_de_truncar(self):
+        # No debe truncar contando el wrapper que de todos modos se va a
+        # quitar — el núcleo real debe sobrevivir completo si cabe en 1500.
+        from agents.scheduler.agent import _followup_payload
+        marker = "[Contexto: el usuario respondía a Cassiel sobre: "
+        wrapped = f"{marker}núcleo corto]"
+        assert _followup_payload(wrapped, 1) == {"q": "núcleo corto", "n": 1}
+
     async def test_route_with_followup_fuerza_reminder(self, monkeypatch):
         # Hook compartido por /chat y /chat/stream: con followup pendiente,
         # la decisión es reminder sin pasar por el router.
         import agents.scheduler.agent as cassiel_mod
         monkeypatch.setattr(cassiel_mod, "pop_followup",
-                            lambda user: "recuérdame lo de la casa")
+                            lambda user: {"q": "recuérdame lo de la casa", "n": 1})
         from interfaces.api.routers.chat import _route_with_followup
         q, decision = await _route_with_followup("u@x.com", "mañana")
         assert decision.intent == "reminder"
         assert decision.routing_reason == "cassiel_followup"
-        assert q == ("[Contexto: el usuario respondía a Cassiel sobre: "
-                     "recuérdame lo de la casa]\nmañana")
+        assert "mañana" in q and "recuérdame lo de la casa" in q
+        assert q.index("mañana") < q.index("recuérdame lo de la casa")
 
     async def test_route_with_followup_sin_pendiente_rutea_normal(self, monkeypatch):
         import agents.scheduler.agent as cassiel_mod

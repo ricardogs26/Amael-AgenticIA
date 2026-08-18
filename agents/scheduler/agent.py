@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -73,16 +74,102 @@ Reglas:
 - Si el mensaje trae [Contexto: …], es la continuación de esa petición — únelos."""
 
 
-_FOLLOWUP_TTL_S = 600
+_FOLLOWUP_TTL_S      = 600
+_FOLLOWUP_MAX_CHARS  = 1500   # tope duro del texto guardado — nunca crece sin límite
+_FOLLOWUP_MAX_ROUNDS = 2      # cuántas veces Cassiel puede volver a preguntar
+
+_FOLLOWUP_WRAP_MARKER = "[Contexto: el usuario respondía a Cassiel sobre: "
+
+# Marcador interno (nunca llega al usuario ni al LLM) que viaja PEGADO al
+# principio del texto fusionado para que CassielAgent.execute() sepa en qué
+# ronda de followup está sin tener que ir a Redis otra vez — pop_followup ya
+# fue destructivo (GETDEL) para cuando el turno llega aquí.
+_FOLLOWUP_MARKER_RE = re.compile(r"^\[\[CASSIEL_FOLLOWUP:n=(\d+)\]\]\n")
+
+_FOLLOWUP_ESCAPE_MSG = (
+    "No logré entenderlo tras varias vueltas 🙏 Mándamelo en una sola frase, "
+    "por ejemplo: «anota: ir por los útiles escolares el 22 de agosto» o "
+    "«recuérdame el viernes a las 9 revisar el aviso»."
+)
+
+_FOLLOWUP_ANSWERED_NOTE = (
+    "El usuario YA respondió a tu pregunta anterior — actúa con lo que "
+    "tienes; NO vuelvas a preguntar lo mismo."
+)
 
 
-def merge_followup(question: str, prev: str) -> str:
+def _strip_followup_wrapper(text: str) -> str:
+    """Pure. Si `text` contiene el wrapper de contexto de Cassiel — una vez o
+    anidado varias veces, en cualquier posición — se queda solo con el
+    núcleo original. Sin esto, cada ronda reenvolvía el wrapper anterior:
+    `[Contexto: [Contexto: [Contexto: …]]]` hasta ahogar al LLM."""
+    result = text
+    for _ in range(10):   # tope defensivo contra anidamiento patológico
+        idx = result.find(_FOLLOWUP_WRAP_MARKER)
+        if idx == -1:
+            break
+        start = idx + len(_FOLLOWUP_WRAP_MARKER)
+        end = result.rfind("]")
+        if end == -1 or end < start:
+            break
+        result = result[start:end]
+    return result.strip()
+
+
+def _followup_payload(prev_query: str, round_n: int) -> dict | None:
+    """Pure. Arma el valor a guardar para el followup de Cassiel, o None SOLO
+    si `round_n` excede el tope de rondas (loop-breaker) — esa es la única
+    señal que debe cortar el flujo con la salida de escape. Un texto vacío
+    no es un caso de tope: se guarda tal cual (payload["q"] == ""), y es
+    quien llama (`_set_followup`) el que decide no pegarle a Redis por nada.
+    Desenvuelve wrappers previos y trunca al inicio del texto — las fechas
+    de un aviso viven al principio."""
+    if round_n > _FOLLOWUP_MAX_ROUNDS:
+        return None
+    core = _strip_followup_wrapper(prev_query).strip()[:_FOLLOWUP_MAX_CHARS]
+    return {"q": core, "n": round_n}
+
+
+def _parse_followup_value(raw) -> dict:
+    """Pure. El valor viejo guardado en Redis era el string crudo (sin
+    ronda) — se trata como ronda 1 para no romper followups en vuelo durante
+    el despliegue."""
+    if isinstance(raw, dict):
+        return {"q": str(raw.get("q") or ""), "n": int(raw.get("n") or 1)}
+    text = raw.decode() if isinstance(raw, bytes) else str(raw)
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {"q": text, "n": 1}
+    if isinstance(data, dict) and "q" in data:
+        return {"q": str(data.get("q") or ""), "n": int(data.get("n") or 1)}
+    return {"q": text, "n": 1}
+
+
+def merge_followup(question: str, prev) -> str:
     """Combina la respuesta del usuario con la petición previa sobre la que
-    Cassiel preguntó — el _SYSTEM sabe unir ambas partes."""
-    return f"[Contexto: el usuario respondía a Cassiel sobre: {prev}]\n{question}"
+    Cassiel preguntó. Orden: la RESPUESTA va primero (es la señal), el
+    contexto después (es referencia) — antes iba el aviso largo primero y
+    la respuesta corta se perdía al fondo del prompt. Nunca reenvuelve un
+    wrapper ya existente ni deja crecer el texto sin límite."""
+    parsed = prev if isinstance(prev, dict) and "n" in prev and "q" in prev \
+        else _parse_followup_value(prev)
+    core = _strip_followup_wrapper(parsed["q"]).strip()[:_FOLLOWUP_MAX_CHARS]
+    body = f"{question}\n\n{_FOLLOWUP_WRAP_MARKER}{core}]"
+    return f"[[CASSIEL_FOLLOWUP:n={parsed['n']}]]\n{body}"
 
 
-def pop_followup(user: str) -> str | None:
+def _extract_followup_round(query: str) -> tuple[str, int]:
+    """Pure. Quita el marcador interno de ronda (si lo hay) y devuelve
+    (texto_limpio, ronda_previa). ronda_previa=0 si este turno no viene de
+    un merge de followup."""
+    m = _FOLLOWUP_MARKER_RE.match(query)
+    if not m:
+        return query, 0
+    return _FOLLOWUP_MARKER_RE.sub("", query, count=1), int(m.group(1))
+
+
+def pop_followup(user: str) -> dict | None:
     """Consume (GETDEL — un solo uso) el followup pendiente del usuario.
     Best-effort: sin Redis devuelve None, jamás lanza."""
     try:
@@ -90,7 +177,7 @@ def pop_followup(user: str) -> str | None:
         raw = get_redis_client().getdel(f"cassiel:followup:{user}")
         if raw is None:
             return None
-        return raw.decode() if isinstance(raw, bytes) else str(raw)
+        return _parse_followup_value(raw)
     except Exception:
         return None
 
@@ -107,6 +194,9 @@ class CassielAgent(BaseAgent):
     # Última petición del usuario en este turno — la guardan las ramas que
     # responden con una pregunta, para que la siguiente respuesta vuelva aquí.
     _last_query: str = ""
+    # Ronda de followup que se guardaría SI esta rama vuelve a preguntar
+    # (previa + 1). Default 1: turno que no viene de un merge de followup.
+    _next_followup_round: int = 1
 
     async def execute(self, task: dict[str, Any]) -> AgentResult:
         query      = (task.get("query") or "").strip()
@@ -121,16 +211,21 @@ class CassielAgent(BaseAgent):
 
         from agents.scheduler import storage
 
+        query, prev_round = _extract_followup_round(query)
         self._last_query = query
+        self._next_followup_round = prev_round + 1
         tz_name = storage.user_timezone(user_email)
         pending = self._pop_pending_question(user_email)
-        extra_context = None
+        extra_lines = []
         if pending:
-            extra_context = (
+            extra_lines.append(
                 f"Pregunta pendiente al usuario: fecha para la tarea "
                 f"#{pending.get('task_id')}. Si este mensaje la responde, "
                 f"action=task_postpone con task_ref={pending.get('task_id')} y new_due."
             )
+        if prev_round > 0:
+            extra_lines.append(_FOLLOWUP_ANSWERED_NOTE)
+        extra_context = "\n".join(extra_lines) or None
         try:
             parsed = self._parse_intent(query, tz_name, extra_context)
         except Exception as exc:
@@ -192,7 +287,8 @@ class CassielAgent(BaseAgent):
         action = str(parsed.get("action", "")).lower().strip()
 
         if action == "unclear":
-            self._set_followup(user_email, self._last_query)
+            if not self._set_followup(user_email, self._last_query, self._next_followup_round):
+                return _FOLLOWUP_ESCAPE_MSG
             return str(parsed.get("clarification")
                        or "¿Qué quieres que programe y cuándo?")
 
@@ -202,7 +298,8 @@ class CassielAgent(BaseAgent):
             schedule = str(parsed.get("schedule") or "").strip()
             delivery = str(parsed.get("delivery") or "whatsapp").strip().lower()
             if not (title and prompt and schedule):
-                self._set_followup(user_email, self._last_query)
+                if not self._set_followup(user_email, self._last_query, self._next_followup_round):
+                    return _FOLLOWUP_ESCAPE_MSG
                 return ("Me falta el qué o el cuándo. Ejemplo: «recuérdame revisar "
                         "el PR todos los lunes a las 9am».")
             job = storage.create_job(
@@ -230,7 +327,8 @@ class CassielAgent(BaseAgent):
         if action in ("pause", "resume", "delete"):
             ref = str(parsed.get("job_ref") or "").strip()
             if not ref:
-                self._set_followup(user_email, self._last_query)
+                if not self._set_followup(user_email, self._last_query, self._next_followup_round):
+                    return _FOLLOWUP_ESCAPE_MSG
                 return "¿Cuál tarea? Dame su número o parte del nombre."
             job = storage.find_job(user_email, ref)
             if not job:
@@ -259,7 +357,8 @@ class CassielAgent(BaseAgent):
                 t = parsed.get("task") or {}
                 titulo = str(t.get("title") or "").strip()
                 if not titulo:
-                    self._set_followup(user_email, self._last_query)
+                    if not self._set_followup(user_email, self._last_query, self._next_followup_round):
+                        return _FOLLOWUP_ESCAPE_MSG
                     return "¿Qué tarea anoto? Dímela en una frase corta."
                 due = None
                 if t.get("due_date"):
@@ -277,8 +376,8 @@ class CassielAgent(BaseAgent):
                 extra = ""
                 if due is None and task.priority == "alta":
                     self._set_pending_question(user_email, task.id, "due_date")
-                    self._set_followup(user_email, self._last_query)
-                    extra = " ¿Para cuándo la necesitas?"
+                    if self._set_followup(user_email, self._last_query, self._next_followup_round):
+                        extra = " ¿Para cuándo la necesitas?"
                 mins = f", ~{task.estimated_minutes} min" if task.estimated_minutes else ""
                 return (f"📝 Anotada #{task.id}: *{task.title}* — {task.category}, "
                         f"prioridad {task.priority}{mins}."
@@ -309,7 +408,8 @@ class CassielAgent(BaseAgent):
             # task_done / task_cancel / task_postpone
             ref = str(parsed.get("task_ref") or "").strip()
             if not ref:
-                self._set_followup(user_email, self._last_query)
+                if not self._set_followup(user_email, self._last_query, self._next_followup_round):
+                    return _FOLLOWUP_ESCAPE_MSG
                 return "¿Cuál pendiente? Dame su número o parte del nombre."
             task = tasks_storage.find_task(user_email, ref)   # ValueError si 2+
             if not task:
@@ -328,28 +428,34 @@ class CassielAgent(BaseAgent):
             # fecha inválida): el mensaje ya es legible. La ambigüedad de
             # find_task («Hay varias…») es una pregunta al usuario → followup.
             if "hay varias" in str(exc).lower():
-                self._set_followup(user_email, self._last_query)
+                if not self._set_followup(user_email, self._last_query, self._next_followup_round):
+                    return _FOLLOWUP_ESCAPE_MSG
             return str(exc)
 
     _PENDING_TTL_S = 600
 
-    def _set_followup(self, user: str, prev_query: str) -> None:
+    def _set_followup(self, user: str, prev_query: str, round_n: int = 1) -> bool:
         """Marca que Cassiel dejó una pregunta abierta: el próximo mensaje del
         usuario se rutea de vuelta a Cassiel con `prev_query` como contexto.
         Si la query trae bloques inyectados por chat.py, guarda solo la
-        pregunta real del usuario."""
+        pregunta real del usuario. Devuelve False (y NO guarda) si `round_n`
+        excede el tope de rondas — el llamador debe usar la salida
+        determinista (`_FOLLOWUP_ESCAPE_MSG`) en vez de volver a preguntar."""
         if "[Pregunta actual]\n" in prev_query:
             prev_query = prev_query.rsplit("[Pregunta actual]\n", 1)[-1]
-        prev_query = prev_query.strip()[:400]
-        if not prev_query:
-            return
+        payload = _followup_payload(prev_query, round_n)
+        if payload is None:
+            return False
+        if not payload["q"]:
+            return True   # nada útil que guardar, pero no es el loop-breaker
         try:
             from storage.redis.client import get_redis_client
             get_redis_client().setex(
-                f"cassiel:followup:{user}", _FOLLOWUP_TTL_S, prev_query,
+                f"cassiel:followup:{user}", _FOLLOWUP_TTL_S, json.dumps(payload),
             )
         except Exception as exc:
             logger.debug(f"[cassiel] followup no guardado: {exc}")
+        return True
 
     def _set_pending_question(self, user: str, task_id: int, field: str) -> None:
         try:
