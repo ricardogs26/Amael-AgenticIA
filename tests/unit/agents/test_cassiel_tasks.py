@@ -257,6 +257,28 @@ class TestFollowup:
         from agents.scheduler.agent import pop_followup
         assert pop_followup("nadie@x.com") is None
 
+    async def test_route_with_followup_fuerza_reminder(self, monkeypatch):
+        # Hook compartido por /chat y /chat/stream: con followup pendiente,
+        # la decisión es reminder sin pasar por el router.
+        import agents.scheduler.agent as cassiel_mod
+        monkeypatch.setattr(cassiel_mod, "pop_followup",
+                            lambda user: "recuérdame lo de la casa")
+        from interfaces.api.routers.chat import _route_with_followup
+        q, decision = await _route_with_followup("u@x.com", "mañana")
+        assert decision.intent == "reminder"
+        assert decision.routing_reason == "cassiel_followup"
+        assert q == ("[Contexto: el usuario respondía a Cassiel sobre: "
+                     "recuérdame lo de la casa]\nmañana")
+
+    async def test_route_with_followup_sin_pendiente_rutea_normal(self, monkeypatch):
+        import agents.scheduler.agent as cassiel_mod
+        monkeypatch.setattr(cassiel_mod, "pop_followup", lambda user: None)
+        from interfaces.api.routers.chat import _route_with_followup
+        q, decision = await _route_with_followup("u@x.com", "¿qué pods hay en el cluster?")
+        assert q == "¿qué pods hay en el cluster?"
+        assert decision.intent == "kubernetes"
+        assert decision.routing_reason != "cassiel_followup"
+
 
 class TestRuteo:
     @pytest.mark.parametrize("frase", [
