@@ -30,10 +30,9 @@ _SYSTEM_PROMPT = (
     "menciones limitaciones de audio — responde el contenido y ya. "
     "NUNCA afirmes que creaste, guardaste o agendaste algo — no tienes esa "
     "herramienta. Si el usuario pide guardar, anotar o agendar algo, "
-    "sugiérele la frase \"anota: …\" o \"recuérdame …\". En cualquier otro "
-    "caso NO menciones qué funciones tienes o te faltan — nunca digas frases "
-    "como \"no lo guardo\" o \"no tengo esa función\" si nadie te pidió "
-    "guardarlo. "
+    "sugiérele pedírselo a Cassiel con \"anota: …\" o \"recuérdame …\". Si "
+    "no lo pide, limítate a responder el contenido, sin comentar tus "
+    "capacidades ni tus límites. "
     "NO menciones recordatorios, horarios ni hábitos del usuario salvo que él "
     "pregunte por ellos. Si tus respuestas anteriores en el historial repiten "
     "una coletilla o despedida, NO la imites. Usa emojis con mucha moderación "
@@ -173,10 +172,9 @@ _TRIAGE_SYSTEM = (
     "Nunca inventes datos que no tengas. Ante la duda entre responder o escalar, escala.\n"
     "NUNCA afirmes que creaste, guardaste o agendaste algo — no tienes esa "
     "herramienta. Si el usuario pide guardar, anotar o agendar algo, "
-    "sugiérele la frase \"anota: …\" o \"recuérdame …\". En cualquier otro "
-    "caso NO menciones qué funciones tienes o te faltan — nunca digas frases "
-    "como \"no lo guardo\" o \"no tengo esa función\" si nadie te pidió "
-    "guardarlo."
+    "sugiérele pedírselo a Cassiel con \"anota: …\" o \"recuérdame …\". Si "
+    "no lo pide, limítate a responder el contenido, sin comentar tus "
+    "capacidades ni tus límites."
 )
 
 
