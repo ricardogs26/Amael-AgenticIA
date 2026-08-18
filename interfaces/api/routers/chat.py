@@ -390,6 +390,9 @@ async def chat_stream(
                 yield _sse("done")
                 _persist_message(conversation_id, user_id, question,
                                  _PASTE_PENDING_PROMPT, request_id, "paste")
+                asyncio.ensure_future(_store_memory_episode(
+                    user_id, conversation_id, question, _PASTE_PENDING_PROMPT
+                ))
                 return
 
             from orchestration import RoutingDecision, dispatch
@@ -506,10 +509,14 @@ async def _route_with_followup(user_id: str, question: str):
     from agents.scheduler.agent import merge_followup, pop_followup
     from orchestration import AgentRouter, RoutingDecision
 
-    pending_paste = _pop_pending_paste(user_id)
-    if pending_paste and len(question) < 400:
-        merged = _merge_paste(question, pending_paste)
-        return merged, await AgentRouter().route(merged)
+    # OJO: comprobar la longitud ANTES de hacer pop — GETDEL es incondicional
+    # y destructivo (un solo uso). Si un follow-up largo hiciera el pop sin
+    # ir a fusionarse, el texto guardado se perdía sin que nadie lo usara.
+    if len(question) < 400:
+        pending_paste = _pop_pending_paste(user_id)
+        if pending_paste:
+            merged = _merge_paste(question, pending_paste)
+            return merged, await AgentRouter().route(merged)
 
     prev = pop_followup(user_id)
     if prev:
@@ -528,11 +535,19 @@ async def _route_with_followup(user_id: str, question: str):
 # respuesta corta se fusiona con ese texto antes de rutear.
 
 _PASTE_INSTRUCTION_RE = re.compile(
-    r"resume|res[uú]me|recu[eé]rda|record|anota|apunta|guarda|analiza|explica|"
-    r"traduce|agenda|ayuda|puedes|podr[ií]as|qu[eé]\b|c[oó]mo\b|cu[aá]ndo\b|"
-    r"dime|hazme|necesito|quiero|busca|revisa|\?",
+    r"resume|res[uú]me|recu[eé]rd|anota|apunta|guarda|analiza|explica|"
+    r"traduce|agenda|ayuda|puedes|podr[ií]as|qué\b|cómo\b|cuándo\b|¿|"
+    r"dime|hazme|necesito|quiero|busca|revisa",
     re.IGNORECASE,
 )
+
+# Un "?" de cierre solo cuenta como pregunta si aparece cerca del inicio del
+# mensaje — en un aviso largo puede aparecer por azar mucho más adelante
+# (una cita, un horario "9:00?") sin que el mensaje completo sea una
+# pregunta. "¿" de apertura sí es señal fuerte en cualquier posición de los
+# primeros 200 chars (arriba) porque en español marca inequívocamente el
+# INICIO de una interrogación.
+_PASTE_QUESTION_MARK_WINDOW = 80
 
 _PASTE_PENDING_TTL_S    = 600
 _PASTE_PENDING_MAX_CHARS = 4000
@@ -546,8 +561,16 @@ _PASTE_PENDING_PROMPT = (
 
 def _has_instruction(text: str) -> bool:
     """True si los primeros 200 chars sugieren una petición explícita
-    (verbo de acción o pregunta), en vez de solo texto pegado."""
-    return bool(_PASTE_INSTRUCTION_RE.search(text[:200]))
+    (verbo de acción o pregunta acentuada/con apertura ¿), en vez de solo
+    texto pegado. Deliberadamente NO dispara con "que"/"como" sin acento
+    (conectores comunísimos en español: "les recordamos que…", "el evento
+    que se realizará…" — un aviso escolar real los usa todo el tiempo) ni
+    con "record" suelto ("recordamos", "recordatorio" NO son instrucción;
+    "recuerda"/"recuérdame" SÍ). El "?" de cierre solo cuenta si aparece
+    cerca del inicio (ver `_PASTE_QUESTION_MARK_WINDOW`)."""
+    if _PASTE_INSTRUCTION_RE.search(text[:200]):
+        return True
+    return "?" in text[:_PASTE_QUESTION_MARK_WINDOW]
 
 
 def _is_bare_paste(question: str) -> bool:

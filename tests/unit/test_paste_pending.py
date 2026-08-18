@@ -25,6 +25,47 @@ CORREO_PEGADO = (
     "Gracias por tu compra y por confiar en nosotros para tus envios."
 )
 
+# ── Casos adversarios (revisión) ──────────────────────────────────────────────
+# "que"/"como" sin acento son los conectores más comunes del español — un
+# aviso real los usa todo el tiempo sin ser una instrucción. "recordamos"
+# tampoco es instrucción ("recuerda"/"recuérdame" sí). Ninguno de los tres
+# textos de abajo lleva "?" ni "¿".
+
+AVISO_COMPARTIMOS_QUE = (
+    "Estimados Padres de Familia: Les compartimos que el proximo lunes se "
+    "llevara a cabo la reunion informativa del ciclo escolar en el auditorio "
+    "principal a las nueve de la manana. La asistencia es importante para "
+    "conocer los detalles del programa academico y las actividades extra "
+    "curriculares del semestre. Se solicita llegar con quince minutos de "
+    "anticipacion y portar el gafete de identificacion correspondiente. "
+    "Gracias por su atencion y su compromiso constante con la comunidad "
+    "escolar durante todo el ciclo lectivo en curso."
+)
+assert len(AVISO_COMPARTIMOS_QUE) > 400
+
+AVISO_RECORDAMOS_EL_PAGO = (
+    "Estimados Padres de Familia: Les recordamos el pago de la colegiatura "
+    "correspondiente al mes en curso, el cual debera realizarse a mas tardar "
+    "el dia treinta en la caja de la institucion o mediante transferencia "
+    "bancaria a la cuenta oficial del plantel. El comprobante de pago debe "
+    "entregarse en la administracion escolar dentro de los tres dias "
+    "posteriores a la transaccion para su debido registro contable. "
+    "Agradecemos su puntualidad y compromiso con la institucion durante "
+    "este ciclo escolar."
+)
+assert len(AVISO_RECORDAMOS_EL_PAGO) > 400
+
+CORREO_BANCO_CON_QUE = (
+    "Estimado cliente, le informamos que se ha registrado un cargo por "
+    "el servicio de mantenimiento correspondiente al periodo actual en su "
+    "cuenta bancaria. El monto sera reflejado en su proximo estado de "
+    "cuenta junto con el desglose detallado de los conceptos aplicados "
+    "durante el mes. Para mayor informacion sobre este cargo puede "
+    "consultar los terminos y condiciones del contrato vigente firmado "
+    "al momento de la apertura de la cuenta. Gracias por su preferencia."
+)
+assert len(CORREO_BANCO_CON_QUE) > 400
+
 
 class TestHasInstruction:
     @pytest.mark.parametrize("texto", [
@@ -41,6 +82,30 @@ class TestHasInstruction:
     def test_correo_pegado_sin_peticion(self):
         assert chat._has_instruction(CORREO_PEGADO) is False
 
+    # ── Adversarios: "que"/"como" sueltos y "record..." NO son instrucción ──
+    def test_les_compartimos_que_no_es_instruccion(self):
+        assert chat._has_instruction(AVISO_COMPARTIMOS_QUE) is False
+
+    def test_les_recordamos_el_pago_no_es_instruccion(self):
+        assert chat._has_instruction(AVISO_RECORDAMOS_EL_PAGO) is False
+
+    def test_correo_banco_con_que_no_es_instruccion(self):
+        assert chat._has_instruction(CORREO_BANCO_CON_QUE) is False
+
+    def test_puedes_revisar_al_frente_si_es_instruccion(self):
+        assert chat._has_instruction("¿puedes revisar esto?") is True
+
+    def test_signo_de_cierre_lejos_del_inicio_no_cuenta(self):
+        # Un "?" que aparece muy adelante en un texto largo (una cita, un
+        # horario "9:00?") no debe convertir el aviso completo en pregunta.
+        relleno = "x" * 300
+        texto = AVISO_COMPARTIMOS_QUE + " " + relleno + " ¿o no?"
+        assert chat._has_instruction(texto) is False
+
+    def test_signo_de_cierre_cerca_del_inicio_si_cuenta(self):
+        texto = "hola?" + "x" * 500
+        assert chat._has_instruction(texto) is True
+
 
 class TestIsBarePaste:
     def test_aviso_largo_sin_instruccion_es_bare_paste(self):
@@ -51,6 +116,15 @@ class TestIsBarePaste:
 
     def test_mensaje_corto_no_es_bare_paste(self):
         assert chat._is_bare_paste("hola, ¿cómo estás?") is False
+
+    def test_les_compartimos_que_es_bare_paste(self):
+        assert chat._is_bare_paste(AVISO_COMPARTIMOS_QUE) is True
+
+    def test_les_recordamos_el_pago_es_bare_paste(self):
+        assert chat._is_bare_paste(AVISO_RECORDAMOS_EL_PAGO) is True
+
+    def test_correo_banco_con_que_es_bare_paste(self):
+        assert chat._is_bare_paste(CORREO_BANCO_CON_QUE) is True
 
 
 class TestMergePaste:
@@ -139,3 +213,18 @@ class TestWiringRouteWithFollowup:
         monkeypatch.setattr(cassiel_mod, "pop_followup", _pop_followup_no_deberia_llamarse)
         q, decision = await chat._route_with_followup("u@x.com", "resume esto")
         assert "Estimados Padres de Familia..." in q
+
+    async def test_mensaje_largo_no_hace_pop_el_paste_sobrevive(self, monkeypatch):
+        # Regresión: _pop_pending_paste (GETDEL, destructivo) NO debe
+        # llamarse si el mensaje actual es largo (>= 400) — de lo contrario
+        # se borra un paste guardado sin llegar a fusionarse con nada.
+        def _pop_no_deberia_llamarse(user):
+            raise AssertionError("_pop_pending_paste no debe llamarse con mensaje largo")
+
+        monkeypatch.setattr(chat, "_pop_pending_paste", _pop_no_deberia_llamarse)
+        import agents.scheduler.agent as cassiel_mod
+        monkeypatch.setattr(cassiel_mod, "pop_followup", lambda user: None)
+
+        mensaje_largo = "¿qué pods hay en el cluster? " + "x" * 400
+        q, decision = await chat._route_with_followup("u@x.com", mensaje_largo)
+        assert q == mensaje_largo
