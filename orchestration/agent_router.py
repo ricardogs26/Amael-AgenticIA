@@ -62,7 +62,9 @@ _KEYWORD_RULES = [
     # Monitoreo / métricas
     (r"\b(prometheus|grafana|metric|alert|latency|dashboard|log)\b",
      "monitoring", ["sre", "devops"]),
-    # Productividad
+    # Productividad. OJO: esta regla se salta para textos largos pegados
+    # (> _PRODUCTIVITY_MAX_LEN) — un aviso escolar que MENCIONA «agenda» no es
+    # una petición de calendario/correo (caso real 17-ago). Ver route().
     (r"\b(calendar|meeting|email|gmail|schedule|event|agenda|correo|cita|reunion)\b",
      "productivity", ["productivity"]),
     # CTO / estrategia tecnológica (antes que coding para evitar falsos positivos)
@@ -91,6 +93,10 @@ _KEYWORD_RULES = [
     (r"^\s*(hola|hey|holi|buen[oa]s?\s*(d[ií]as|tardes|noches)?|qu[eé]\s*tal|c[oó]mo\s*est[aá]s|c[oó]mo\s*va|gracias|muchas\s*gracias|ok|okay|vale|perfecto|genial|adi[oó]s|hasta\s*luego|nos\s*vemos|buen\s*d[ií]a|saludos)\b[\s!.,]*$",
      "chat", ["chat"]),
 ]
+
+# Un texto más largo que esto no es una petición directa de productividad:
+# las keywords (agenda, correo, fecha…) aparecen como MENCIÓN, no como orden.
+_PRODUCTIVITY_MAX_LEN = 400
 
 
 _INTENT_TO_AGENTS = {
@@ -165,6 +171,8 @@ class AgentRouter:
 
         # 1. Keyword matching (determinístico, sin LLM)
         for pattern, intent, agents in _KEYWORD_RULES:
+            if intent == "productivity" and len(question) > _PRODUCTIVITY_MAX_LEN:
+                continue
             if re.search(pattern, q_lower, re.IGNORECASE):
                 _record_routing_metric(intent, "keyword")
                 return RoutingDecision(

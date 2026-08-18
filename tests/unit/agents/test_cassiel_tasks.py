@@ -291,3 +291,70 @@ class TestRuteo:
         from orchestration.agent_router import AgentRouter
         decision = await AgentRouter().route(frase)
         assert decision.intent == intent
+
+    async def test_texto_largo_pegado_no_dispara_productivity(self, monkeypatch):
+        # Fix 4b — un aviso escolar pegado (caso real 17-ago) menciona
+        # «agenda» y «fecha» pero no es una petición de calendario/correo.
+        from orchestration.agent_router import AgentRouter
+
+        async def sin_llm(self, question):
+            return None
+        monkeypatch.setattr(AgentRouter, "_route_with_llm", sin_llm)
+
+        aviso = (
+            "Estimados padres de familia: les compartimos la siguiente agenda "
+            "de actividades del ciclo escolar. La primera fecha importante es "
+            "la junta de bienvenida, donde se explicará la dinámica del año. "
+            "Después tendremos la semana de evaluaciones diagnósticas, la "
+            "entrega de libros y materiales, y el festival de inicio de curso. "
+            "Les pedimos puntualidad en la entrada, marcar todos los útiles "
+            "con nombre completo y revisar diariamente la libreta de tareas. "
+            "Agradecemos su apoyo y quedamos atentos a cualquier duda."
+        )
+        assert len(aviso) > 400
+        decision = await AgentRouter().route(aviso)
+        assert decision.intent != "productivity"
+
+    @pytest.mark.parametrize("frase", [
+        "agenda una reunión con Marco el jueves",
+        "revisa mi correo",
+    ])
+    async def test_peticiones_cortas_de_productivity_intactas(self, frase):
+        from orchestration.agent_router import AgentRouter
+        decision = await AgentRouter().route(frase)
+        assert decision.intent == "productivity"
+
+
+class TestRenderToolOutput:
+    """Fix 4a — el dict crudo de una herramienta jamás llega a WhatsApp."""
+
+    def test_dict_emails_se_formatea_legible(self):
+        from orchestration.agent_dispatcher import _render_tool_output
+        out = _render_tool_output({"emails": [
+            {"subject": "Factura CFE", "from": "cfe@cfe.mx", "date": "2026-08-15"},
+            {"subject": "Aviso escolar", "from": "colegio@x.mx", "date": "2026-08-16"},
+        ]})
+        assert out.startswith("📧 2 correos:")
+        assert "Factura CFE" in out and "cfe@cfe.mx" in out
+        assert "{'" not in out
+
+    def test_dict_emails_tope_5(self):
+        from orchestration.agent_dispatcher import _render_tool_output
+        emails = [{"subject": f"m{i}", "from": "a@b.c", "date": ""} for i in range(9)]
+        out = _render_tool_output({"emails": emails})
+        assert "📧 9 correos:" in out
+        assert out.count("•") == 5
+
+    def test_dict_arbitrario_devuelve_disculpa(self):
+        from orchestration.agent_dispatcher import _render_tool_output
+        out = _render_tool_output({"events": [1, 2], "ok": True})
+        assert "reformular" in out and "{" not in out
+
+    def test_str_repr_de_dict_devuelve_disculpa(self):
+        from orchestration.agent_dispatcher import _render_tool_output
+        out = _render_tool_output("{'emails': [{'subject': 'x'}]}")
+        assert "reformular" in out
+
+    def test_str_normal_intacto(self):
+        from orchestration.agent_dispatcher import _render_tool_output
+        assert _render_tool_output("Todo en orden ✅") == "Todo en orden ✅"

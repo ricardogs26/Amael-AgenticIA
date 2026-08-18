@@ -62,6 +62,30 @@ _DIRECT_DISPATCH: dict[str, str] = {
     "qa":           "qa",         # Phanuel — ejecución de tests y reporte CI
 }
 
+def _render_tool_output(value: Any) -> str:
+    """Convierte el output crudo de un agente en texto legible para el usuario.
+
+    Un dict/list (o su repr como string) jamás debe llegar a WhatsApp — el
+    caso real del 17-ago: la búsqueda de Gmail devolvió `{'emails': [...]}`
+    y el dict crudo salió tal cual por el bridge.
+    """
+    if isinstance(value, dict) and isinstance(value.get("emails"), list):
+        emails = value["emails"]
+        lineas = [
+            f"• {e.get('subject', '(sin asunto)')} — {e.get('from', '?')} ({e.get('date', '')})"
+            for e in emails[:5] if isinstance(e, dict)
+        ]
+        return f"📧 {len(emails)} correos:\n" + "\n".join(lineas)
+    if isinstance(value, str) and not value.lstrip().startswith(("{'", "[{")):
+        return value
+    logger.warning(
+        f"[dispatcher] output de herramienta no legible (tipo {type(value).__name__}) "
+        f"— se devuelve disculpa en vez del dato crudo"
+    )
+    return ("Obtuve datos de la herramienta pero no pude resumirlos — "
+            "intenta reformular la petición.")
+
+
 # Intents que pasan por el pipeline LangGraph completo.
 # "memory" salió de aquí (1.14.2): iba al pipeline, que no tiene NINGUNA
 # herramienta de historial — «¿qué te dije del trader?» terminaba en un plan
@@ -348,14 +372,14 @@ class AgentDispatcher:
         if result.success and result.output:
             output = result.output
             if isinstance(output, dict):
-                answer = (
+                answer = _render_tool_output(
                     output.get("response")
                     or output.get("summary")
                     or output.get("result")
-                    or str(output)
+                    or output
                 )
             else:
-                answer = str(output)
+                answer = _render_tool_output(output)
         elif not result.success:
             answer = f"❌ {result.error or 'Error desconocido'}"
 
