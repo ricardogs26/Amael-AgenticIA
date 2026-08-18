@@ -269,6 +269,11 @@ class TestRuteo:
         "ya compré el café",
         "ya lo hice",
         "cancela la del café",
+        # Fix 3 — conjugaciones de «recordar» + referencia temporal
+        "Recuerda de mi mañana de revisar licenciada para el contrato de la casa",
+        "recuerda que mañana a las 9 tengo lo del contrato",
+        "me recuerdes mañana comprar los útiles",
+        "recuérdame hoy a las 5 llamar al banco",
     ])
     async def test_frases_de_tarea_rutean_a_reminder(self, frase):
         from orchestration.agent_router import AgentRouter
@@ -277,6 +282,8 @@ class TestRuteo:
 
     @pytest.mark.parametrize("frase,intent", [
         ("recuerda lo que te dije del proyecto", "memory"),
+        # «la semana pasada» NO es la referencia temporal «la próxima semana»
+        ("¿recuerdas qué hablamos la semana pasada?", "memory"),
         ("agenda una reunión con Marco el jueves", "productivity"),
         ("necesito el estado del cluster", "kubernetes"),
     ])

@@ -44,7 +44,14 @@ _KEYWORD_RULES = [
      r"ya\s+lo\s+hice|ya\s+(compr[eé]|pagu[eé]|termin[eé]|fui)\b|"
      r"cancela\s+la\s+del?\b|"
      r"necesito\s+(agendar|comprar|llamar|pagar|revisar|renovar|llevar|recoger)\b|"
-     r"todos\s+los\s+d[ií]as|tareas?\s+programadas?|mis\s+recordatorios)\b",
+     r"todos\s+los\s+d[ií]as|tareas?\s+programadas?|mis\s+recordatorios|"
+     # Conjugaciones de «recordar» («recuerda de mi mañana…», «me recuerdes
+     # mañana…» — transcripciones de voz, caso real 16-ago) seguidas de una
+     # referencia temporal cercana. OJO: «la próxima semana» sí, «la semana
+     # pasada» no — esa es una consulta de memoria.
+     r"recuerd\w*\b.{0,60}\b(ma[nñ]ana|hoy|pasado\s+ma[nñ]ana|a\s+las?\s+\d|"
+     r"el\s+(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)|"
+     r"la\s+pr[oó]xima\s+semana))\b",
      "reminder", ["scheduler"]),
     # SRE / incidentes
     (r"\b(incident|anomaly|crash\s*loop|oom|circuit.breaker|sre|postmortem|slo)\b",
@@ -71,7 +78,7 @@ _KEYWORD_RULES = [
     (r"\b(search|find|look\s*up|documentation|explain|buscar|documento|pdf|docx)\b",
      "research", ["researcher"]),
     # Memoria / historial
-    (r"\b(remember|recall|history|last\s*time|previously|recuerda|recordar)\b",
+    (r"\b(remember|recall|history|last\s*time|previously|recuerdas?|recordar)\b",
      "memory", ["memory"]),
     # QA / validación — Phanuel. `tests?` cubre singular Y plural: la regla
     # vieja pedía `\btest\b` y «qué tests debo correr» caía a general (10-ago).
