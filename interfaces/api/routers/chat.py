@@ -207,11 +207,10 @@ async def chat(
 
     # Routing + dispatch
     try:
-        from orchestration import AgentRouter, dispatch
+        from orchestration import dispatch
 
-        router_inst = AgentRouter()
-        decision    = await router_inst.route(question)
-        tools_map   = _build_tools_map(effective_user)
+        question, decision = await _route_with_followup(effective_user, question)
+        tools_map = _build_tools_map(effective_user)
 
         # Enriquecer con memoria (best-effort, no bloquea si falla).
         # Dos capas con reglas distintas (B2 del plan Hermes):
@@ -364,8 +363,9 @@ async def chat_stream(
     }
 
     async def generate():
+        nonlocal question
         try:
-            from orchestration import AgentRouter, RoutingDecision, dispatch
+            from orchestration import RoutingDecision, dispatch
 
             tools_map = _build_tools_map(user_id)
 
@@ -382,8 +382,9 @@ async def chat_stream(
                 yield _sse("status", msg=f"Conectando con {label}…")
             else:
                 yield _sse("status", msg="Analizando tu pregunta…")
-                router_inst = AgentRouter()
-                decision    = await router_inst.route(question)
+                # Mismo hook de followup que /chat: consume la pregunta
+                # abierta de Cassiel para que no secuestre otro canal después.
+                question, decision = await _route_with_followup(user_id, question)
 
             yield _sse("status", msg="Procesando respuesta…")
 
@@ -453,6 +454,31 @@ async def chat_stream(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+async def _route_with_followup(user_id: str, question: str):
+    """
+    Routing con continuidad conversacional de Cassiel — compartido por
+    /chat y /chat/stream.
+
+    Si el turno anterior dejó una pregunta abierta (followup en Redis,
+    GETDEL = un solo uso), este mensaje es la respuesta: va directo a
+    Cassiel con la petición previa como contexto, sin pasar por el router.
+    Si el usuario cambió de tema, Cassiel responde normal o vuelve a
+    preguntar (action=unclear).
+
+    Retorna (question_posiblemente_combinada, RoutingDecision).
+    """
+    from agents.scheduler.agent import merge_followup, pop_followup
+    from orchestration import AgentRouter, RoutingDecision
+
+    prev = pop_followup(user_id)
+    if prev:
+        return merge_followup(question, prev), RoutingDecision(
+            intent="reminder", agents=["scheduler"], confidence=1.0,
+            routing_reason="cassiel_followup",
+        )
+    return question, await AgentRouter().route(question)
+
 
 def _build_tools_map(user_id: str) -> dict:
     """

@@ -69,7 +69,30 @@ Reglas:
   si el usuario dio fecha — no la inventes.
 - «ya lo hice / ya compré X» → task_done con task_ref. «cancela» → task_cancel.
   «mejor el lunes» → task_postpone con new_due.
-- «/pendientes» o «qué tengo pendiente» → task_list (filter si lo dijo)."""
+- «/pendientes» o «qué tengo pendiente» → task_list (filter si lo dijo).
+- Si el mensaje trae [Contexto: …], es la continuación de esa petición — únelos."""
+
+
+_FOLLOWUP_TTL_S = 600
+
+
+def merge_followup(question: str, prev: str) -> str:
+    """Combina la respuesta del usuario con la petición previa sobre la que
+    Cassiel preguntó — el _SYSTEM sabe unir ambas partes."""
+    return f"[Contexto: el usuario respondía a Cassiel sobre: {prev}]\n{question}"
+
+
+def pop_followup(user: str) -> str | None:
+    """Consume (GETDEL — un solo uso) el followup pendiente del usuario.
+    Best-effort: sin Redis devuelve None, jamás lanza."""
+    try:
+        from storage.redis.client import get_redis_client
+        raw = get_redis_client().getdel(f"cassiel:followup:{user}")
+        if raw is None:
+            return None
+        return raw.decode() if isinstance(raw, bytes) else str(raw)
+    except Exception:
+        return None
 
 
 @AgentRegistry.register
@@ -80,6 +103,10 @@ class CassielAgent(BaseAgent):
     role         = "Scheduler conversacional — recordatorios y tareas programadas"
     version      = "1.0.0"
     capabilities = ["job_create", "job_list", "job_pause", "job_resume", "job_delete"]
+
+    # Última petición del usuario en este turno — la guardan las ramas que
+    # responden con una pregunta, para que la siguiente respuesta vuelva aquí.
+    _last_query: str = ""
 
     async def execute(self, task: dict[str, Any]) -> AgentResult:
         query      = (task.get("query") or "").strip()
@@ -94,6 +121,7 @@ class CassielAgent(BaseAgent):
 
         from agents.scheduler import storage
 
+        self._last_query = query
         tz_name = storage.user_timezone(user_email)
         pending = self._pop_pending_question(user_email)
         extra_context = None
@@ -164,6 +192,7 @@ class CassielAgent(BaseAgent):
         action = str(parsed.get("action", "")).lower().strip()
 
         if action == "unclear":
+            self._set_followup(user_email, self._last_query)
             return str(parsed.get("clarification")
                        or "¿Qué quieres que programe y cuándo?")
 
@@ -173,6 +202,7 @@ class CassielAgent(BaseAgent):
             schedule = str(parsed.get("schedule") or "").strip()
             delivery = str(parsed.get("delivery") or "whatsapp").strip().lower()
             if not (title and prompt and schedule):
+                self._set_followup(user_email, self._last_query)
                 return ("Me falta el qué o el cuándo. Ejemplo: «recuérdame revisar "
                         "el PR todos los lunes a las 9am».")
             job = storage.create_job(
@@ -200,6 +230,7 @@ class CassielAgent(BaseAgent):
         if action in ("pause", "resume", "delete"):
             ref = str(parsed.get("job_ref") or "").strip()
             if not ref:
+                self._set_followup(user_email, self._last_query)
                 return "¿Cuál tarea? Dame su número o parte del nombre."
             job = storage.find_job(user_email, ref)
             if not job:
@@ -228,6 +259,7 @@ class CassielAgent(BaseAgent):
                 t = parsed.get("task") or {}
                 titulo = str(t.get("title") or "").strip()
                 if not titulo:
+                    self._set_followup(user_email, self._last_query)
                     return "¿Qué tarea anoto? Dímela en una frase corta."
                 due = None
                 if t.get("due_date"):
@@ -245,6 +277,7 @@ class CassielAgent(BaseAgent):
                 extra = ""
                 if due is None and task.priority == "alta":
                     self._set_pending_question(user_email, task.id, "due_date")
+                    self._set_followup(user_email, self._last_query)
                     extra = " ¿Para cuándo la necesitas?"
                 mins = f", ~{task.estimated_minutes} min" if task.estimated_minutes else ""
                 return (f"📝 Anotada #{task.id}: *{task.title}* — {task.category}, "
@@ -276,6 +309,7 @@ class CassielAgent(BaseAgent):
             # task_done / task_cancel / task_postpone
             ref = str(parsed.get("task_ref") or "").strip()
             if not ref:
+                self._set_followup(user_email, self._last_query)
                 return "¿Cuál pendiente? Dame su número o parte del nombre."
             task = tasks_storage.find_task(user_email, ref)   # ValueError si 2+
             if not task:
@@ -291,10 +325,31 @@ class CassielAgent(BaseAgent):
             return f"⏭ #{task.id} *{task.title}* pospuesta al {nueva}."
         except ValueError as exc:
             # Errores de validación en código (categoría inválida, ambigüedad,
-            # fecha inválida): el mensaje ya es legible.
+            # fecha inválida): el mensaje ya es legible. La ambigüedad de
+            # find_task («Hay varias…») es una pregunta al usuario → followup.
+            if "hay varias" in str(exc).lower():
+                self._set_followup(user_email, self._last_query)
             return str(exc)
 
     _PENDING_TTL_S = 600
+
+    def _set_followup(self, user: str, prev_query: str) -> None:
+        """Marca que Cassiel dejó una pregunta abierta: el próximo mensaje del
+        usuario se rutea de vuelta a Cassiel con `prev_query` como contexto.
+        Si la query trae bloques inyectados por chat.py, guarda solo la
+        pregunta real del usuario."""
+        if "[Pregunta actual]\n" in prev_query:
+            prev_query = prev_query.rsplit("[Pregunta actual]\n", 1)[-1]
+        prev_query = prev_query.strip()[:400]
+        if not prev_query:
+            return
+        try:
+            from storage.redis.client import get_redis_client
+            get_redis_client().setex(
+                f"cassiel:followup:{user}", _FOLLOWUP_TTL_S, prev_query,
+            )
+        except Exception as exc:
+            logger.debug(f"[cassiel] followup no guardado: {exc}")
 
     def _set_pending_question(self, user: str, task_id: int, field: str) -> None:
         try:

@@ -44,7 +44,14 @@ _KEYWORD_RULES = [
      r"ya\s+lo\s+hice|ya\s+(compr[eé]|pagu[eé]|termin[eé]|fui)\b|"
      r"cancela\s+la\s+del?\b|"
      r"necesito\s+(agendar|comprar|llamar|pagar|revisar|renovar|llevar|recoger)\b|"
-     r"todos\s+los\s+d[ií]as|tareas?\s+programadas?|mis\s+recordatorios)\b",
+     r"todos\s+los\s+d[ií]as|tareas?\s+programadas?|mis\s+recordatorios|"
+     # Conjugaciones de «recordar» («recuerda de mi mañana…», «me recuerdes
+     # mañana…» — transcripciones de voz, caso real 16-ago) seguidas de una
+     # referencia temporal cercana. OJO: «la próxima semana» sí, «la semana
+     # pasada» no — esa es una consulta de memoria.
+     r"recuerd\w*\b.{0,60}\b(ma[nñ]ana|hoy|pasado\s+ma[nñ]ana|a\s+las?\s+\d|"
+     r"el\s+(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)|"
+     r"la\s+pr[oó]xima\s+semana))\b",
      "reminder", ["scheduler"]),
     # SRE / incidentes
     (r"\b(incident|anomaly|crash\s*loop|oom|circuit.breaker|sre|postmortem|slo)\b",
@@ -55,7 +62,9 @@ _KEYWORD_RULES = [
     # Monitoreo / métricas
     (r"\b(prometheus|grafana|metric|alert|latency|dashboard|log)\b",
      "monitoring", ["sre", "devops"]),
-    # Productividad
+    # Productividad. OJO: esta regla se salta para textos largos pegados
+    # (> _PRODUCTIVITY_MAX_LEN) — un aviso escolar que MENCIONA «agenda» no es
+    # una petición de calendario/correo (caso real 17-ago). Ver route().
     (r"\b(calendar|meeting|email|gmail|schedule|event|agenda|correo|cita|reunion)\b",
      "productivity", ["productivity"]),
     # CTO / estrategia tecnológica (antes que coding para evitar falsos positivos)
@@ -71,7 +80,7 @@ _KEYWORD_RULES = [
     (r"\b(search|find|look\s*up|documentation|explain|buscar|documento|pdf|docx)\b",
      "research", ["researcher"]),
     # Memoria / historial
-    (r"\b(remember|recall|history|last\s*time|previously|recuerda|recordar)\b",
+    (r"\b(remember|recall|history|last\s*time|previously|recuerdas?|recordar)\b",
      "memory", ["memory"]),
     # QA / validación — Phanuel. `tests?` cubre singular Y plural: la regla
     # vieja pedía `\btest\b` y «qué tests debo correr» caía a general (10-ago).
@@ -84,6 +93,10 @@ _KEYWORD_RULES = [
     (r"^\s*(hola|hey|holi|buen[oa]s?\s*(d[ií]as|tardes|noches)?|qu[eé]\s*tal|c[oó]mo\s*est[aá]s|c[oó]mo\s*va|gracias|muchas\s*gracias|ok|okay|vale|perfecto|genial|adi[oó]s|hasta\s*luego|nos\s*vemos|buen\s*d[ií]a|saludos)\b[\s!.,]*$",
      "chat", ["chat"]),
 ]
+
+# Un texto más largo que esto no es una petición directa de productividad:
+# las keywords (agenda, correo, fecha…) aparecen como MENCIÓN, no como orden.
+_PRODUCTIVITY_MAX_LEN = 400
 
 
 _INTENT_TO_AGENTS = {
@@ -158,6 +171,8 @@ class AgentRouter:
 
         # 1. Keyword matching (determinístico, sin LLM)
         for pattern, intent, agents in _KEYWORD_RULES:
+            if intent == "productivity" and len(question) > _PRODUCTIVITY_MAX_LEN:
+                continue
             if re.search(pattern, q_lower, re.IGNORECASE):
                 _record_routing_metric(intent, "keyword")
                 return RoutingDecision(

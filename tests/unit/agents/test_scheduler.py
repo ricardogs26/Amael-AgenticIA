@@ -108,6 +108,10 @@ class _CassielSinLLM:
     def __init__(self):
         from agents.scheduler.agent import CassielAgent
         self._apply = CassielAgent._apply.__get__(self)
+        # _apply llama a _set_followup en las ramas que preguntan al usuario;
+        # el real es best-effort (sin Redis solo loguea), así que se bindea.
+        self._set_followup = CassielAgent._set_followup.__get__(self)
+        self._last_query = ""
 
 
 def test_accion_desconocida_no_truena(monkeypatch):

@@ -185,6 +185,101 @@ class TestNudgeMessage:
         assert "comprar café" in msg and "hoy" in msg
 
 
+class TestFollowup:
+    """Fix 1 — continuidad conversacional: cuando Cassiel pregunta, guarda
+    followup para que la siguiente respuesta del usuario vuelva a él."""
+
+    @pytest.fixture
+    def agent(self, monkeypatch):
+        from agents.scheduler.agent import CassielAgent
+        a = CassielAgent.__new__(CassielAgent)
+        a._last_query = "recuérdame lo de la casa"
+        return a
+
+    def _spy(self, agent, monkeypatch):
+        llamadas = []
+        monkeypatch.setattr(
+            agent, "_set_followup",
+            lambda user, prev: llamadas.append((user, prev)),
+        )
+        return llamadas
+
+    def test_unclear_guarda_followup(self, agent, monkeypatch):
+        llamadas = self._spy(agent, monkeypatch)
+        out = agent._apply(
+            {"action": "unclear", "clarification": "¿Para cuándo?"},
+            "u@x.com", "America/Mexico_City",
+        )
+        assert out == "¿Para cuándo?"
+        assert llamadas == [("u@x.com", "recuérdame lo de la casa")]
+
+    def test_create_incompleto_guarda_followup(self, agent, monkeypatch):
+        llamadas = self._spy(agent, monkeypatch)
+        out = agent._apply({"action": "create", "title": "x"},
+                           "u@x.com", "America/Mexico_City")
+        assert "falta" in out.lower()
+        assert llamadas
+
+    def test_task_ref_ambiguo_guarda_followup(self, agent, monkeypatch):
+        llamadas = self._spy(agent, monkeypatch)
+        def ambiguo(user_id, ref):
+            raise ValueError("Hay varias pendientes que coinciden con 'banco': …")
+        monkeypatch.setattr(ts, "find_task", ambiguo)
+        out = agent._apply({"action": "task_done", "task_ref": "banco"},
+                           "u@x.com", "America/Mexico_City")
+        assert "varias" in out.lower()
+        assert llamadas
+
+    def test_task_sin_ref_guarda_followup(self, agent, monkeypatch):
+        llamadas = self._spy(agent, monkeypatch)
+        out = agent._apply({"action": "task_done"},
+                           "u@x.com", "America/Mexico_City")
+        assert "cuál" in out.lower()
+        assert llamadas
+
+    def test_create_completo_no_guarda_followup(self, agent, monkeypatch):
+        llamadas = self._spy(agent, monkeypatch)
+        monkeypatch.setattr(ts, "create_task",
+                            lambda user_id, title, **kw: _task(id=3, title=title))
+        agent._apply({"action": "task_create", "task": {"title": "comprar café",
+                                                        "priority": "baja"}},
+                     "u@x.com", "America/Mexico_City")
+        assert not llamadas
+
+    def test_merge_followup_formato(self):
+        from agents.scheduler.agent import merge_followup
+        out = merge_followup("mañana", "recuérdame lo de la casa")
+        assert out == ("[Contexto: el usuario respondía a Cassiel sobre: "
+                       "recuérdame lo de la casa]\nmañana")
+
+    def test_pop_followup_sin_redis_devuelve_none(self, monkeypatch):
+        # Sin Redis alcanzable, pop_followup jamás lanza: devuelve None.
+        from agents.scheduler.agent import pop_followup
+        assert pop_followup("nadie@x.com") is None
+
+    async def test_route_with_followup_fuerza_reminder(self, monkeypatch):
+        # Hook compartido por /chat y /chat/stream: con followup pendiente,
+        # la decisión es reminder sin pasar por el router.
+        import agents.scheduler.agent as cassiel_mod
+        monkeypatch.setattr(cassiel_mod, "pop_followup",
+                            lambda user: "recuérdame lo de la casa")
+        from interfaces.api.routers.chat import _route_with_followup
+        q, decision = await _route_with_followup("u@x.com", "mañana")
+        assert decision.intent == "reminder"
+        assert decision.routing_reason == "cassiel_followup"
+        assert q == ("[Contexto: el usuario respondía a Cassiel sobre: "
+                     "recuérdame lo de la casa]\nmañana")
+
+    async def test_route_with_followup_sin_pendiente_rutea_normal(self, monkeypatch):
+        import agents.scheduler.agent as cassiel_mod
+        monkeypatch.setattr(cassiel_mod, "pop_followup", lambda user: None)
+        from interfaces.api.routers.chat import _route_with_followup
+        q, decision = await _route_with_followup("u@x.com", "¿qué pods hay en el cluster?")
+        assert q == "¿qué pods hay en el cluster?"
+        assert decision.intent == "kubernetes"
+        assert decision.routing_reason != "cassiel_followup"
+
+
 class TestRuteo:
     @pytest.mark.parametrize("frase", [
         "recuérdame comprar café el día de súper",
@@ -196,6 +291,11 @@ class TestRuteo:
         "ya compré el café",
         "ya lo hice",
         "cancela la del café",
+        # Fix 3 — conjugaciones de «recordar» + referencia temporal
+        "Recuerda de mi mañana de revisar licenciada para el contrato de la casa",
+        "recuerda que mañana a las 9 tengo lo del contrato",
+        "me recuerdes mañana comprar los útiles",
+        "recuérdame hoy a las 5 llamar al banco",
     ])
     async def test_frases_de_tarea_rutean_a_reminder(self, frase):
         from orchestration.agent_router import AgentRouter
@@ -204,6 +304,8 @@ class TestRuteo:
 
     @pytest.mark.parametrize("frase,intent", [
         ("recuerda lo que te dije del proyecto", "memory"),
+        # «la semana pasada» NO es la referencia temporal «la próxima semana»
+        ("¿recuerdas qué hablamos la semana pasada?", "memory"),
         ("agenda una reunión con Marco el jueves", "productivity"),
         ("necesito el estado del cluster", "kubernetes"),
     ])
@@ -211,3 +313,70 @@ class TestRuteo:
         from orchestration.agent_router import AgentRouter
         decision = await AgentRouter().route(frase)
         assert decision.intent == intent
+
+    async def test_texto_largo_pegado_no_dispara_productivity(self, monkeypatch):
+        # Fix 4b — un aviso escolar pegado (caso real 17-ago) menciona
+        # «agenda» y «fecha» pero no es una petición de calendario/correo.
+        from orchestration.agent_router import AgentRouter
+
+        async def sin_llm(self, question):
+            return None
+        monkeypatch.setattr(AgentRouter, "_route_with_llm", sin_llm)
+
+        aviso = (
+            "Estimados padres de familia: les compartimos la siguiente agenda "
+            "de actividades del ciclo escolar. La primera fecha importante es "
+            "la junta de bienvenida, donde se explicará la dinámica del año. "
+            "Después tendremos la semana de evaluaciones diagnósticas, la "
+            "entrega de libros y materiales, y el festival de inicio de curso. "
+            "Les pedimos puntualidad en la entrada, marcar todos los útiles "
+            "con nombre completo y revisar diariamente la libreta de tareas. "
+            "Agradecemos su apoyo y quedamos atentos a cualquier duda."
+        )
+        assert len(aviso) > 400
+        decision = await AgentRouter().route(aviso)
+        assert decision.intent != "productivity"
+
+    @pytest.mark.parametrize("frase", [
+        "agenda una reunión con Marco el jueves",
+        "revisa mi correo",
+    ])
+    async def test_peticiones_cortas_de_productivity_intactas(self, frase):
+        from orchestration.agent_router import AgentRouter
+        decision = await AgentRouter().route(frase)
+        assert decision.intent == "productivity"
+
+
+class TestRenderToolOutput:
+    """Fix 4a — el dict crudo de una herramienta jamás llega a WhatsApp."""
+
+    def test_dict_emails_se_formatea_legible(self):
+        from orchestration.agent_dispatcher import _render_tool_output
+        out = _render_tool_output({"emails": [
+            {"subject": "Factura CFE", "from": "cfe@cfe.mx", "date": "2026-08-15"},
+            {"subject": "Aviso escolar", "from": "colegio@x.mx", "date": "2026-08-16"},
+        ]})
+        assert out.startswith("📧 2 correos:")
+        assert "Factura CFE" in out and "cfe@cfe.mx" in out
+        assert "{'" not in out
+
+    def test_dict_emails_tope_5(self):
+        from orchestration.agent_dispatcher import _render_tool_output
+        emails = [{"subject": f"m{i}", "from": "a@b.c", "date": ""} for i in range(9)]
+        out = _render_tool_output({"emails": emails})
+        assert "📧 9 correos:" in out
+        assert out.count("•") == 5
+
+    def test_dict_arbitrario_devuelve_disculpa(self):
+        from orchestration.agent_dispatcher import _render_tool_output
+        out = _render_tool_output({"events": [1, 2], "ok": True})
+        assert "reformular" in out and "{" not in out
+
+    def test_str_repr_de_dict_devuelve_disculpa(self):
+        from orchestration.agent_dispatcher import _render_tool_output
+        out = _render_tool_output("{'emails': [{'subject': 'x'}]}")
+        assert "reformular" in out
+
+    def test_str_normal_intacto(self):
+        from orchestration.agent_dispatcher import _render_tool_output
+        assert _render_tool_output("Todo en orden ✅") == "Todo en orden ✅"
