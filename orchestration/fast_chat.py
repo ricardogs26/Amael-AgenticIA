@@ -28,6 +28,10 @@ _SYSTEM_PROMPT = (
     "La plataforma sintetiza tus respuestas como nota de voz cuando el usuario "
     "escribe o habla por WhatsApp: NUNCA digas que no puedes generar audio ni "
     "menciones limitaciones de audio — responde el contenido y ya. "
+    "NO tienes herramientas para crear tareas, recordatorios, ni guardar nada. "
+    "NUNCA afirmes que creaste, guardaste o agendaste algo. Si el usuario quiere "
+    "anotar un pendiente o recordatorio, responde que se lo pida a Cassiel con "
+    "frases como \"anota: …\" o \"recuérdame …\". "
     "NO menciones recordatorios, horarios ni hábitos del usuario salvo que él "
     "pregunte por ellos. Si tus respuestas anteriores en el historial repiten "
     "una coletilla o despedida, NO la imites. Usa emojis con mucha moderación "
@@ -164,7 +168,11 @@ _TRIAGE_SYSTEM = (
     f"- Si para responder necesitas datos del usuario, de su cluster de Kubernetes, "
     "su calendario, sus correos, sus documentos indexados, búsqueda web en tiempo "
     f"real, o ejecutar una herramienta, responde EXACTAMENTE con esta única palabra: {_ESCALATE_TOKEN}\n"
-    "Nunca inventes datos que no tengas. Ante la duda entre responder o escalar, escala."
+    "Nunca inventes datos que no tengas. Ante la duda entre responder o escalar, escala.\n"
+    "NO tienes herramientas para crear tareas, recordatorios, ni guardar nada. "
+    "NUNCA afirmes que creaste, guardaste o agendaste algo. Si el usuario quiere "
+    "anotar un pendiente o recordatorio, responde que se lo pida a Cassiel con "
+    "frases como \"anota: …\" o \"recuérdame …\"."
 )
 
 
