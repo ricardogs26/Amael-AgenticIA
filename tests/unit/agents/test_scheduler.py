@@ -112,6 +112,7 @@ class _CassielSinLLM:
         # el real es best-effort (sin Redis solo loguea), así que se bindea.
         self._set_followup = CassielAgent._set_followup.__get__(self)
         self._last_query = ""
+        self._next_followup_round = 1
 
 
 def test_accion_desconocida_no_truena(monkeypatch):
