@@ -189,6 +189,22 @@ async def chat(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
     question = result
 
+    # paste:pending — texto reenviado largo sin instrucción: se guarda y se
+    # pregunta qué hacer, sin pasar por dispatch (misma familia de early-return
+    # que el cache hit y el flujo de imagen, arriba).
+    if _is_bare_paste(question):
+        _set_pending_paste(effective_user, question)
+        _persist_message(conversation_id, effective_user, question,
+                         _PASTE_PENDING_PROMPT, request_id, "paste")
+        asyncio.ensure_future(_store_memory_episode(
+            effective_user, conversation_id, question, _PASTE_PENDING_PROMPT
+        ))
+        return ChatResponse(
+            answer=_PASTE_PENDING_PROMPT, response=_PASTE_PENDING_PROMPT,
+            conversation_id=conversation_id, request_id=request_id,
+            intent="paste", dispatch_mode="paste_pending", elapsed_ms=0.0,
+        )
+
     # P7-004: Response cache — Redis TTL 60s para queries idénticos del mismo usuario
     _cache_key = None
     _cached_answer = _get_cached_response(effective_user, question)
@@ -365,6 +381,17 @@ async def chat_stream(
     async def generate():
         nonlocal question
         try:
+            # paste:pending — mismo hook que /chat: texto largo sin
+            # instrucción se guarda y se responde directo por el canal SSE,
+            # sin pasar por dispatch.
+            if _is_bare_paste(question):
+                _set_pending_paste(user_id, question)
+                yield _sse("token", content=_PASTE_PENDING_PROMPT)
+                yield _sse("done")
+                _persist_message(conversation_id, user_id, question,
+                                 _PASTE_PENDING_PROMPT, request_id, "paste")
+                return
+
             from orchestration import RoutingDecision, dispatch
 
             tools_map = _build_tools_map(user_id)
@@ -457,19 +484,32 @@ async def chat_stream(
 
 async def _route_with_followup(user_id: str, question: str):
     """
-    Routing con continuidad conversacional de Cassiel — compartido por
-    /chat y /chat/stream.
+    Routing con continuidad conversacional — compartido por /chat y
+    /chat/stream.
 
-    Si el turno anterior dejó una pregunta abierta (followup en Redis,
-    GETDEL = un solo uso), este mensaje es la respuesta: va directo a
-    Cassiel con la petición previa como contexto, sin pasar por el router.
-    Si el usuario cambió de tema, Cassiel responde normal o vuelve a
-    preguntar (action=unclear).
+    Dos mecanismos de continuidad, en este orden:
+
+    1. paste:pending — si el turno anterior guardó un texto reenviado
+       (ver `_is_bare_paste`) y este mensaje es una respuesta corta
+       (< 400 chars), se fusionan y el flujo sigue el ruteo NORMAL sobre
+       el texto combinado. Si también hay un followup de Cassiel pendiente,
+       el paste merge gana este turno y el followup NO se consume — se deja
+       intacto en Redis para la próxima respuesta corta, así no se pierde.
+    2. cassiel:followup — si el turno anterior dejó una pregunta abierta
+       (Redis, GETDEL = un solo uso), este mensaje es la respuesta: va
+       directo a Cassiel con la petición previa como contexto, sin pasar
+       por el router. Si el usuario cambió de tema, Cassiel responde normal
+       o vuelve a preguntar (action=unclear).
 
     Retorna (question_posiblemente_combinada, RoutingDecision).
     """
     from agents.scheduler.agent import merge_followup, pop_followup
     from orchestration import AgentRouter, RoutingDecision
+
+    pending_paste = _pop_pending_paste(user_id)
+    if pending_paste and len(question) < 400:
+        merged = _merge_paste(question, pending_paste)
+        return merged, await AgentRouter().route(merged)
 
     prev = pop_followup(user_id)
     if prev:
@@ -478,6 +518,76 @@ async def _route_with_followup(user_id: str, question: str):
             routing_reason="cassiel_followup",
         )
     return question, await AgentRouter().route(question)
+
+
+# ── paste:pending — texto reenviado sin instrucción ──────────────────────────
+#
+# Un mensaje reenviado (aviso escolar, correo, etc.) sin petición explícita
+# no debe ir al pipeline de dispatch: Amael pregunta qué hacer con él, guarda
+# el texto (Redis, mismo patrón que cassiel:followup) y la siguiente
+# respuesta corta se fusiona con ese texto antes de rutear.
+
+_PASTE_INSTRUCTION_RE = re.compile(
+    r"resume|res[uú]me|recu[eé]rda|record|anota|apunta|guarda|analiza|explica|"
+    r"traduce|agenda|ayuda|puedes|podr[ií]as|qu[eé]\b|c[oó]mo\b|cu[aá]ndo\b|"
+    r"dime|hazme|necesito|quiero|busca|revisa|\?",
+    re.IGNORECASE,
+)
+
+_PASTE_PENDING_TTL_S    = 600
+_PASTE_PENDING_MAX_CHARS = 4000
+
+_PASTE_PENDING_PROMPT = (
+    "Recibí un texto largo 📄 ¿Qué hago con él? Puedo: crear un recordatorio "
+    "de la fecha que menciona, anotarlo como pendiente, resumirlo, guardarlo "
+    "en tus documentos, o nada."
+)
+
+
+def _has_instruction(text: str) -> bool:
+    """True si los primeros 200 chars sugieren una petición explícita
+    (verbo de acción o pregunta), en vez de solo texto pegado."""
+    return bool(_PASTE_INSTRUCTION_RE.search(text[:200]))
+
+
+def _is_bare_paste(question: str) -> bool:
+    """True si `question` es un texto largo (> 400 chars) SIN instrucción —
+    probable reenvío (aviso escolar, correo) que requiere preguntar qué
+    hacer antes de dispatchar."""
+    return len(question) > 400 and not _has_instruction(question)
+
+
+def _merge_paste(instruction: str, stored: str) -> str:
+    """Combina la instrucción corta del usuario con el texto reenviado que
+    quedó pendiente en Redis."""
+    return f"{instruction}\n\n[Texto reenviado previamente por el usuario]:\n{stored}"
+
+
+def _set_pending_paste(user_id: str, text: str) -> None:
+    """Guarda el texto reenviado (truncado a 4000 chars, TTL 600s) para
+    fusionarlo con la siguiente respuesta corta. Best-effort: sin Redis no
+    persiste — el usuario tendría que reenviarlo."""
+    try:
+        from storage.redis.client import get_redis_client
+        get_redis_client().setex(
+            f"paste:pending:{user_id}", _PASTE_PENDING_TTL_S,
+            text[:_PASTE_PENDING_MAX_CHARS],
+        )
+    except Exception:
+        pass
+
+
+def _pop_pending_paste(user_id: str) -> str | None:
+    """Consume (GETDEL — un solo uso) el texto reenviado pendiente.
+    Best-effort: sin Redis alcanzable devuelve None, jamás lanza."""
+    try:
+        from storage.redis.client import get_redis_client
+        raw = get_redis_client().getdel(f"paste:pending:{user_id}")
+        if raw is None:
+            return None
+        return raw.decode() if isinstance(raw, bytes) else str(raw)
+    except Exception:
+        return None
 
 
 def _build_tools_map(user_id: str) -> dict:
