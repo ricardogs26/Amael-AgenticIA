@@ -19,6 +19,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 
 from interfaces.api.auth import get_current_user
 
@@ -61,6 +62,37 @@ async def orders(user_id: Annotated[str, Depends(get_current_user)], limit: int 
                  include_hold: bool = False) -> dict:
     return await _forward("GET", f"/orders?limit={min(limit, 200)}"
                                  f"&include_hold={str(include_hold).lower()}")
+
+
+@router.get("/statement")
+async def statement(user_id: Annotated[str, Depends(get_current_user)], month: str) -> dict:
+    """Estado de cuenta mensual (JSON). month = YYYY-MM."""
+    return await _forward("GET", f"/statement?month={_month(month)}")
+
+
+@router.get("/statement.pdf")
+async def statement_pdf(user_id: Annotated[str, Depends(get_current_user)], month: str) -> Response:
+    """Estado de cuenta mensual en PDF — se reenvían los bytes tal cual."""
+    m = _month(month)
+    headers = {"Authorization": f"Bearer {INTERNAL_API_SECRET}"}
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.get(f"{TRADER_SERVICE_URL}/api/trader/statement.pdf?month={m}",
+                                 headers=headers)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="trader-service no disponible") from exc
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=r.text[:500])
+    return Response(content=r.content, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="amael-trader-{m}.pdf"'})
+
+
+def _month(month: str) -> str:
+    """Valida YYYY-MM antes de concatenarlo en la URL interna."""
+    import re
+    if not re.fullmatch(r"20\d{2}-(0[1-9]|1[0-2])", month or ""):
+        raise HTTPException(status_code=422, detail="month debe ser YYYY-MM")
+    return month
 
 
 @router.get("/holds")
