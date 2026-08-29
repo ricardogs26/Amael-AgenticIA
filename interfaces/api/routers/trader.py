@@ -64,6 +64,34 @@ async def orders(user_id: Annotated[str, Depends(get_current_user)], limit: int 
                                  f"&include_hold={str(include_hold).lower()}")
 
 
+@router.get("/rules")
+async def rules(user_id: Annotated[str, Depends(get_current_user)]) -> dict:
+    """Parámetros de negocio del trader (tabla trader_rules) con metadatos."""
+    return await _forward("GET", "/rules")
+
+
+@router.get("/rules/history")
+async def rules_history(user_id: Annotated[str, Depends(get_current_user)],
+                        key: str | None = None, limit: int = 50) -> dict:
+    q = f"?limit={min(limit, 500)}" + (f"&key={_rule_key(key)}" if key else "")
+    return await _forward("GET", f"/rules/history{q}")
+
+
+@router.patch("/rules/{key}")
+async def rules_set(user_id: Annotated[str, Depends(get_current_user)], key: str,
+                    body: dict) -> dict:
+    """Cambia un parámetro. `changed_by` es el usuario del JWT, no lo que mande el cliente."""
+    payload = {"value": body.get("value"), "reason": body.get("reason", ""), "changed_by": user_id}
+    return await _forward("PATCH", f"/rules/{_rule_key(key)}", payload)
+
+
+def _rule_key(key: str) -> str:
+    import re
+    if not re.fullmatch(r"[a-z0-9_]{1,64}", key or ""):
+        raise HTTPException(status_code=422, detail="clave de regla inválida")
+    return key
+
+
 @router.get("/statement")
 async def statement(user_id: Annotated[str, Depends(get_current_user)], month: str) -> dict:
     """Estado de cuenta mensual (JSON). month = YYYY-MM."""
