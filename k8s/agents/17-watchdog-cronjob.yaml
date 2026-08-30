@@ -93,7 +93,8 @@ spec:
                     amael-ia/qdrant,
                     amael-ia/amael-agentic-deployment,
                     amael-ia/raphael-service,
-                    amael-ia/whatsapp-bridge-deployment
+                    amael-ia/whatsapp-bridge-deployment,
+                    hackathon/optionwright
                 # Un aviso por recurso cada 60 min — suficiente para no olvidarlo,
                 # poco para no volverse ruido que se aprende a ignorar.
                 - name: WATCHDOG_REALERT_MIN
