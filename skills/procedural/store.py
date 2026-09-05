@@ -320,10 +320,22 @@ def approve(name: str) -> dict:
 
 
 def reject(name: str) -> bool:
-    propuesta = get_skill(name, status="proposed")
-    if not propuesta:
+    """
+    Elimina la propuesta pendiente de `name`; si no hay propuesta, retira la
+    versión ACTIVA. Retirar una activa es el caso urgente: el 4-sep-2026 se
+    aprobó por error una skill que proponía `docker system prune --volumes`
+    por SSH en un nodo containerd, y `reject` respondía «no hay propuesta
+    pendiente» mientras la skill ya entraba al diagnóstico. Aprobar sigue
+    siendo la única forma de activar; quitar debe ser igual de directo.
+    """
+    skill = get_skill(name, status="proposed")
+    estado = "propuesta"
+    if not skill:
+        skill = get_skill(name, status="active")
+        estado = "activa"
+    if not skill:
         return False
     _qdrant(f"/collections/{COLLECTION}/points/delete?wait=true",
-            {"points": [propuesta["id"]]})
-    logger.info(f"[skills] Rechazada y eliminada: {name}")
+            {"points": [skill["id"]]})
+    logger.info(f"[skills] Rechazada y eliminada ({estado}): {name}")
     return True

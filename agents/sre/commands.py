@@ -438,7 +438,7 @@ def _cmd_skills(cmd: str) -> str:
       skills                 — lista propuestas y activas
       skill[s] show <name>   — SKILL.md completo de la propuesta (o activa)
       skill approve <name>   — activa la propuesta
-      skill reject <name>    — la elimina
+      skill reject <name>    — elimina la propuesta, o la activa si no hay propuesta
     """
     from skills.procedural import store
 
@@ -483,8 +483,8 @@ def _cmd_skills(cmd: str) -> str:
         extra = " (reemplazó a la versión activa anterior)" if r["replaced_active"] else ""
         return f"✅ Skill `{name}` aprobada y activa{extra}."
     if accion in ("reject", "rechazar"):
-        return (f"🗑 Propuesta `{name}` eliminada." if store.reject(name)
-                else f"No hay propuesta pendiente llamada `{name}`.")
+        return (f"🗑 Skill `{name}` eliminada (propuesta o activa)." if store.reject(name)
+                else f"No existe ninguna skill llamada `{name}`.")
     return f"Acción desconocida: {accion}. Usa show | approve | reject."
 
 

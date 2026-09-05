@@ -52,3 +52,20 @@ def test_briefing_no_se_cae_si_qdrant_falla(monkeypatch):
         raise RuntimeError("qdrant down")
     monkeypatch.setattr("skills.procedural.store.list_skills", _boom)
     assert briefing._pending_skills_section() == ""
+
+
+def test_reject_tambien_retira_una_skill_activa(monkeypatch):
+    """4-sep-2026: Ricardo aprobó por error una skill peligrosa (docker prune
+    --volumes por SSH) y `reject` contestó «no hay propuesta pendiente» porque
+    solo borraba propuestas. Una skill activa equivocada es MÁS urgente de
+    quitar que una propuesta: entra al diagnóstico."""
+    from skills.procedural import store
+
+    calls = []
+    monkeypatch.setattr(store, "get_skill",
+                        lambda name, status=None: {"id": "p1", "name": name, "status": "active"}
+                        if status == "active" else None)
+    monkeypatch.setattr(store, "_qdrant", lambda *a, **k: calls.append((a, k)) or {})
+
+    assert store.reject("sre-disk-exhaustion-predicted") is True
+    assert calls and "points/delete" in calls[0][0][0]
