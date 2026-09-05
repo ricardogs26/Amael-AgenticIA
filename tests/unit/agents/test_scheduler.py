@@ -195,6 +195,45 @@ async def test_run_job_espera_al_router_y_entrega(monkeypatch):
     assert entregado["texto"] == "hola"
 
 
+@pytest.mark.parametrize("intent", ["memory", "reminder"])
+async def test_run_job_recordatorio_plano_se_entrega_sin_dispatcher(monkeypatch, intent):
+    """
+    Caso real (job #1, 29 noches seguidas): el prompt «Recuerda estirar la
+    espalda» pasaba por el router, «recuerda» caía en `memory`, Zaphkiel
+    buscaba en el historial y el WhatsApp de las 20:00 decía «No encontré nada
+    en tu historial sobre 'estirar', 'espalda'». Un job cuyo prompt rutea a
+    memory/reminder no es una consulta: es el recordatorio mismo, y se
+    entrega tal cual — sin dispatcher ni LLM.
+    """
+    from agents.scheduler import runner
+
+    class _Router:
+        async def route(self, q):
+            from orchestration.agent_router import RoutingDecision
+            return RoutingDecision(intent=intent, agents=["x"],
+                                   confidence=1.0, routing_reason="test")
+
+    class _Dispatcher:
+        async def dispatch(self, **kw):
+            raise AssertionError("un recordatorio plano no debe ir al dispatcher")
+
+    entregado = {}
+    monkeypatch.setattr("orchestration.agent_router.AgentRouter", _Router)
+    monkeypatch.setattr("orchestration.agent_dispatcher.AgentDispatcher", _Dispatcher)
+    monkeypatch.setattr("interfaces.api.routers.chat._build_tools_map", lambda u: {})
+    monkeypatch.setattr(runner, "_deliver_whatsapp",
+                        lambda job, text: entregado.update(texto=text))
+
+    job = storage.Job(id=1, user_id="u@x.com", title="estiramiento espalda",
+                      prompt="Recuerda estirar la espalda",
+                      schedule="0 20 * * *", timezone="America/Mexico_City",
+                      delivery="whatsapp", enabled=True, one_shot=False,
+                      next_run_at=datetime.now(UTC))
+    await runner._run_job(job)
+    assert "estirar la espalda" in entregado["texto"]
+    assert "historial" not in entregado["texto"]
+
+
 async def test_run_job_sin_respuesta_truena(monkeypatch):
     """Un dispatcher que devuelve vacío debe registrarse como error, no como ok."""
     from agents.scheduler import runner

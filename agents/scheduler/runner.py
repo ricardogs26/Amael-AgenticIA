@@ -25,6 +25,10 @@ _TICK_SECONDS   = int(os.environ.get("SCHEDULER_TICK_SECONDS", "60"))
 # en el 14b; sin tope, un job colgado bloquearía el tick para siempre.
 _JOB_TIMEOUT_S  = int(os.environ.get("SCHEDULER_JOB_TIMEOUT_S", "300"))
 
+# Intents que, en el prompt de un job, no describen una tarea sino el
+# recordatorio en sí (ver _run_job).
+_INTENTS_RECORDATORIO_PLANO = frozenset({"memory", "reminder"})
+
 _scheduler = None
 
 
@@ -188,6 +192,20 @@ async def _run_job(job) -> None:
     from orchestration.agent_router import AgentRouter
 
     decision = await AgentRouter().route(job.prompt)
+
+    # Un prompt que rutea a `memory` o `reminder` no es una consulta que un
+    # agente pueda ejecutar: es el recordatorio mismo («Recuerda estirar la
+    # espalda»). Caso real: el job #1 pasó 29 noches por Zaphkiel y el
+    # WhatsApp de las 20:00 decía «No encontré nada en tu historial sobre
+    # 'estirar', 'espalda'». Se entrega tal cual, sin dispatcher ni LLM.
+    if decision.intent in _INTENTS_RECORDATORIO_PLANO:
+        logger.info(f"[scheduler] Job #{job.id} es recordatorio plano "
+                    f"(intent={decision.intent}); se entrega sin dispatcher.")
+        answer = f"⏰ {job.prompt.strip()}"
+        if job.delivery == "whatsapp":
+            _deliver_whatsapp(job, answer)
+        return
+
     result   = await AgentDispatcher().dispatch(
         question=job.prompt,
         user_id=job.user_id,
