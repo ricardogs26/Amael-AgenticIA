@@ -280,3 +280,30 @@ def test_is_anomaly_silenced(fake_redis, monkeypatch):
     assert is_anomaly_silenced(anomaly) is False
     fake_redis.set("sre:silent:amael-ia:demo-crashloop:CRASH_LOOP", "1")
     assert is_anomaly_silenced(anomaly) is True
+
+
+# ── skills: singular y plural son lo mismo ────────────────────────────────────
+
+def test_skill_show_acepta_plural_y_singular(fake_redis, monkeypatch):
+    """4-sep-2026: Ricardo escribió `/sre skills show <name>` (plural, como el
+    comando que lista) y recibió «Unknown command». La distinción skill/skills
+    no aporta nada al usuario: ambas formas resuelven igual."""
+    from agents.sre.commands import handle_command
+
+    monkeypatch.setattr(
+        "skills.procedural.store.get_skill",
+        lambda name, status=None: {"name": name, "text": "---\nname: x\n---\n## Cuándo usar\nSKILL_BODY"},
+    )
+    for cmd in ("skill show sre-oom-killed", "skills show sre-oom-killed"):
+        reply = handle_command(cmd)
+        assert "SKILL_BODY" in reply, cmd
+        assert "Unknown" not in reply, cmd
+
+
+def test_skills_sin_argumentos_lista(fake_redis, monkeypatch):
+    from agents.sre.commands import handle_command
+
+    monkeypatch.setattr("skills.procedural.store.list_skills",
+                        lambda status=None, scope=None: [])
+    assert "No hay skills" in handle_command("skills")
+    assert "No hay skills" in handle_command("skill")

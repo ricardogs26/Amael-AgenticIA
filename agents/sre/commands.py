@@ -436,14 +436,17 @@ def _cmd_skills(cmd: str) -> str:
     las aprueba aquí.
 
       skills                 — lista propuestas y activas
-      skill show <name>      — SKILL.md completo de la propuesta (o activa)
+      skill[s] show <name>   — SKILL.md completo de la propuesta (o activa)
       skill approve <name>   — activa la propuesta
       skill reject <name>    — la elimina
     """
     from skills.procedural import store
 
     partes = cmd.split()
-    if partes[0] == "skills":
+    # `skill` y `skills` son intercambiables: el plural nació para listar y el
+    # singular para actuar, pero el usuario no tiene por qué recordarlo
+    # (4-sep-2026: «/sre skills show <name>» → Unknown command).
+    if len(partes) == 1:
         propuestas = store.list_skills(status="proposed")
         activas    = store.list_skills(status="active")
         lineas = []
@@ -532,7 +535,7 @@ def handle_command(command: str, quoted_text: str | None = None) -> str:
             return _cmd_audit()
         if cmd in ("mode", "modo") or cmd.startswith(("mode ", "modo ")):
             return _cmd_mode(cmd)
-        if cmd == "skills" or cmd.startswith("skill "):
+        if cmd in ("skill", "skills") or cmd.startswith(("skill ", "skills ")):
             return _cmd_skills(cmd)
         return f"❓ Unknown command: '{cmd}'. Type `help` to see the options."
     except Exception as exc:
