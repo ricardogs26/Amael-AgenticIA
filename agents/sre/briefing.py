@@ -234,7 +234,33 @@ def generate_morning_briefing() -> str:
     except Exception:
         pass
 
+    # 7. Skills propuestas sin decisión (C1). El aviso puntual de la propuesta
+    # se perdió durante un mes (severity LOW filtrada); este recordatorio
+    # diario es la red de seguridad: mientras haya pendientes, se ven aquí.
+    seccion = _pending_skills_section()
+    if seccion:
+        lines.append(seccion)
+
     return "\n".join(lines)
+
+
+def _pending_skills_section() -> str:
+    """Línea del briefing con las skills propuestas que esperan aprobación.
+    Vacío si no hay ninguna o si Qdrant no responde — el briefing no se cae
+    por esto."""
+    try:
+        from skills.procedural import store
+        pendientes = store.list_skills(status="proposed")
+    except Exception:
+        return ""
+    if not pendientes:
+        return ""
+    nombres = ", ".join(f"`{s.get('name', '?')}`" for s in pendientes[:3])
+    extra = f" (+{len(pendientes) - 3})" if len(pendientes) > 3 else ""
+    return (
+        f"\n🧠 *Skills pendientes de aprobar:* {len(pendientes)} — {nombres}{extra}"
+        f"\n  Revisa con */sre skills* · aprueba con */sre skill approve <name>*"
+    )
 
 
 # ── Retrospectiva semanal (P7) ────────────────────────────────────────────────

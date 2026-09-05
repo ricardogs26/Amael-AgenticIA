@@ -78,7 +78,12 @@ def _notify_proposal(name: str, owner_agent: str, reason: str) -> None:
             f"Ver:      /sre skill show {name}\n"
             f"Aprobar:  /sre skill approve {name}\n"
             f"Rechazar: /sre skill reject {name}",
-            severity="LOW",
+            # HIGH, no LOW: notify_whatsapp_sre filtra por debajo de
+            # SRE_MIN_NOTIFY_SEVERITY (default HIGH). Con LOW, las 10 propuestas
+            # del 7–12-ago-2026 se guardaron y ningún aviso salió — Ricardo se
+            # enteró un mes después por /sre skills. Un aviso que pide una
+            # decisión humana no puede tener una severidad que el filtro tira.
+            severity="HIGH",
         )
     except Exception as exc:
         logger.warning(f"[skill_manage] aviso WhatsApp no salió: {exc}")
