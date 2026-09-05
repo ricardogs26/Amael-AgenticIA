@@ -43,15 +43,28 @@ def _to_str(v) -> str:
 # Singleton LLM para postmortems
 _postmortem_llm = None
 
+# Un solo timeout para el cliente HTTP y para la espera del hilo. Entre el
+# 5-ago y el 4-sep-2026 el cliente tenía 300 s y la espera 60 s escritos a
+# mano: en el 30b de CPU la generación tarda ~2 min, así que Ollama terminaba
+# el trabajo y el hilo ya había tirado el resultado — 5 remediaciones
+# verificadas, 0 postmortems. Con el 9b en GPU son segundos; 120 s es margen
+# para cuando la GPU está ocupada con un chat.
+POSTMORTEM_TIMEOUT_S = 120
+
 
 def _get_postmortem_llm():
     """
-    LLM para postmortems. Usa el tier profundo (ollama-cpu) cuando está
-    configurado: el postmortem se genera ~300 s después de una remediación, y
-    en la instancia GPU desalojaba al modelo interactivo justo cuando es más
-    probable que alguien esté preguntando qué pasó.
+    LLM para postmortems: el modelo interactivo (9b en GPU), NUNCA el tier
+    profundo.
 
-    Sin OLLAMA_DEEP_URL / LLM_DEEP_MODEL se comporta igual que antes.
+    El tier profundo (30b en ollama-cpu, 1.1.13) se probó aquí y salió mal
+    por dos lados: la generación tardaba más que el timeout de espera (ver
+    POSTMORTEM_TIMEOUT_S) y cargar 18 GB en RAM cada viernes a las 02:15
+    ponía el nodo al 91 % y disparaba NODE_MEMORY_HIGH — una alerta causada
+    por el propio informe del incidente anterior. Decisión de Ricardo
+    (4-sep-2026): el postmortem va al 9b local. El desalojo del modelo
+    interactivo que motivó el tier profundo ya no aplica: desde el 13-ago el
+    9b es el único causal en la GPU.
     """
     global _postmortem_llm
     if _postmortem_llm is None:
@@ -59,23 +72,14 @@ def _get_postmortem_llm():
 
         from config.settings import settings
 
-        if settings.ollama_deep_url and settings.llm_model_deep:
-            model, base_url, timeout = (
-                settings.llm_model_deep, settings.ollama_deep_url, 300,
-            )
-        else:
-            model, base_url, timeout = (
-                settings.llm_model, settings.ollama_base_url, 90,
-            )
-
         _postmortem_llm = OllamaLLM(
-            model=model,
-            base_url=base_url,
-            client_kwargs={"timeout": timeout},
+            model=settings.llm_model,
+            base_url=settings.ollama_base_url,
+            client_kwargs={"timeout": POSTMORTEM_TIMEOUT_S},
         )
         logger.info(
-            f"[reporter] LLM de postmortems: model={model} base_url={base_url} "
-            f"timeout={timeout}s"
+            f"[reporter] LLM de postmortems: model={settings.llm_model} "
+            f"base_url={settings.ollama_base_url} timeout={POSTMORTEM_TIMEOUT_S}s"
         )
     return _postmortem_llm
 
@@ -223,7 +227,7 @@ def _get_incident_by_key(incident_key: str) -> dict | None:
 
 
 def _generate_postmortem_sync(incident: dict) -> dict | None:
-    """Llama al LLM para generar un postmortem estructurado (timeout 60s)."""
+    """Llama al LLM para generar un postmortem estructurado (POSTMORTEM_TIMEOUT_S)."""
     import concurrent.futures
 
     prompt = (
@@ -237,7 +241,7 @@ def _generate_postmortem_sync(incident: dict) -> dict | None:
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
             future = ex.submit(_get_postmortem_llm().invoke, prompt)
-            raw = future.result(timeout=60)
+            raw = future.result(timeout=POSTMORTEM_TIMEOUT_S)
 
         import re
         match = re.search(r"\{.*\}", raw, re.DOTALL)
