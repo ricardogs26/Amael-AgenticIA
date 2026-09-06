@@ -201,6 +201,25 @@ def list_jobs(user_id: str, include_disabled: bool = True) -> list[Job]:
             return [_row_to_job(r) for r in cur.fetchall()]
 
 
+_STOPWORDS = frozenset({
+    "de", "del", "la", "el", "los", "las", "un", "una", "unos", "unas", "mi",
+    "mis", "que", "por", "para", "con", "sin", "en", "al", "lo", "le", "me",
+    "se", "tarea", "recordatorio", "recuerda", "recuérdame", "recuerdame",
+    "borra", "elimina", "cancela", "pausa", "reanuda",
+})
+
+
+def _raices(texto: str) -> set[str]:
+    """Raíces (5 primeras letras, sin acentos) de las palabras significativas
+    de `texto`: >3 letras y fuera de las stopwords. Determinista, sin LLM."""
+    import re
+    import unicodedata
+    plano = unicodedata.normalize("NFKD", texto.lower())
+    plano = "".join(c for c in plano if not unicodedata.combining(c))
+    return {w[:5] for w in re.findall(r"[a-zñ]+", plano)
+            if len(w) > 3 and w not in _STOPWORDS}
+
+
 def find_job(user_id: str, ref: str) -> Job | None:
     """
     Localiza un job por id numérico o por substring del título (case-insensitive).
@@ -211,7 +230,19 @@ def find_job(user_id: str, ref: str) -> Job | None:
     ref = ref.strip()
     if ref.isdigit():
         return next((j for j in jobs if j.id == int(ref)), None)
-    candidatos = [j for j in jobs if ref.lower() in j.title.lower()]
+    # 1) substring en título O prompt: el LLM parafrasea la referencia
+    #    («estirar la espalda» para el título «estiramiento espalda») pero el
+    #    prompt suele conservar las palabras del usuario. Caso real 5-sep-2026.
+    ref_l = ref.lower()
+    candidatos = [j for j in jobs
+                  if ref_l in j.title.lower() or ref_l in j.prompt.lower()]
+    # 2) sin substring: raíces de las palabras significativas de la referencia
+    #    contenidas todas en título+prompt («estiramientos» ~ «estirar»).
+    if not candidatos:
+        raices = _raices(ref)
+        if raices:
+            candidatos = [j for j in jobs
+                          if raices <= _raices(f"{j.title} {j.prompt}")]
     if len(candidatos) > 1:
         opciones = ", ".join(f"#{j.id} {j.title!r}" for j in candidatos)
         raise ValueError(f"Hay varias tareas que coinciden con {ref!r}: {opciones}")

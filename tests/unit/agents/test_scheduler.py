@@ -158,6 +158,33 @@ def test_find_job_ambiguo_lista_candidatos(monkeypatch):
     assert storage.find_job("u", "inexistente") is None
 
 
+def test_find_job_tolera_la_referencia_parafraseada(monkeypatch):
+    """
+    Caso real 2026-09-05: Ricardo escribió «borra el recordatorio de
+    estiramiento espalda», el LLM devolvió job_ref «estirar la espalda» y el
+    título guardado era «estiramiento espalda» → «No encontré ninguna tarea».
+    La referencia se busca también en el prompt y, si no hay substring, por
+    raíces de palabras significativas.
+    """
+    ahora = datetime.now(UTC)
+    jobs = [
+        storage.Job(id=1, user_id="u", title="estiramiento espalda",
+                    prompt="Recuerda estirar la espalda",
+                    schedule="0 20 * * *", timezone="UTC", delivery="whatsapp",
+                    enabled=True, one_shot=False, next_run_at=ahora),
+        storage.Job(id=2, user_id="u", title="resumen trader", prompt="resumen del trader",
+                    schedule="0 9 * * *", timezone="UTC", delivery="whatsapp",
+                    enabled=True, one_shot=False, next_run_at=ahora),
+    ]
+    monkeypatch.setattr(storage, "list_jobs", lambda u, include_disabled=True: jobs)
+    assert storage.find_job("u", "estirar la espalda").id == 1    # substring del prompt
+    assert storage.find_job("u", "estiramientos de espalda").id == 1  # solo raíces
+    assert storage.find_job("u", "la espalda").id == 1
+    assert storage.find_job("u", "trader").id == 2
+    assert storage.find_job("u", "el de la rodilla") is None
+    assert storage.find_job("u", "de la") is None   # puras stopwords no matchean todo
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 async def test_run_job_espera_al_router_y_entrega(monkeypatch):
