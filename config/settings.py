@@ -167,6 +167,10 @@ class Settings(BaseSettings):
     # El admin_phone se usa en el day-planner para notificaciones WhatsApp
     admin_phone: str = Field(default="521XXXXXXXXXX", alias="ADMIN_PHONE")
 
+    # ── Recepcionista de WhatsApp (números no registrados) ───────────────────
+    reception_max_per_phone: int = Field(default=15, alias="RECEPTION_MAX_PER_PHONE")
+    reception_max_per_day: int = Field(default=100, alias="RECEPTION_MAX_PER_DAY")
+
     # ── PostgreSQL ────────────────────────────────────────────────────────────
     postgres_host: str = Field(default="postgres-service", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")

@@ -355,6 +355,8 @@ def create_app() -> FastAPI:
     app.include_router(devops_router)       # POST /api/devops/ci-hook — webhook CI
     app.include_router(observability_router)  # GET /api/slo/status — P2-006
     app.include_router(trader_router)       # /api/trader/* — proxy a trader-service
+    from interfaces.api.routers.reception import router as reception_router
+    app.include_router(reception_router)    # /api/reception/* — recepcionista WhatsApp
 
     return app
 
@@ -374,6 +376,9 @@ def _ensure_schema() -> None:
         with conn.cursor() as cur:
             # ── P7-001: pg_trgm para búsqueda full-text eficiente ──────────
             cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+            # Leads del recepcionista de WhatsApp (richardx.dev)
+            from agents.reception.storage import _DDL as _LEADS_DDL
+            cur.execute(_LEADS_DDL)
 
             # ── Conversaciones y mensajes ──────────────────────────────────
             cur.execute("""

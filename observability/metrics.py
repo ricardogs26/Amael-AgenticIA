@@ -406,3 +406,15 @@ REGISTRY_HEALTH_STATUS = Gauge(
     "Estado de salud de cada componente registrado (1=ok, 0=fail)",
     ["component_type", "component_name"],   # type: skill | tool | storage
 )
+
+# ── Recepcionista de WhatsApp (leads desde richardx.dev) ──────────────────────
+RECEPTION_MESSAGES_TOTAL = Counter(
+    "amael_reception_messages_total",
+    "Mensajes de números no registrados atendidos por el recepcionista",
+    ["result"],   # replied | rate_limited | silenced | media | error
+)
+RECEPTION_LEADS_TOTAL = Counter(
+    "amael_reception_leads_total",
+    "Eventos del ciclo de vida de un lead",
+    ["event"],    # created | completed | approved | rejected
+)
