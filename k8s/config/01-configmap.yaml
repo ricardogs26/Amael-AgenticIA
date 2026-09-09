@@ -130,3 +130,6 @@ data:
 
   # Número WhatsApp del admin para notificaciones del day-planner
   ADMIN_PHONE: "5219993437008"
+  # Recepcionista de WhatsApp (números no registrados desde richardx.dev)
+  RECEPTION_MAX_PER_PHONE: "15"
+  RECEPTION_MAX_PER_DAY: "100"
