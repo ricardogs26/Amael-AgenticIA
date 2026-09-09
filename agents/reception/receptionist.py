@@ -212,8 +212,8 @@ def handle_message(phone: str, text: str, has_media: bool = False) -> str | None
     if lead is None:
         if not is_trigger(text):
             RECEPTION_MESSAGES_TOTAL.labels(result="ignored").inc()
-            logger.info(f"[reception] {phone} sin frase de activación — ignorado")
-            return None
+            logger.info(f"[reception] {phone} sin frase de activación — aviso de uso privado")
+            return prompts.REPLY_PRIVATE
         lead = storage.get_or_create(phone)
         RECEPTION_LEADS_TOTAL.labels(event="created").inc()
     if lead.status == "rejected":

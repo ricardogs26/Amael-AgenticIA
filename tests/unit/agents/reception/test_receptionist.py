@@ -180,9 +180,9 @@ def wired(monkeypatch, fake_redis):
 
 
 class TestHandle:
-    def test_sin_lead_y_sin_frase_se_ignora(self, wired):
+    def test_sin_lead_y_sin_frase_aviso_privado(self, wired):
         st, calls = wired
-        assert receptionist.handle_message("5215550001111", "hola, ¿quién eres?") is None
+        assert receptionist.handle_message("5215550001111", "hola, ¿quién eres?") == prompts.REPLY_PRIVATE
         assert calls["llm"] == 0 and st.msgs == [] and not st.exists
 
     def test_la_frase_abre_el_lead_y_luego_todo_pasa(self, wired):

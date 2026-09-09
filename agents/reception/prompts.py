@@ -43,4 +43,5 @@ def build_system(captured: dict) -> str:
 REPLY_FALLBACK  = "Gracias por escribir. Le paso tu mensaje a Ricardo y él te contacta."
 REPLY_LIMIT     = "Ya tengo tu mensaje. Ricardo te contactará directamente; gracias por la paciencia."
 REPLY_MEDIA     = "Por aquí solo puedo atender texto. ¿Me cuentas en un mensaje qué necesitas?"
+REPLY_PRIVATE   = "⚠️ Este asistente es de uso privado. Contacta al administrador para obtener acceso."
 REPLY_ERROR     = "Ahora mismo no puedo atenderte. Intenta de nuevo en unos minutos."

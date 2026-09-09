@@ -147,8 +147,8 @@ comando pide confirmación extra: escribirlo por WhatsApp es la confirmación.
 
 Un número sin lead solo abre conversación si su mensaje contiene «hola amael»
 y «richardx.dev» tras normalizar (minúsculas, sin acentos ni puntuación).
-Cualquier otro mensaje de un desconocido se ignora en silencio: sin respuesta
-no hay señal para spam. Con lead existente todo mensaje pasa.
+Cualquier otro mensaje de un desconocido recibe el aviso fijo «Este asistente es
+de uso privado…» sin LLM (decisión de Ricardo, 1.18.3; 1.18.2 lo ignoraba en silencio). Con lead existente todo mensaje pasa.
 
 ## 4. Guardarraíles (todos en código)
 
