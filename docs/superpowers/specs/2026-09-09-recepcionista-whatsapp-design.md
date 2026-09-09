@@ -143,6 +143,13 @@ y `status='active'`; si no, responde «Comando no disponible» sin más detalle.
 Errores (id inexistente, sin texto en `responder`) devuelven mensaje corto. Ningún
 comando pide confirmación extra: escribirlo por WhatsApp es la confirmación.
 
+## 3.1 Activación (añadido tras la prueba de Ricardo, 2026-09-09)
+
+Un número sin lead solo abre conversación si su mensaje contiene «hola amael»
+y «richardx.dev» tras normalizar (minúsculas, sin acentos ni puntuación).
+Cualquier otro mensaje de un desconocido se ignora en silencio: sin respuesta
+no hay señal para spam. Con lead existente todo mensaje pasa.
+
 ## 4. Guardarraíles (todos en código)
 
 | Límite | Valor | Mecanismo | Respuesta al exceder |

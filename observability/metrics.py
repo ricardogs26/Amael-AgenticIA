@@ -411,7 +411,7 @@ REGISTRY_HEALTH_STATUS = Gauge(
 RECEPTION_MESSAGES_TOTAL = Counter(
     "amael_reception_messages_total",
     "Mensajes de números no registrados atendidos por el recepcionista",
-    ["result"],   # replied | rate_limited | silenced | media | error
+    ["result"],   # replied | rate_limited | silenced | ignored | media | error
 )
 RECEPTION_LEADS_TOTAL = Counter(
     "amael_reception_leads_total",

@@ -125,14 +125,34 @@ class TestLimits:
 
 # ── handle_message (storage y LLM mockeados) ──────────────────────────────────
 
+class TestTrigger:
+    @pytest.mark.parametrize("txt", [
+        "Hola Amael, vengo de richardx.dev",
+        "hola amael vengo de richardx.dev",
+        "HOLA AMAEL, VENGO DE RICHARDX.DEV",
+        "Holá Amaél, vengo de richardx.dev!!",
+        "Hola Amael, vengo de richardx.dev — quiero platicar de RAG",
+    ])
+    def test_acepta_variantes_del_enlace(self, txt):
+        assert receptionist.is_trigger(txt)
+
+    @pytest.mark.parametrize("txt", ["hola", "Hola Amael", "vengo de richardx.dev", "", "Soy Juan de Acme"])
+    def test_rechaza_lo_demas(self, txt):
+        assert not receptionist.is_trigger(txt)
+
+
 class _Store:
     def __init__(self, lead):
+        self.exists = False
         self.lead = lead
         self.msgs = []
         self.updates = {}
         self.count = lead.message_count
         self.notified = False
-    def get_or_create(self, phone): return self.lead
+    def get_or_create(self, phone):
+        self.exists = True
+        return self.lead
+    def get_by_phone(self, phone): return self.lead if self.exists else None
     def add_message(self, lid, role, content): self.msgs.append((role, content))
     def recent_messages(self, lid, n=8): return list(self.msgs)[-n:]
     def bump_count(self, lid):
@@ -146,7 +166,7 @@ class _Store:
 def wired(monkeypatch, fake_redis):
     lead = _lead()
     st = _Store(lead)
-    for name in ("get_or_create", "add_message", "recent_messages", "bump_count",
+    for name in ("get_or_create", "get_by_phone", "add_message", "recent_messages", "bump_count",
                  "update_fields", "mark_notified"):
         monkeypatch.setattr(storage, name, getattr(st, name))
     calls = {"llm": 0, "admin": []}
@@ -160,8 +180,21 @@ def wired(monkeypatch, fake_redis):
 
 
 class TestHandle:
+    def test_sin_lead_y_sin_frase_se_ignora(self, wired):
+        st, calls = wired
+        assert receptionist.handle_message("5215550001111", "hola, ¿quién eres?") is None
+        assert calls["llm"] == 0 and st.msgs == [] and not st.exists
+
+    def test_la_frase_abre_el_lead_y_luego_todo_pasa(self, wired):
+        st, calls = wired
+        assert receptionist.handle_message("5215550001111", "Hola Amael, vengo de richardx.dev") == "Hola, soy Amael"
+        assert st.exists
+        assert receptionist.handle_message("5215550001111", "soy Juan") == "Hola, soy Amael"
+        assert calls["llm"] == 2
+
     def test_flujo_completo_avisa_una_vez(self, wired):
         st, calls = wired
+        st.exists = True
         reply = receptionist.handle_message("5215550001111", "Hola, soy Juan de Acme, quiero RAG")
         assert reply == "Hola, soy Amael"
         assert st.updates == {"name": "Juan", "company": "Acme", "reason": "RAG"}
@@ -171,23 +204,27 @@ class TestHandle:
 
     def test_silenciado_no_llama_llm(self, wired, fake_redis):
         st, calls = wired
+        st.exists = True
         receptionist.silence("5215550001111")
         assert receptionist.handle_message("5215550001111", "hola") is None
         assert calls["llm"] == 0
 
     def test_rechazado_no_contesta(self, wired):
         st, calls = wired
+        st.exists = True
         st.lead.status = "rejected"
         assert receptionist.handle_message("5215550001111", "hola") is None
         assert calls["llm"] == 0
 
     def test_media_sin_texto(self, wired):
         st, calls = wired
+        st.exists = True
         assert receptionist.handle_message("5215550001111", "", has_media=True) == prompts.REPLY_MEDIA
         assert calls["llm"] == 0
 
     def test_tope_no_llama_llm(self, wired):
         st, calls = wired
+        st.exists = True
         for _ in range(3):
             receptionist.handle_message("5215550001111", "hola")
         assert calls["llm"] == 3
@@ -196,6 +233,7 @@ class TestHandle:
 
     def test_llm_caido_error_sin_decision(self, wired, monkeypatch):
         st, calls = wired
+        st.exists = True
         def boom(*a): raise ConnectionError("ollama")
         monkeypatch.setattr(receptionist, "_ask_llm", boom)
         assert receptionist.handle_message("5215550001111", "hola") == prompts.REPLY_ERROR
@@ -203,6 +241,7 @@ class TestHandle:
 
     def test_texto_se_trunca_a_500(self, wired):
         st, calls = wired
+        st.exists = True
         receptionist.handle_message("5215550001111", "a" * 2000)
         assert len(st.msgs[0][1]) == 500
 

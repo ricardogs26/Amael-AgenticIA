@@ -89,6 +89,7 @@ _SQL_UPSERT = (
     f"RETURNING {_COLS}"
 )
 _SQL_GET       = f"SELECT {_COLS} FROM leads WHERE id = %s"
+_SQL_GET_PHONE = f"SELECT {_COLS} FROM leads WHERE phone = %s"
 _SQL_LIST_OPEN = f"SELECT {_COLS} FROM leads WHERE status = 'open' ORDER BY updated_at DESC LIMIT %s"
 _SQL_SET = {  # columna → sentencia fija; nada se concatena desde fuera
     "name":    "UPDATE leads SET name = %s, updated_at = now() WHERE id = %s",
@@ -106,6 +107,14 @@ def get_or_create(phone: str) -> Lead:
         with conn.cursor() as cur:
             cur.execute(_SQL_UPSERT, (phone,))
             return _row(cur.fetchone())
+
+
+def get_by_phone(phone: str) -> Lead | None:
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(_SQL_GET_PHONE, (phone,))
+            r = cur.fetchone()
+            return _row(r) if r else None
 
 
 def get(lead_id: int) -> Lead | None:

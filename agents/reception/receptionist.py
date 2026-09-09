@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import unicodedata
 from datetime import UTC, datetime
 
 from agents.reception import prompts, storage
@@ -30,6 +32,25 @@ _K_SILENCED   = "reception:silenced:{phone}"
 
 
 # ── Funciones puras ───────────────────────────────────────────────────────────
+
+def _fold(text: str) -> str:
+    """minúsculas, sin acentos, sin puntuación, espacios colapsados."""
+    t = unicodedata.normalize("NFKD", text or "")
+    t = "".join(ch for ch in t if not unicodedata.combining(ch)).lower()
+    t = re.sub(r"[^a-z0-9. ]+", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def is_trigger(text: str) -> bool:
+    """
+    El enlace del sitio manda «Hola Amael, vengo de richardx.dev». Solo esa
+    frase (mayúsculas/acentos/puntuación aparte) abre una conversación con un
+    número desconocido; cualquier otro mensaje se ignora en silencio. Sin esto
+    el bot quedaba abierto a cualquiera que tuviera el número.
+    """
+    f = _fold(text)
+    return "hola amael" in f and "richardx.dev" in f
+
 
 def parse_llm_json(raw: str) -> dict:
     """
@@ -187,12 +208,17 @@ def handle_message(phone: str, text: str, has_media: bool = False) -> str | None
         RECEPTION_MESSAGES_TOTAL.labels(result="silenced").inc()
         return None
 
-    lead = storage.get_or_create(phone)
+    lead = storage.get_by_phone(phone)
+    if lead is None:
+        if not is_trigger(text):
+            RECEPTION_MESSAGES_TOTAL.labels(result="ignored").inc()
+            logger.info(f"[reception] {phone} sin frase de activación — ignorado")
+            return None
+        lead = storage.get_or_create(phone)
+        RECEPTION_LEADS_TOTAL.labels(event="created").inc()
     if lead.status == "rejected":
         RECEPTION_MESSAGES_TOTAL.labels(result="silenced").inc()
         return None
-    if lead.message_count == 0:
-        RECEPTION_LEADS_TOTAL.labels(event="created").inc()
 
     if has_media and not text:
         RECEPTION_MESSAGES_TOTAL.labels(result="media").inc()
