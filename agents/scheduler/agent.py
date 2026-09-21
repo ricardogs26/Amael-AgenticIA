@@ -98,6 +98,23 @@ _FOLLOWUP_ANSWERED_NOTE = (
 )
 
 
+# chat.py antepone el bloque de perfil y la memoria episódica a lo que manda a
+# CUALQUIER agente, y cierra con este encabezado. Cassiel solo traduce una
+# petición a JSON: ese contexto no le aporta y sí le estorba — el marcador de
+# ronda dejaba de estar al inicio (el tope de rondas nunca contaba) y el 9b
+# aplanaba el JSON. Mantener en sincronía con `dispatch_q` en chat.py.
+_CHAT_QUESTION_HEADER = "[Pregunta actual]\n"
+
+
+def _unwrap_chat_context(query: str) -> str:
+    """Pure. Se queda con lo que va después del último «[Pregunta actual]»;
+    sin ese encabezado devuelve el texto tal cual."""
+    idx = query.rfind(_CHAT_QUESTION_HEADER)
+    if idx == -1:
+        return query
+    return query[idx + len(_CHAT_QUESTION_HEADER):].strip()
+
+
 def _strip_followup_wrapper(text: str) -> str:
     """Pure. Si `text` contiene el wrapper de contexto de Cassiel — una vez o
     anidado varias veces, en cualquier posición — se queda solo con el
@@ -211,7 +228,7 @@ class CassielAgent(BaseAgent):
 
         from agents.scheduler import storage
 
-        query, prev_round = _extract_followup_round(query)
+        query, prev_round = _extract_followup_round(_unwrap_chat_context(query))
         self._last_query = query
         self._next_followup_round = prev_round + 1
         tz_name = storage.user_timezone(user_email)
@@ -354,7 +371,14 @@ class CassielAgent(BaseAgent):
 
         try:
             if action == "task_create":
-                t = parsed.get("task") or {}
+                t = parsed.get("task")
+                if not isinstance(t, dict) or not str(t.get("title") or "").strip():
+                    # El 9b a veces aplana el esquema: `title`, `category`…
+                    # arriba en vez de dentro de `task`. El dato está — leerlo
+                    # de ahí en vez de volver a preguntar (loop del 19-sep).
+                    anidado = t if isinstance(t, dict) else {}
+                    t = {**parsed, **{k: v for k, v in anidado.items()
+                                      if v not in (None, "")}}
                 titulo = str(t.get("title") or "").strip()
                 if not titulo:
                     if not self._set_followup(user_email, self._last_query, self._next_followup_round):

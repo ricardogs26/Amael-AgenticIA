@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 
@@ -166,12 +167,21 @@ def sorted_pending(tasks: list[Task], today: date) -> list[Task]:
     return sorted(tasks, key=lambda t: sort_key(t, today))
 
 
+_ID_REF_RE = re.compile(r"^#?\s*(\d+)\b\s*(.*)$", re.DOTALL)
+
+
 def match_tasks(tasks: list[Task], ref: str) -> list[Task]:
     """Busca tareas por ID numérico exacto o substring case-insensitive en
     título. Devuelve lista (0, 1, o más matches — ambigüedad resuelta arriba)."""
     ref = ref.strip()
-    if ref.isdigit():
-        return [t for t in tasks if t.id == int(ref)]
+    # «#1», «#1 Recomendación PS5» o «1 Recomendación…»: así imprime task_list
+    # los pendientes y así los devuelve el usuario (y el LLM). '#1'.isdigit()
+    # es False, y sin esto se buscaba «#1» como texto dentro del título.
+    m = _ID_REF_RE.match(ref)
+    if m:
+        por_id = [t for t in tasks if t.id == int(m.group(1))]
+        if por_id or not m.group(2):
+            return por_id
     return [t for t in tasks if ref.lower() in t.title.lower()]
 
 

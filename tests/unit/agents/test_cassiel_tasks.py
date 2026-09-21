@@ -450,3 +450,78 @@ class TestRenderToolOutput:
     def test_str_normal_intacto(self):
         from orchestration.agent_dispatcher import _render_tool_output
         assert _render_tool_output("Todo en orden ✅") == "Todo en orden ✅"
+
+
+class TestLoopCafetera:
+    """Caso real del 19-sep-2026: «agrega como pendiente reparar la cafetera
+    Breville» → «¿Qué tarea anoto?» 5 veces seguidas. Tres fallas encadenadas,
+    reproducidas contra el 9b con el prompt real:
+
+    1. chat.py antepone el bloque de perfil/memoria y «[Pregunta actual]» a lo
+       que recibe Cassiel: el marcador de ronda ya no queda al inicio, el regex
+       `^` no lo ve y el tope de 2 rondas NUNCA cuenta.
+    2. Con ese envoltorio el 9b aplana el JSON (`title` arriba, no `task.title`)
+       y el código solo leía `task.title` → volvía a preguntar teniendo el dato.
+    3. «Elimina pendiente #1»: '#1'.isdigit() es False → buscaba «#1» como
+       texto dentro del título.
+    """
+
+    PERFIL = ("Contexto del usuario (no lo cites ni menciones; úsalo solo si es "
+              "relevante):\n- prefiere respuestas cortas y directas")
+
+    def _envuelto(self, q):
+        return f"{self.PERFIL}\n\n[Pregunta actual]\n{q}"
+
+    def test_unwrap_se_queda_con_la_pregunta_actual(self):
+        from agents.scheduler.agent import _unwrap_chat_context
+        assert _unwrap_chat_context(self._envuelto("anota: comprar café")) == \
+            "anota: comprar café"
+
+    def test_unwrap_sin_envoltorio_no_cambia(self):
+        from agents.scheduler.agent import _unwrap_chat_context
+        assert _unwrap_chat_context("anota: comprar café") == "anota: comprar café"
+
+    def test_ronda_se_detecta_aunque_venga_envuelta(self):
+        from agents.scheduler.agent import (
+            _extract_followup_round,
+            _unwrap_chat_context,
+            merge_followup,
+        )
+        merged = merge_followup("Reparar cafetera Breville",
+                                {"q": "agrega como pendiente…", "n": 2})
+        limpio, ronda = _extract_followup_round(
+            _unwrap_chat_context(self._envuelto(merged)))
+        assert ronda == 2
+        assert "CASSIEL_FOLLOWUP" not in limpio and "prefiere respuestas" not in limpio
+
+    def test_task_create_aplanado_por_el_llm_se_anota(self, monkeypatch):
+        from agents.scheduler.agent import CassielAgent
+        agent = CassielAgent.__new__(CassielAgent)
+        creado = {}
+
+        def fake_create(user_id, title, **kw):
+            creado.update(title=title, **kw)
+            return _task(id=2, title=title)
+        monkeypatch.setattr(ts, "create_task", fake_create)
+        # JSON textual que devolvió el 9b en la reproducción
+        out = agent._apply(
+            {"action": "task_create", "title": "Reparar cafetera Breville",
+             "description": "", "category": "personal", "priority": "media",
+             "estimated_minutes": 30, "due_date": None, "needs_scheduling": False},
+            "u@x.com", "America/Mexico_City",
+        )
+        assert creado["title"] == "Reparar cafetera Breville"
+        assert creado["estimated_minutes"] == 30
+        assert "Anotada #2" in out
+
+    @pytest.mark.parametrize("ref", ["#1", " #1 ", "#1 Recomendación PS5 Regis",
+                                     "1 Recomendación PS5 Regis"])
+    def test_ref_con_gato_empareja_por_id(self, ref):
+        tareas = [_task(id=1, title="Recomendación PS5 Regis"),
+                  _task(id=12, title="otra")]
+        assert [t.id for t in ts.match_tasks(tareas, ref)] == [1]
+
+    def test_titulo_que_empieza_con_numero_sigue_por_texto(self):
+        # «3 cotizaciones» no es la tarea #3: si el id no existe, cae a substring
+        tareas = [_task(id=8, title="pedir 3 cotizaciones del techo")]
+        assert [t.id for t in ts.match_tasks(tareas, "3 cotizaciones")] == [8]
