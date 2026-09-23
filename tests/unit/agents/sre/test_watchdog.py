@@ -303,3 +303,89 @@ def test_una_caida_real_sigue_mandando_a_mirar_pods(monkeypatch):
 
     assert "caído" in enviado["text"]
     assert "kubectl get pods" in enviado["text"]
+
+
+# ── Backups (23-sep-2026: 12 días fallando sin aviso) ───────────────────────────
+
+from datetime import UTC, datetime, timedelta  # noqa: E402
+
+_AHORA = datetime(2026, 9, 23, 14, 0, tzinfo=UTC)
+
+
+def _cj(last_ok, suspend=False):
+    return SimpleNamespace(
+        spec=SimpleNamespace(suspend=suspend),
+        status=SimpleNamespace(last_successful_time=last_ok),
+    )
+
+
+def _batch(cj):
+    api = MagicMock()
+    api.read_namespaced_cron_job.return_value = cj
+    return api
+
+
+def test_backup_reciente_no_reporta():
+    api = _batch(_cj(_AHORA - timedelta(hours=3)))
+    assert watchdog.check_backup(api, "amael-ia", "postgres-backup", now=_AHORA) is None
+
+
+def test_backup_viejo_se_reporta_con_horas():
+    """El caso real: último éxito el 11-sep, todas las corridas después fallaron."""
+    api = _batch(_cj(datetime(2026, 9, 11, 11, 0, tzinfo=UTC)))
+
+    problem = watchdog.check_backup(api, "amael-ia", "postgres-backup", now=_AHORA)
+
+    assert "SIN BACKUP EXITOSO" in problem
+    assert "291 h" in problem
+    assert "`amael-ia/postgres-backup`" in problem
+
+
+def test_backup_justo_en_el_umbral_no_reporta(monkeypatch):
+    monkeypatch.setattr(watchdog, "_BACKUP_MAX_H", 26.0)
+    api = _batch(_cj(_AHORA - timedelta(hours=26)))
+    assert watchdog.check_backup(api, "amael-ia", "qdrant-backup", now=_AHORA) is None
+
+
+def test_backup_sin_ningun_exito_se_reporta():
+    api = _batch(SimpleNamespace(spec=SimpleNamespace(suspend=False),
+                                 status=SimpleNamespace(last_successful_time=None)))
+    assert "SIN NINGÚN BACKUP" in watchdog.check_backup(api, "amael-ia", "qdrant-backup", now=_AHORA)
+
+
+def test_backup_suspendido_se_reporta():
+    """Suspendido = no hay respaldo, aunque el último éxito sea reciente."""
+    api = _batch(_cj(_AHORA - timedelta(hours=1), suspend=True))
+    assert "SUSPENDIDO" in watchdog.check_backup(api, "amael-ia", "postgres-backup", now=_AHORA)
+
+
+def test_backup_inexistente_se_reporta():
+    api = MagicMock()
+    exc = Exception("not found")
+    exc.status = 404
+    api.read_namespaced_cron_job.side_effect = exc
+    assert "NO EXISTE" in watchdog.check_backup(api, "amael-ia", "postgres-backup", now=_AHORA)
+
+
+def test_la_clave_de_dedup_de_backup_sale_del_aviso():
+    api = _batch(_cj(_AHORA - timedelta(days=5)))
+    problem = watchdog.check_backup(api, "amael-ia", "qdrant-backup", now=_AHORA)
+    assert problem.split("`")[1] == "amael-ia/qdrant-backup"
+
+
+def test_el_whatsapp_incluye_como_reintentar_backup(monkeypatch):
+    import requests
+
+    enviado = {}
+
+    def _post(url, json, timeout):
+        enviado.update(json)
+        return SimpleNamespace(status_code=200, text="")
+
+    monkeypatch.setattr(requests, "post", _post)
+    monkeypatch.setattr(watchdog, "_PHONE", "5210000000000")
+
+    watchdog.send_alert(["`amael-ia/postgres-backup` SIN BACKUP EXITOSO hace 291 h."])
+
+    assert "--from=cronjob" in enviado["text"]
+    assert "unseal" not in enviado["text"]

@@ -11,9 +11,9 @@ Este módulo es deliberadamente **independiente** de Raphael:
   - Corre como CronJob aparte, en su propio pod y con su propia ServiceAccount.
   - Si Raphael está caído, en CrashLoop o mudo, esto sigue avisando.
 
-Comprueba tres cosas y manda un WhatsApp si fallan: que los deployments críticos
-tengan al menos una réplica disponible, que Vault no esté sellado, y que el PAT
-de GitHub siga vivo. Nada más — cada función extra es una forma nueva de que el
+Comprueba cuatro cosas y manda un WhatsApp si fallan: que los deployments
+críticos tengan al menos una réplica disponible, que Vault no esté sellado, que
+el PAT de GitHub siga vivo y que los backups hayan corrido bien hace poco. Nada más — cada función extra es una forma nueva de que el
 vigilante falle en silencio.
 
 Lo de Vault entró el 7-ago-2026. Un pod de Vault que reinicia arranca SELLADO
@@ -34,6 +34,14 @@ efímero entra y sale de 0 réplicas por diseño, así que vigilarle las réplic
 sería puro ruido. Lo que se vigila es la credencial, y con anticipación: el
 valor está en avisar ANTES del 401, no en confirmarlo cinco días después.
 
+Lo de los backups entró el 23-sep-2026. Los CronJobs de postgres y qdrant
+descargaban `mc` de dl.min.io en cada corrida; MinIO retiró esa descarga (410
+Gone) y los respaldos fallaron del 12 al 23-sep sin que nadie lo supiera: las
+PrometheusRule de `08-backup-alerts.yaml` se evalúan pero Alertmanager está
+apagado, así que no avisan a nadie. Un Job fallido no pinta rojo ningún
+Deployment. Se lee `status.lastSuccessfulTime` del CronJob — cubre también a
+los jobs lanzados a mano con `--from=cronjob`.
+
 Uso:
     python -m agents.sre.watchdog
 
@@ -44,6 +52,8 @@ Env vars:
     WATCHDOG_GITHUB_TOKEN  PAT a validar ("" desactiva el chequeo)
     WATCHDOG_GITHUB_API    API de GitHub (default https://api.github.com)
     WATCHDOG_GH_EXPIRY_DAYS  días de anticipación del aviso de expiración (7)
+    WATCHDOG_BACKUPS       CSV `namespace/cronjob` de backups ("" desactiva)
+    WATCHDOG_BACKUP_MAX_HOURS  antigüedad máxima del último backup exitoso (26)
     OWNER_PHONE            teléfono destino
     WHATSAPP_BRIDGE_URL    bridge (default http://whatsapp-bridge-service:3000)
 
@@ -73,6 +83,11 @@ _DEFAULT_TARGETS = (
 )
 
 _TARGETS      = os.environ.get("WATCHDOG_DEPLOYMENTS", _DEFAULT_TARGETS)
+_BACKUPS      = os.environ.get(
+    "WATCHDOG_BACKUPS", "amael-ia/postgres-backup,amael-ia/qdrant-backup"
+)
+# Diarios: 26 h deja margen a un job lento sin esperar dos días para avisar.
+_BACKUP_MAX_H = float(os.environ.get("WATCHDOG_BACKUP_MAX_HOURS", "26"))
 _REALERT_MIN  = int(os.environ.get("WATCHDOG_REALERT_MIN", "60"))
 _VAULT_ADDR   = os.environ.get("WATCHDOG_VAULT_ADDR",
                                "http://vault.vault.svc.cluster.local:8200")
@@ -164,6 +179,39 @@ def check_vault() -> str | None:
             f"`vault/vault-0` SELLADO ({progreso}/{umbral} llaves). "
             "Los secretos de Google no se pueden leer: el brief diario y "
             "productivity-service van a fallar."
+        )
+    return None
+
+
+def check_backup(batch_v1, namespace: str, name: str, now=None) -> str | None:
+    """
+    ¿El CronJob de backup tuvo un éxito en las últimas `_BACKUP_MAX_H` horas?
+
+    Se mira el último ÉXITO, no el último intento: un job que corre a diario y
+    falla a diario se ve «activo» y es justo el caso del 12–23-sep-2026.
+    """
+    from datetime import datetime
+
+    try:
+        cj = batch_v1.read_namespaced_cron_job(name, namespace)
+    except Exception as exc:
+        if getattr(exc, "status", None) == 404:
+            return f"`{namespace}/{name}` (backup) NO EXISTE en el clúster."
+        return f"`{namespace}/{name}` (backup) no se pudo consultar: {exc}"
+
+    if getattr(cj.spec, "suspend", False):
+        return f"`{namespace}/{name}` SUSPENDIDO: no se están haciendo backups."
+
+    last_ok = cj.status.last_successful_time if cj.status else None
+    if last_ok is None:
+        return f"`{namespace}/{name}` SIN NINGÚN BACKUP EXITOSO registrado."
+
+    now = now or datetime.now(UTC)
+    horas = (now - last_ok).total_seconds() / 3600
+    if horas > _BACKUP_MAX_H:
+        return (
+            f"`{namespace}/{name}` SIN BACKUP EXITOSO hace {horas:.0f} h "
+            f"(último: {last_ok:%Y-%m-%d %H:%M} UTC)."
         )
     return None
 
@@ -265,6 +313,7 @@ def send_alert(problems: list[str]) -> bool:
 
     hay_vault = any("vault/" in p for p in problems)
     hay_github = any("github/" in p for p in problems)
+    hay_backup = any("backup" in p.split("`")[1] for p in problems if "`" in p)
     # Un PAT que expira la semana que viene no es una caída. Titularlo como tal
     # (y mandar a mirar pods que están sanos) es exactamente el ruido que hace
     # que un aviso se aprenda a ignorar.
@@ -301,6 +350,12 @@ def send_alert(problems: list[str]) -> bool:
             "Luego `kubectl rollout restart deploy/github-runner-deployment "
             "-n amael-ia`."
         )
+    if hay_backup:
+        text += (
+            "\n\nPara los backups: `kubectl get jobs -n amael-ia | grep backup` "
+            "y los logs del último fallido; para reintentar, "
+            "`kubectl create job <nombre>-manual --from=cronjob/<cronjob> -n amael-ia`."
+        )
     try:
         import requests
 
@@ -326,6 +381,7 @@ def main() -> int:
     except Exception:
         config.load_kube_config()
     apps_v1 = client.AppsV1Api()
+    batch_v1 = client.BatchV1Api()
 
     targets = _parse_targets(_TARGETS)
     logger.info(f"Vigilando {len(targets)} deployments críticos.")
@@ -352,6 +408,14 @@ def main() -> int:
         problems.append(gh_problem)
     elif _GH_TOKEN:
         logger.info("OK — github pat (válido)")
+
+    for ns, name in _parse_targets(_BACKUPS):
+        backup_problem = check_backup(batch_v1, ns, name)
+        if backup_problem:
+            logger.error(backup_problem)
+            problems.append(backup_problem)
+        else:
+            logger.info(f"OK — backup {ns}/{name}")
 
     if not problems:
         logger.info("Todos los deployments críticos están sanos.")

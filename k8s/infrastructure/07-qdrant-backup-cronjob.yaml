@@ -35,6 +35,17 @@ spec:
             app: qdrant-backup
         spec:
           restartPolicy: OnFailure
+          # mc viene de una imagen fija en el registry privado (espejo de
+          # quay.io/minio/mc). Antes se descargaba de dl.min.io en cada corrida;
+          # desde ~12-sep-2026 responde 410 Gone y los backups fallaron 12 días
+          # sin que nadie lo notara.
+          initContainers:
+          - name: mc
+            image: registry.richardx.dev/minio-mc:RELEASE.2025-08-13T08-35-41Z
+            command: ["cp", "/usr/bin/mc", "/tools/mc"]
+            volumeMounts:
+            - name: tools
+              mountPath: /tools
           containers:
           - name: qdrant-backup
             image: alpine:3.20
@@ -52,9 +63,7 @@ spec:
               WORKDIR="/tmp/qdrant_${TIMESTAMP}"
               mkdir -p "${WORKDIR}"
 
-              # Instalar y configurar mc
-              wget -qO /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc
-              chmod +x /usr/local/bin/mc
+              export PATH="/tools:$PATH"
               mc alias set minio "${MINIO_URL}" "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" --api S3v4
               mc mb --ignore-existing "minio/${BUCKET}"
 
@@ -98,6 +107,9 @@ spec:
                 secretKeyRef:
                   name: amael-secrets
                   key: MINIO_ROOT_PASSWORD
+            volumeMounts:
+            - name: tools
+              mountPath: /tools
             resources:
               requests:
                 cpu: "100m"
@@ -105,3 +117,6 @@ spec:
               limits:
                 cpu: "500m"
                 memory: "256Mi"
+          volumes:
+          - name: tools
+            emptyDir: {}
