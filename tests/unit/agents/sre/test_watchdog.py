@@ -389,3 +389,72 @@ def test_el_whatsapp_incluye_como_reintentar_backup(monkeypatch):
 
     assert "--from=cronjob" in enviado["text"]
     assert "unseal" not in enviado["text"]
+
+
+# ── Dedup solo tras envío exitoso ───────────────────────────────────────────
+# 24-sep-2026: Chaos Mesh mató al bridge a las 02:00, el watchdog no pudo
+# mandar el aviso (Connection refused) y aun así marcó el dedup — el reintento
+# del Job y las corridas de la siguiente hora se quedaron callados.
+
+
+class _FakeRedis:
+    def __init__(self):
+        self.data = {}
+
+    def exists(self, key):
+        return int(key in self.data)
+
+    def set(self, key, value, ex=None, nx=False):
+        if nx and key in self.data:
+            return None
+        self.data[key] = value
+        return True
+
+
+def test_envio_fallido_no_marca_dedup(monkeypatch):
+    fake = _FakeRedis()
+    monkeypatch.setattr(watchdog, "_redis", lambda: fake)
+    monkeypatch.setattr(watchdog, "send_alert", lambda problems: False)
+
+    watchdog.notify(["`amael-ia/whatsapp-bridge-deployment` SIN RÉPLICAS DISPONIBLES (0/1)."])
+
+    assert fake.data == {}
+
+
+def test_envio_exitoso_marca_dedup_y_la_siguiente_corrida_calla(monkeypatch):
+    fake = _FakeRedis()
+    enviados = []
+    monkeypatch.setattr(watchdog, "_redis", lambda: fake)
+    monkeypatch.setattr(watchdog, "send_alert", lambda problems: enviados.append(problems) or True)
+    problema = "`amael-ia/postgres` SIN RÉPLICAS DISPONIBLES (0/1)."
+
+    watchdog.notify([problema])
+    watchdog.notify([problema])
+
+    assert len(enviados) == 1
+    assert "watchdog:alerted:amael-ia/postgres" in fake.data
+
+
+def test_solo_se_envian_los_no_notificados(monkeypatch):
+    fake = _FakeRedis()
+    fake.data["watchdog:alerted:amael-ia/postgres"] = "1"
+    enviados = []
+    monkeypatch.setattr(watchdog, "_redis", lambda: fake)
+    monkeypatch.setattr(watchdog, "send_alert", lambda problems: enviados.append(problems) or True)
+
+    watchdog.notify([
+        "`amael-ia/postgres` SIN RÉPLICAS DISPONIBLES (0/1).",
+        "`amael-ia/redis` SIN RÉPLICAS DISPONIBLES (0/1).",
+    ])
+
+    assert enviados == [["`amael-ia/redis` SIN RÉPLICAS DISPONIBLES (0/1)."]]
+
+
+def test_sin_redis_se_alerta_igual(monkeypatch):
+    enviados = []
+    monkeypatch.setattr(watchdog, "_redis", lambda: None)
+    monkeypatch.setattr(watchdog, "send_alert", lambda problems: enviados.append(problems) or True)
+
+    watchdog.notify(["`amael-ia/redis` SIN RÉPLICAS DISPONIBLES (0/1)."])
+
+    assert len(enviados) == 1

@@ -288,8 +288,9 @@ def check_github_token() -> str | None:
     )
 
 
-def _should_alert(key: str) -> bool:
-    """Dedup por Redis. Si Redis no responde, se alerta igual (fail-loud)."""
+def _redis():
+    """Cliente Redis para el dedup, o None si no responde (fail-loud: sin
+    Redis se alerta igual)."""
     try:
         import redis
 
@@ -300,10 +301,39 @@ def _should_alert(key: str) -> bool:
             decode_responses=True,
             socket_timeout=5,
         )
-        return bool(r.set(f"watchdog:alerted:{key}", "1", nx=True, ex=_REALERT_MIN * 60))
+        r.ping()
+        return r
     except Exception as exc:
         logger.warning(f"Redis no disponible ({exc}) — se alerta sin dedup.")
-        return True
+        return None
+
+
+def notify(problems: list[str]) -> None:
+    """Envía los problemas aún no notificados y marca el dedup SOLO si el
+    envío salió. Marcarlo antes silenciaba la alerta cuando el caído era
+    justo el bridge (24-sep-2026: Chaos Mesh lo mató a las 02:00, el envío dio
+    Connection refused y el reintento del Job ya encontró el dedup puesto)."""
+    r = _redis()
+    keys = {p: f"watchdog:alerted:{p.split('`')[1]}" for p in problems}
+    nuevos = problems
+    if r is not None:
+        try:
+            nuevos = [p for p in problems if not r.exists(keys[p])]
+        except Exception as exc:
+            logger.warning(f"Redis falló al leer el dedup ({exc}) — se alerta igual.")
+            r = None
+    if not nuevos:
+        logger.info(f"{len(problems)} problema(s) ya notificados — dedup activo.")
+        return
+    if not send_alert(nuevos):
+        logger.warning("Alerta no enviada — sin dedup, se reintenta en la siguiente corrida.")
+        return
+    if r is not None:
+        try:
+            for p in nuevos:
+                r.set(keys[p], "1", ex=_REALERT_MIN * 60)
+        except Exception as exc:
+            logger.warning(f"No se pudo marcar el dedup ({exc}).")
 
 
 def send_alert(problems: list[str]) -> bool:
@@ -421,11 +451,7 @@ def main() -> int:
         logger.info("Todos los deployments críticos están sanos.")
         return 0
 
-    nuevos = [p for p in problems if _should_alert(p.split("`")[1])]
-    if nuevos:
-        send_alert(nuevos)
-    else:
-        logger.info(f"{len(problems)} problema(s) ya notificados — dedup activo.")
+    notify(problems)
     return 1
 
 
