@@ -627,6 +627,19 @@ def _clean_agent_answer(content: str) -> str:
     return "\n".join(utiles).strip()
 
 
+# qwen3.5 emite las tool-calls en XML y a veces las cierra mal; Ollama corta el
+# stream con «XML syntax error … (status code: -1)». Es azar del muestreo, no
+# del cluster: un reintento basta. El 2-oct-2026 ese error llegó al audio
+# matutino como «errores en la consulta» y sonó a falla del cluster.
+_TOOLCALL_PARSE_RETRIES = 1
+_TOOLCALL_PARSE_MARKERS = ("xml syntax error", "error parsing tool call")
+
+
+def _is_toolcall_parse_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(m in msg for m in _TOOLCALL_PARSE_MARKERS)
+
+
 def query_agent(query: str) -> str:
     """
     Punto de entrada para consultas conversacionales al agente SRE.
@@ -656,21 +669,34 @@ def query_agent(query: str) -> str:
     lg_agent = _get_langgraph_agent()
     if lg_agent is None:
         return "❌ Agente SRE no disponible: error inicializando LangGraph."
-    try:
-        from langchain_core.messages import HumanMessage
-        result = lg_agent.invoke({"messages": [HumanMessage(content=query)]})
-        messages = result.get("messages", [])
-        if messages:
-            last = messages[-1]
-            content = last.content if hasattr(last, "content") else str(last)
+    from langchain_core.messages import HumanMessage
+    for attempt in range(1 + _TOOLCALL_PARSE_RETRIES):
+        try:
+            result = lg_agent.invoke({"messages": [HumanMessage(content=query)]})
+            messages = result.get("messages", [])
+            if messages:
+                last = messages[-1]
+                content = last.content if hasattr(last, "content") else str(last)
+                SRE_LANGGRAPH_REQUESTS.labels(result="ok").inc()
+                return _clean_agent_answer(content)
             SRE_LANGGRAPH_REQUESTS.labels(result="ok").inc()
-            return _clean_agent_answer(content)
-        SRE_LANGGRAPH_REQUESTS.labels(result="ok").inc()
-        return "Sin respuesta del agente."
-    except Exception as exc:
-        logger.error(f"[sre.agent] LangGraph error: {exc}")
-        SRE_LANGGRAPH_REQUESTS.labels(result="error").inc()
-        return f"❌ Error ejecutando agente SRE: {exc}"
+            return "Sin respuesta del agente."
+        except Exception as exc:
+            if _is_toolcall_parse_error(exc) and attempt < _TOOLCALL_PARSE_RETRIES:
+                logger.warning(
+                    f"[sre.agent] tool-call mal formada, reintento {attempt + 1}: {exc}"
+                )
+                SRE_LANGGRAPH_REQUESTS.labels(result="retry").inc()
+                continue
+            logger.error(f"[sre.agent] LangGraph error: {exc}")
+            SRE_LANGGRAPH_REQUESTS.labels(result="error").inc()
+            if _is_toolcall_parse_error(exc):
+                return (
+                    "❌ No pude consultar el cluster: el modelo generó una llamada "
+                    "a herramienta inválida. Esto NO indica un problema del cluster."
+                )
+            return f"❌ Error ejecutando agente SRE: {exc}"
+    return "Sin respuesta del agente."
 
 
 # ── APScheduler — loop autónomo ───────────────────────────────────────────────
