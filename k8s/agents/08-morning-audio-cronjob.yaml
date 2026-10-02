@@ -23,7 +23,7 @@ spec:
             # Imagen propia: python + ffmpeg + morning_audio.py
             # Flujo: /api/chat (resumen breve) -> CosyVoice3 /tts (WAV)
             #        -> ffmpeg WAV→OGG/opus -> bridge /send-audio (nota de voz, ptt)
-            image: registry.richardx.dev/morning-audio:1.0.3
+            image: registry.richardx.dev/morning-audio:1.0.4
             imagePullPolicy: IfNotPresent
             env:
             - name: BOT_JWT_TOKEN
