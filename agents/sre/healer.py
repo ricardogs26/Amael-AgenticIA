@@ -177,6 +177,27 @@ def _deployment_exists(deployment_name: str, namespace: str) -> bool:
         return True
 
 
+def resolve_restart_target(anomaly: Anomaly) -> str:
+    """Nombre del Deployment a reiniciar para una anomalía.
+
+    owner_name, si existe, es el nombre REAL (sale de ownerReferences) y nunca
+    se reescribe: el 5-oct-2026 `frontend-next-deployment` se renombraba a
+    `frontend-next` por un match de prefijo en APP_MANIFEST_MAP → patch 404.
+    Sin dueño se intenta el prefijo más largo del mapa (pod → deployment) y,
+    si nada coincide, el propio resource_name.
+    """
+    if anomaly.owner_name:
+        return anomaly.owner_name
+    target = anomaly.resource_name
+    from agents.sre.bug_library import APP_MANIFEST_MAP
+    matches = [k for k in APP_MANIFEST_MAP if target.startswith(k + "-")]
+    if matches:
+        best = max(matches, key=len)
+        logger.debug(f"[healer] Pod→deployment: {target!r} → {best!r}")
+        return best
+    return target
+
+
 def decide_action(anomaly: Anomaly, confidence: float) -> str:
     """
     Aplica guardrails y decide la acción apropiada.
@@ -194,7 +215,7 @@ def decide_action(anomaly: Anomaly, confidence: float) -> str:
 
     Migrado desde k8s-agent/main.py → decide_action()
     """
-    resource = anomaly.owner_name or anomaly.resource_name
+    resource = resolve_restart_target(anomaly)
 
     # POD_STATUS_UNKNOWN: limpieza determinística de cadáveres post-reinicio del
     # nodo. Borrar el pod huérfano es seguro incluso en deployments protegidos —
@@ -767,16 +788,8 @@ def execute_sre_action(
         )
 
     if action_type == ActionType.ROLLOUT_RESTART:
-        target = anomaly.owner_name or anomaly.resource_name
+        target = resolve_restart_target(anomaly)
         namespace = anomaly.namespace
-
-        # Normalize pod name → deployment name (metric anomalies set resource_name=pod)
-        from agents.sre.bug_library import APP_MANIFEST_MAP
-        for _map_key in APP_MANIFEST_MAP:
-            if target != _map_key and target.startswith(_map_key + "-"):
-                logger.debug(f"[healer] Pod→deployment: {target!r} → {_map_key!r}")
-                target = _map_key
-                break
 
         from agents.sre.healer import _check_restart_limit
         if _check_restart_limit(target, namespace):

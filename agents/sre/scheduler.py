@@ -221,8 +221,10 @@ _DEDUP_TTL_BY_TYPE: dict[str, int] = {
     "HIGH_RESTARTS":         3600,   # 1 hora — solo alerta cuando hay crecimiento real
     "MEMORY_LEAK_PREDICTED": 3600,   # 1 hora — tendencia, no emergencia inmediata
     "SLO_BUDGET_BURNING":    1800,   # 30 min — importante pero no urgente por segundo
-    "HIGH_CPU":               900,   # 15 min
-    "HIGH_MEMORY":            900,   # 15 min
+    # Estado persistente: con 900 s un pod estable al 85 % (whatsapp-personal,
+    # noche 5→6-oct-2026) mandaba un WhatsApp cada ~16 min toda la noche.
+    "HIGH_CPU":              3600,   # 1 hora
+    "HIGH_MEMORY":           3600,   # 1 hora
     # Infraestructura — TTL largo para no repetir notificaciones de estado persistente
     "VAULT_SEALED":          1800,   # 30 min — persiste hasta unseal manual
     "LOADBALANCER_NO_IP":    1800,   # 30 min — persiste hasta fix de MetalLB
@@ -419,14 +421,9 @@ def sre_autonomous_loop(
                 anomaly, action_type, reporter.notify_whatsapp_sre
             )
             if action_type == "ROLLOUT_RESTART":
-                _restart_target = anomaly.owner_name or anomaly.resource_name
-                # Normalize pod name → deployment name so _check_restart_limit matches
-                from agents.sre.bug_library import APP_MANIFEST_MAP
-                for _map_key in APP_MANIFEST_MAP:
-                    if _restart_target != _map_key and _restart_target.startswith(_map_key + "-"):
-                        _restart_target = _map_key
-                        break
-                healer.record_restart(_restart_target, anomaly.namespace)
+                # Misma resolución que execute_sre_action: si no, el contador
+                # y _check_restart_limit miran claves distintas.
+                healer.record_restart(healer.resolve_restart_target(anomaly), anomaly.namespace)
 
             # Report
             mark_incident(anomaly.incident_key)

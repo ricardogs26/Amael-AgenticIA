@@ -190,19 +190,7 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                 # con owner_name="" y el healer usaba el nombre del POD como si
                 # fuera un Deployment → patch 404 en bucle cada 60s (visto con
                 # los pods de amael-watchdog, que fallan por diseño).
-                owner_name = ""
-                owner_kind = ""
-                for ref in (pod.metadata.owner_references or []):
-                    if ref.kind in ("ReplicaSet", "StatefulSet", "DaemonSet"):
-                        owner_name = ref.name.rsplit("-", 1)[0] if ref.kind == "ReplicaSet" else ref.name
-                        owner_kind = "Deployment" if ref.kind == "ReplicaSet" else ref.kind
-                        break
-                    if ref.kind == "Job":
-                        # El CronJob controller ya gestiona reintentos vía
-                        # backoffLimit; Raphael no debe interferir.
-                        owner_name = ref.name
-                        owner_kind = "Job"
-                        break
+                owner_name, owner_kind = _pod_owner(pod.metadata.owner_references)
                 _owner_meta = {"owner_kind": owner_kind} if owner_kind else {}
 
                 for cs in container_statuses:
@@ -441,6 +429,52 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
     return anomalies
 
 
+def _pod_owner(owner_references) -> tuple[str, str]:
+    """(owner_name, owner_kind) de un pod a partir de sus ownerReferences.
+
+    ReplicaSet → su Deployment (se quita el hash del template). Un pod de Job
+    devuelve kind "Job": el CronJob controller ya gestiona reintentos vía
+    backoffLimit y Raphael no debe interferir. Sin dueño → ("", "").
+    """
+    for ref in (owner_references or []):
+        if ref.kind in ("ReplicaSet", "StatefulSet", "DaemonSet"):
+            if ref.kind == "ReplicaSet":
+                return ref.name.rsplit("-", 1)[0], "Deployment"
+            return ref.name, ref.kind
+        if ref.kind == "Job":
+            return ref.name, "Job"
+    return "", ""
+
+
+def _attach_pod_owners(anomalies: list[Anomaly]) -> None:
+    """Completa owner_name/owner_kind en anomalías de métricas (resource=Pod).
+
+    Prometheus solo da el nombre del pod. Sin el dueño, el healer buscaba un
+    Deployment llamado como el POD → 404 → NOTIFY_HUMAN en cada ciclo: la
+    noche del 5→6-oct-2026 whatsapp-personal (HIGH_MEMORY) mandó ~45 WhatsApps
+    y nunca se reinició. Si la API falla, la anomalía sigue sin dueño (el
+    healer la notifica como antes) — observar nunca se cae por esto.
+    """
+    pods = [a for a in anomalies if a.resource_type == "Pod" and not a.owner_name]
+    if not pods:
+        return
+    try:
+        v1 = _get_k8s_client().CoreV1Api()
+    except Exception as exc:
+        logger.warning(f"[observer] Sin cliente K8s para resolver dueños: {exc}")
+        return
+    for a in pods:
+        try:
+            pod = v1.read_namespaced_pod(name=a.resource_name, namespace=a.namespace)
+        except Exception as exc:
+            logger.debug(f"[observer] Dueño de {a.namespace}/{a.resource_name} no resuelto: {exc}")
+            continue
+        owner_name, owner_kind = _pod_owner(pod.metadata.owner_references)
+        if owner_name:
+            a.owner_name = owner_name
+            a.metadata = {**(a.metadata or {}), "owner_kind": owner_kind}
+
+
 def observe_metrics(prometheus_url: str) -> list[Anomaly]:
     """
     Observa métricas de CPU, memoria y tasa de errores vía Prometheus (P4-A).
@@ -529,6 +563,7 @@ def observe_metrics(prometheus_url: str) -> list[Anomaly]:
 
     if anomalies:
         logger.info(f"[observer] observe_metrics: {len(anomalies)} anomalías de métricas.")
+    _attach_pod_owners(anomalies)
     return anomalies
 
 
