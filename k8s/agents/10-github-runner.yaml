@@ -88,7 +88,7 @@ spec:
 
       containers:
         - name: runner
-          image: registry.richardx.dev/github-runner:1.0.0
+          image: registry.richardx.dev/github-runner:1.0.1
           imagePullPolicy: Always
 
           env:
