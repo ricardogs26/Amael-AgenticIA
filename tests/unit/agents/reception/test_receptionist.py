@@ -160,6 +160,7 @@ class _Store:
         return self.count
     def update_fields(self, lid, **kw): self.updates.update(kw)
     def mark_notified(self, lid): self.notified = True
+    def set_status(self, lid, status): self.lead.status = status
 
 
 @pytest.fixture
@@ -167,7 +168,7 @@ def wired(monkeypatch, fake_redis):
     lead = _lead()
     st = _Store(lead)
     for name in ("get_or_create", "get_by_phone", "add_message", "recent_messages", "bump_count",
-                 "update_fields", "mark_notified"):
+                 "update_fields", "mark_notified", "set_status"):
         monkeypatch.setattr(storage, name, getattr(st, name))
     calls = {"llm": 0, "admin": []}
     def fake_llm(lead, history, text):
@@ -180,10 +181,6 @@ def wired(monkeypatch, fake_redis):
 
 
 class TestHandle:
-    def test_sin_lead_y_sin_frase_aviso_privado(self, wired):
-        st, calls = wired
-        assert receptionist.handle_message("5215550001111", "hola, ¿quién eres?") == prompts.REPLY_PRIVATE
-        assert calls["llm"] == 0 and st.msgs == [] and not st.exists
 
     def test_la_frase_abre_el_lead_y_luego_todo_pasa(self, wired):
         st, calls = wired
@@ -252,3 +249,72 @@ def test_prompt_no_cita_lo_prohibido():
     for palabra in ("no tengo esa función", "no puedo", "prohibido"):
         assert palabra not in s.lower()
     assert "Banco BASE" in s
+
+
+# ── Desconocido sin frase: se guarda y se avisa a Ricardo (6-oct-2026) ────────
+# Caso: «Gina L❣️» escribió el 28-sep sin la frase del enlace. Recibió el aviso
+# de uso privado y nada se guardó; su chat tenía mensajes temporales de 7 días
+# y WhatsApp lo borró en todos los dispositivos. Ricardo la perdió. Ahora el
+# desconocido queda como lead `private` y cada mensaje le llega a Ricardo, que
+# contesta citando el aviso.
+
+class TestPrivate:
+    def test_primer_mensaje_crea_lead_privado_y_avisa(self, wired):
+        st, calls = wired
+        reply = receptionist.handle_message("5215550001111", "Hola, vi tu página", display_name="Gina L")
+        assert reply == prompts.REPLY_PRIVATE
+        assert calls["llm"] == 0
+        assert st.exists and st.lead.status == "private"
+        assert st.msgs == [("visitor", "Hola, vi tu página")]
+        [aviso] = calls["admin"]
+        assert "Desconocido #1" in aviso
+        assert "Gina L" in aviso and "5215550001111" in aviso
+        assert "Hola, vi tu página" in aviso
+        assert "citando" in aviso  # dice cómo contestar
+
+    def test_mensajes_siguientes_se_guardan_y_avisan_sin_respuesta(self, wired):
+        st, calls = wired
+        receptionist.handle_message("5215550001111", "hola")
+        reply = receptionist.handle_message("5215550001111", "¿sigues ahí?")
+        assert reply is None, "el aviso de uso privado sale una sola vez"
+        assert [c for _, c in st.msgs] == ["hola", "¿sigues ahí?"]
+        assert len(calls["admin"]) == 2 and "¿sigues ahí?" in calls["admin"][1]
+        assert calls["llm"] == 0
+
+    def test_privado_que_luego_manda_la_frase_pasa_a_conversacion(self, wired):
+        st, calls = wired
+        receptionist.handle_message("5215550001111", "hola")
+        reply = receptionist.handle_message("5215550001111", "Hola Amael, vengo de richardx.dev")
+        assert reply == "Hola, soy Amael"
+        assert st.lead.status == "open"
+        assert calls["llm"] == 1
+
+    def test_privado_respeta_el_tope_y_deja_de_avisar(self, wired):
+        st, calls = wired
+        for _ in range(3):
+            receptionist.handle_message("5215550001111", "spam")
+        assert len(calls["admin"]) == 3
+        assert receptionist.handle_message("5215550001111", "spam") is None
+        assert len(calls["admin"]) == 3, "pasado el tope no se le llena el WhatsApp a Ricardo"
+
+    def test_privado_con_adjunto_avisa(self, wired):
+        st, calls = wired
+        receptionist.handle_message("5215550001111", "", has_media=True)
+        assert "adjunto" in calls["admin"][0]
+
+    def test_aviso_que_falla_no_rompe_la_respuesta(self, wired, monkeypatch):
+        st, calls = wired
+        import agents.reception.notify as notify
+        def boom(t): raise RuntimeError("bridge caído")
+        monkeypatch.setattr(notify, "send_to_admin", boom)
+        assert receptionist.handle_message("5215550001111", "hola") == prompts.REPLY_PRIVATE
+        assert st.msgs == [("visitor", "hola")]
+
+
+def test_lista_de_pendientes_incluye_privados():
+    assert "'private'" in storage._SQL_LIST_OPEN
+
+
+def test_schema_admite_status_private():
+    assert "private" in storage.STATUSES
+    assert "'private'" in storage._DDL

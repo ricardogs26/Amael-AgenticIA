@@ -26,6 +26,8 @@ class MessageIn(BaseModel):
     phone:     str = Field(min_length=6, max_length=32)
     text:      str = Field(default="", max_length=4000)
     has_media: bool = False
+    # Nombre de perfil de WhatsApp (pushname): solo para el aviso a Ricardo.
+    display_name: str | None = Field(default=None, max_length=100)
 
 
 class ReplyOut(BaseModel):
@@ -41,7 +43,9 @@ class CommandIn(BaseModel):
 async def reception_message(body: MessageIn) -> ReplyOut:
     from agents.reception.receptionist import handle_message
     try:
-        reply = await asyncio.to_thread(handle_message, body.phone, body.text, body.has_media)
+        reply = await asyncio.to_thread(
+            handle_message, body.phone, body.text, body.has_media, body.display_name,
+        )
     except Exception as exc:
         logger.error(f"[reception] handle_message reventó: {exc}")
         from agents.reception.prompts import REPLY_ERROR

@@ -7,7 +7,9 @@ from datetime import datetime
 
 logger = logging.getLogger("agents.reception.storage")
 
-STATUSES = ("open", "approved", "rejected")
+# private: escribió SIN la frase del enlace. Amael no conversa con él, pero sus
+# mensajes se guardan y le llegan a Ricardo (6-oct-2026, caso «Gina L»).
+STATUSES = ("open", "approved", "rejected", "private")
 FIELDS   = ("name", "company", "reason")
 
 _DDL = """
@@ -18,7 +20,7 @@ CREATE TABLE IF NOT EXISTS leads (
     company       TEXT,
     reason        TEXT,
     status        TEXT NOT NULL DEFAULT 'open'
-                  CHECK (status IN ('open','approved','rejected')),
+                  CHECK (status IN ('open','approved','rejected','private')),
     message_count INT  NOT NULL DEFAULT 0,
     notified_at   TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -32,6 +34,10 @@ CREATE TABLE IF NOT EXISTS lead_messages (
     ts       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_lead_messages_lead ON lead_messages (lead_id, id DESC);
+-- Tablas creadas antes de 'private': CREATE IF NOT EXISTS no toca el CHECK viejo.
+ALTER TABLE leads DROP CONSTRAINT IF EXISTS leads_status_check;
+ALTER TABLE leads ADD CONSTRAINT leads_status_check
+    CHECK (status IN ('open','approved','rejected','private'));
 """
 
 
@@ -90,7 +96,10 @@ _SQL_UPSERT = (
 )
 _SQL_GET       = f"SELECT {_COLS} FROM leads WHERE id = %s"
 _SQL_GET_PHONE = f"SELECT {_COLS} FROM leads WHERE phone = %s"
-_SQL_LIST_OPEN = f"SELECT {_COLS} FROM leads WHERE status = 'open' ORDER BY updated_at DESC LIMIT %s"
+_SQL_LIST_OPEN = (
+    f"SELECT {_COLS} FROM leads WHERE status IN ('open', 'private') "
+    "ORDER BY updated_at DESC LIMIT %s"
+)
 _SQL_SET = {  # columna → sentencia fija; nada se concatena desde fuera
     "name":    "UPDATE leads SET name = %s, updated_at = now() WHERE id = %s",
     "company": "UPDATE leads SET company = %s, updated_at = now() WHERE id = %s",

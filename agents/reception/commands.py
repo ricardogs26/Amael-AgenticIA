@@ -19,7 +19,8 @@ HELP = (
     "/lead <n> — ficha e historial\n"
     "/lead <n> aprobar — dar acceso a Amael\n"
     "/lead <n> rechazar — silenciar 30 días\n"
-    "/lead <n> responder <texto> — contestarle vía Amael"
+    "/lead <n> responder <texto> — contestarle vía Amael\n"
+    "↩️ O responde CITANDO el aviso del contacto."
 )
 
 _CMD_RE = re.compile(r"^(?P<id>\d+)(?:\s+(?P<action>aprobar|rechazar|responder|ver))?(?:\s+(?P<text>.+))?$", re.S)

@@ -39,10 +39,15 @@ def test_sin_secreto_403(client):
 
 def test_message_delega_y_nunca_revienta(client, monkeypatch):
     import agents.reception.receptionist as rc
-    monkeypatch.setattr(rc, "handle_message", lambda p, t, m: "hola visitante")
+    seen = {}
+    monkeypatch.setattr(rc, "handle_message",
+                        lambda p, t, m, n: seen.update(name=n) or "hola visitante")
     from interfaces.api import auth as auth_mod
     monkeypatch.setattr(auth_mod, "_emit_security_event", lambda *a, **k: None)
-    r = client.post("/api/reception/message", json={"phone": "5215550001111", "text": "hola"}, headers=_auth())
+    r = client.post("/api/reception/message",
+                    json={"phone": "5215550001111", "text": "hola", "display_name": "Gina L"},
+                    headers=_auth())
     assert r.status_code in (200, 429)
     if r.status_code == 200:
         assert r.json() == {"reply": "hola visitante"}
+        assert seen["name"] == "Gina L"

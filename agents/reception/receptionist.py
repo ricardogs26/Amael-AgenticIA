@@ -198,7 +198,67 @@ def _notify_admin(kind: str, lead: Lead, history: list[tuple[str, str]]) -> None
 
 # ── Entrada principal ─────────────────────────────────────────────────────────
 
-def handle_message(phone: str, text: str, has_media: bool = False) -> str | None:
+def _notify_private(lead: Lead, text: str, has_media: bool, display_name: str | None) -> None:
+    """Aviso a Ricardo por cada mensaje de un desconocido sin la frase.
+
+    El formato «Desconocido #N» lo reconoce el bridge: si Ricardo contesta
+    CITANDO este aviso, su texto le llega al visitante como «Ricardo: …».
+    Un fallo del envío no afecta la respuesta al visitante.
+    """
+    from agents.reception.notify import send_to_admin
+
+    quien = f"{display_name} ({lead.phone})" if display_name else lead.phone
+    cuerpo = f"«{text[:400]}»" if text else ""
+    if has_media:
+        cuerpo = (cuerpo + "\n" if cuerpo else "") + "📎 (envió un adjunto)"
+    txt = (
+        f"📩 *Desconocido #{lead.id}* — {quien}\n{cuerpo}\n\n"
+        f"↩️ Responde citando este mensaje para contestarle.\n"
+        f"/lead {lead.id} aprobar · /lead {lead.id} rechazar"
+    )
+    try:
+        send_to_admin(txt)
+        storage.mark_notified(lead.id)
+    except Exception as exc:
+        logger.error(f"[reception] aviso de desconocido #{lead.id} falló: {exc}")
+
+
+def _handle_private(
+    phone: str, text: str, has_media: bool, display_name: str | None, lead: Lead | None,
+) -> str | None:
+    """Desconocido sin frase: se guarda, se avisa a Ricardo, Amael no conversa.
+
+    6-oct-2026: «Gina L» escribió el 28-sep sin la frase del enlace, recibió el
+    aviso de uso privado y no se guardó nada; su chat tenía mensajes temporales
+    de 7 días y WhatsApp lo borró en todos los dispositivos. Ricardo la perdió.
+    """
+    from observability.metrics import RECEPTION_MESSAGES_TOTAL
+
+    first = lead is None
+    try:
+        limited = check_limits(phone)
+    except Exception as exc:
+        logger.warning(f"[reception] Redis no disponible para límites: {exc}")
+        limited = None
+    if first:
+        lead = storage.get_or_create(phone)
+        storage.set_status(lead.id, "private")
+        lead.status = "private"
+    if limited:
+        RECEPTION_MESSAGES_TOTAL.labels(result="rate_limited").inc()
+        return None
+
+    storage.add_message(lead.id, "visitor", text or "📎 (adjunto)")
+    lead.message_count = storage.bump_count(lead.id)
+    RECEPTION_MESSAGES_TOTAL.labels(result="private").inc()
+    logger.info(f"[reception] desconocido #{lead.id} ({phone}) sin frase — guardado y avisado")
+    _notify_private(lead, text, has_media, display_name)
+    return prompts.REPLY_PRIVATE if first else None
+
+
+def handle_message(
+    phone: str, text: str, has_media: bool = False, display_name: str | None = None,
+) -> str | None:
     from observability.metrics import RECEPTION_LEADS_TOTAL, RECEPTION_MESSAGES_TOTAL
 
     phone = (phone or "").strip()
@@ -209,18 +269,14 @@ def handle_message(phone: str, text: str, has_media: bool = False) -> str | None
         return None
 
     lead = storage.get_by_phone(phone)
-    if lead is None:
+    if lead is None or lead.status == "private":
         if not is_trigger(text):
-            RECEPTION_MESSAGES_TOTAL.labels(result="ignored").inc()
-            # El texto (recortado) entra al log: el 6-oct-2026 un visitante que
-            # llegó desde richardx.dev recibió este aviso y sin el texto no
-            # había forma de saber si borró la frase del enlace o si falló otra cosa.
-            logger.info(
-                f"[reception] {phone} sin frase de activación — aviso de uso privado "
-                f"(texto: {text[:80]!r}, media={has_media})"
-            )
-            return prompts.REPLY_PRIVATE
-        lead = storage.get_or_create(phone)
+            return _handle_private(phone, text, has_media, display_name, lead)
+        if lead is None:
+            lead = storage.get_or_create(phone)
+        else:  # el desconocido encontró la frase: pasa a conversación normal
+            storage.set_status(lead.id, "open")
+            lead.status = "open"
         RECEPTION_LEADS_TOTAL.labels(event="created").inc()
     if lead.status == "rejected":
         RECEPTION_MESSAGES_TOTAL.labels(result="silenced").inc()
