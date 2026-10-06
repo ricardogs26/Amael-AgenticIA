@@ -25,7 +25,15 @@ import pytest  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from fastapi.security import HTTPAuthorizationCredentials  # noqa: E402
 
-from config.settings import settings  # noqa: E402
+
+def _secret() -> str:
+    """El secreto tal como lo lee get_current_user: import en el momento.
+
+    Otros tests recargan config.settings (singleton); un `settings` importado
+    a nivel módulo puede ser otro objeto con otro secreto según el orden.
+    """
+    from config.settings import settings
+    return settings.jwt_secret_key
 
 
 def _creds(token: str) -> HTTPAuthorizationCredentials:
@@ -42,12 +50,12 @@ def _b64(obj: dict) -> str:
 
 
 def test_hs256_token_is_accepted():
-    token = jwt.encode({"sub": "bot-amael@richardx.dev"}, settings.jwt_secret_key, algorithm="HS256")
+    token = jwt.encode({"sub": "bot-amael@richardx.dev"}, _secret(), algorithm="HS256")
     assert _user(token) == "bot-amael@richardx.dev"
 
 
 def test_legacy_email_claim_still_works():
-    token = jwt.encode({"email": "user@example.com"}, settings.jwt_secret_key, algorithm="HS256")
+    token = jwt.encode({"email": "user@example.com"}, _secret(), algorithm="HS256")
     assert _user(token) == "user@example.com"
 
 
@@ -65,7 +73,7 @@ def test_token_issued_by_login_endpoint_roundtrips():
 ], ids=["otro-secreto", "hs512", "alg-none", "sin-sub", "basura"])
 def test_invalid_tokens_are_rejected(token_factory):
     with pytest.raises(HTTPException) as exc:
-        _user(token_factory(settings.jwt_secret_key))
+        _user(token_factory(_secret()))
     assert exc.value.status_code == 401
 
 
