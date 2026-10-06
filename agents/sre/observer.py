@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 
 from agents.sre.models import Anomaly
 from core.constants import AnomalyType, Severity
@@ -152,6 +152,52 @@ def _prometheus_query(url: str, query: str) -> list[dict] | None:
     return None
 
 
+# Ráfaga de reinicios del cluster: cuando el API server se cae unos minutos
+# (cada noche ~01:30 MX al reiniciar la malla WiFi, el nodo va por WiFi) TODOS
+# los controladores que hablan con él reinician a la vez. Eso no es un crash
+# loop de una app y no se arregla reiniciando nada. 27-sep→6-oct-2026: 2–3
+# WhatsApps HIGH_RESTARTS por noche por kube-state-metrics/node-exporter.
+_BURST_WINDOW_S      = int(os.environ.get("SRE_RESTART_BURST_WINDOW_S", "900"))
+_BURST_MIN_PODS      = int(os.environ.get("SRE_RESTART_BURST_MIN_PODS", "5"))
+_BURST_MIN_NAMESPACES = int(os.environ.get("SRE_RESTART_BURST_MIN_NAMESPACES", "3"))
+
+
+def _last_termination(cs):
+    """finished_at (datetime aware) de la última terminación del contenedor, o None."""
+    term = getattr(getattr(cs, "last_state", None), "terminated", None)
+    finished = getattr(term, "finished_at", None)
+    if finished is None:
+        return None
+    if finished.tzinfo is None:
+        finished = finished.replace(tzinfo=UTC)
+    return finished
+
+
+def _detect_restart_burst(v1) -> tuple[int, int] | None:
+    """(pods, namespaces) que terminaron en la ventana si hay ráfaga; None si no.
+
+    Una sola lista de pods de todo el cluster por ciclo (observer ClusterRole).
+    Si la API falla se asume que no hay ráfaga: el comportamiento previo.
+    """
+    try:
+        pods = v1.list_pod_for_all_namespaces().items
+    except Exception as exc:
+        logger.debug(f"[observer] Ráfaga de reinicios no evaluable: {exc}")
+        return None
+    cutoff = datetime.now(UTC) - timedelta(seconds=_BURST_WINDOW_S)
+    hit_pods, hit_ns = set(), set()
+    for pod in pods:
+        for cs in (pod.status.container_statuses or []):
+            finished = _last_termination(cs)
+            if finished and finished >= cutoff:
+                hit_pods.add((pod.metadata.namespace, pod.metadata.name))
+                hit_ns.add(pod.metadata.namespace)
+                break
+    if len(hit_pods) >= _BURST_MIN_PODS and len(hit_ns) >= _BURST_MIN_NAMESPACES:
+        return len(hit_pods), len(hit_ns)
+    return None
+
+
 def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
     """
     Observa el estado estructural de pods y nodos vía Kubernetes API.
@@ -169,6 +215,12 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
         k8s = _get_k8s_client()
         v1      = k8s.CoreV1Api()
         _ = k8s.AppsV1Api()  # instanciado para warm-up del client; pods via v1
+        _burst: dict = {}  # evaluada solo si algún HIGH_RESTARTS lo necesita
+
+        def _burst_info():
+            if "v" not in _burst:
+                _burst["v"] = _detect_restart_burst(v1)
+            return _burst["v"]
 
         # ── Pods ──────────────────────────────────────────────────────────────
         for ns in ns_list:
@@ -276,18 +328,36 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                         elif restarts > last_count:
                             # El conteo creció → reinicio activo real
                             new_restarts = restarts - last_count
+                            severity = Severity.MEDIUM if restarts < 10 else Severity.HIGH
+                            meta     = dict(_owner_meta)
+                            details  = (
+                                f"Pod {pod_name} tuvo {new_restarts} reinicio(s) nuevo(s) "
+                                f"(total acumulado: {restarts})."
+                            )
+                            # ¿Reinició dentro de una ráfaga de todo el cluster?
+                            # LOW: queda en sre_incidents, sin WhatsApp ni restart.
+                            finished = _last_termination(cs)
+                            burst = _burst_info() if finished else None
+                            if burst and finished >= datetime.now(UTC) - timedelta(
+                                seconds=_BURST_WINDOW_S
+                            ):
+                                severity = Severity.LOW
+                                meta["cluster_burst"] = True
+                                details += (
+                                    f" Parte de una ráfaga: {burst[0]} pods en {burst[1]} "
+                                    f"namespaces reiniciaron en los últimos "
+                                    f"{_BURST_WINDOW_S // 60} min — probable caída del "
+                                    f"API server o de la red, no un fallo del pod."
+                                )
                             anomalies.append(Anomaly(
                                 issue_type=AnomalyType.HIGH_RESTARTS,
-                                severity=Severity.MEDIUM if restarts < 10 else Severity.HIGH,
+                                severity=severity,
                                 namespace=ns,
                                 resource_name=pod_name,
                                 resource_type="Pod",
                                 owner_name=owner_name,
-                                metadata=dict(_owner_meta),
-                                details=(
-                                    f"Pod {pod_name} tuvo {new_restarts} reinicio(s) nuevo(s) "
-                                    f"(total acumulado: {restarts})."
-                                ),
+                                metadata=meta,
+                                details=details,
                             ))
                         # else: conteo estable → pod sano, ignorar
 

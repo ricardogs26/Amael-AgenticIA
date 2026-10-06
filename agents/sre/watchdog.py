@@ -11,9 +11,10 @@ Este módulo es deliberadamente **independiente** de Raphael:
   - Corre como CronJob aparte, en su propio pod y con su propia ServiceAccount.
   - Si Raphael está caído, en CrashLoop o mudo, esto sigue avisando.
 
-Comprueba cuatro cosas y manda un WhatsApp si fallan: que los deployments
+Comprueba cinco cosas y manda un WhatsApp si fallan: que los deployments
 críticos tengan al menos una réplica disponible, que Vault no esté sellado, que
-el PAT de GitHub siga vivo y que los backups hayan corrido bien hace poco. Nada más — cada función extra es una forma nueva de que el
+el PAT de GitHub siga vivo, que el runner self-hosted tome jobs y que los
+backups hayan corrido bien hace poco. Nada más — cada función extra es una forma nueva de que el
 vigilante falle en silencio.
 
 Lo de Vault entró el 7-ago-2026. Un pod de Vault que reinicia arranca SELLADO
@@ -52,6 +53,8 @@ Env vars:
     WATCHDOG_GITHUB_TOKEN  PAT a validar ("" desactiva el chequeo)
     WATCHDOG_GITHUB_API    API de GitHub (default https://api.github.com)
     WATCHDOG_GH_EXPIRY_DAYS  días de anticipación del aviso de expiración (7)
+    WATCHDOG_GH_REPOS      CSV owner/repo cuyos jobs self-hosted se vigilan
+    WATCHDOG_RUNNER_QUEUE_MIN  minutos en cola para avisar del runner (20)
     WATCHDOG_BACKUPS       CSV `namespace/cronjob` de backups ("" desactiva)
     WATCHDOG_BACKUP_MAX_HOURS  antigüedad máxima del último backup exitoso (26)
     OWNER_PHONE            teléfono destino
@@ -94,6 +97,8 @@ _VAULT_ADDR   = os.environ.get("WATCHDOG_VAULT_ADDR",
 _GH_TOKEN     = os.environ.get("WATCHDOG_GITHUB_TOKEN", "")
 _GH_API       = os.environ.get("WATCHDOG_GITHUB_API", "https://api.github.com")
 _GH_EXPIRY_D  = int(os.environ.get("WATCHDOG_GH_EXPIRY_DAYS", "7"))
+_GH_REPOS     = os.environ.get("WATCHDOG_GH_REPOS", "ricardogs26/Amael-AgenticIA")
+_RUNNER_QUEUE_MIN = int(os.environ.get("WATCHDOG_RUNNER_QUEUE_MIN", "20"))
 _BRIDGE_URL   = os.environ.get("WHATSAPP_BRIDGE_URL", "http://whatsapp-bridge-service:3000")
 _PHONE        = (
     os.environ.get("OWNER_PHONE")
@@ -288,6 +293,61 @@ def check_github_token() -> str | None:
     )
 
 
+def check_runner_queue(now=None) -> str | None:
+    """
+    ¿Hay jobs self-hosted en cola más de WATCHDOG_RUNNER_QUEUE_MIN minutos?
+
+    Caso disparador (6-oct-2026): la imagen del runner traía 2.332.0 y GitHub
+    exigía 2.337.0. El runner bajaba la actualización y salía; el contenedor
+    reiniciaba desde la imagen vieja → bucle. Pod Running, runner «online» en
+    GitHub y el build del backend ~50 min en cola. Ni réplicas ni el PAT lo
+    ven: se mira la cola, que es el síntoma que importa.
+
+    Solo cuentan jobs con la etiqueta `self-hosted`: una cola larga en
+    ubuntu-latest es problema de GitHub. Errores de red callan — el chequeo del
+    PAT ya avisa cuando GitHub no responde.
+    """
+    if not _GH_TOKEN:
+        return None
+    from datetime import datetime
+
+    now = now or datetime.now(UTC)
+    headers = {"Authorization": f"Bearer {_GH_TOKEN}", "Accept": "application/vnd.github+json"}
+    stuck: list[str] = []
+    try:
+        import requests
+
+        for repo in [r.strip() for r in _GH_REPOS.split(",") if r.strip()]:
+            for status in ("queued", "in_progress"):
+                r = requests.get(f"{_GH_API}/repos/{repo}/actions/runs", headers=headers,
+                                 params={"status": status, "per_page": 20}, timeout=15)
+                if r.status_code != 200:
+                    continue
+                for run in r.json().get("workflow_runs", []):
+                    jr = requests.get(f"{_GH_API}/repos/{repo}/actions/runs/{run['id']}/jobs",
+                                      headers=headers, timeout=15)
+                    if jr.status_code != 200:
+                        continue
+                    for job in jr.json().get("jobs", []):
+                        if job.get("status") != "queued" or "self-hosted" not in job.get("labels", []):
+                            continue
+                        created = datetime.strptime(job["created_at"], "%Y-%m-%dT%H:%M:%SZ")
+                        mins = (now - created.replace(tzinfo=UTC)).total_seconds() / 60
+                        if mins >= _RUNNER_QUEUE_MIN:
+                            stuck.append(f"«{job.get('name')}» ({repo}, {mins:.0f} min)")
+    except Exception as exc:
+        logger.warning(f"Cola del runner no evaluable: {exc}")
+        return None
+
+    if not stuck:
+        return None
+    return (
+        f"`github/runner` no toma jobs: {', '.join(stuck)} en cola. Si el pod está "
+        "Running y GitHub lo ve online, revisa sus logs: «Runner update in progress» "
+        "en bucle = imagen vieja → subir la base en Amael-IA/github-runner/Dockerfile."
+    )
+
+
 def _redis():
     """Cliente Redis para el dedup, o None si no responde (fail-loud: sin
     Redis se alerta igual)."""
@@ -438,6 +498,13 @@ def main() -> int:
         problems.append(gh_problem)
     elif _GH_TOKEN:
         logger.info("OK — github pat (válido)")
+
+    runner_problem = check_runner_queue()
+    if runner_problem:
+        logger.error(runner_problem)
+        problems.append(runner_problem)
+    elif _GH_TOKEN:
+        logger.info("OK — github runner (sin jobs atorados)")
 
     for ns, name in _parse_targets(_BACKUPS):
         backup_problem = check_backup(batch_v1, ns, name)

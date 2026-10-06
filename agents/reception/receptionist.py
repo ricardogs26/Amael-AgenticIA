@@ -212,7 +212,13 @@ def handle_message(phone: str, text: str, has_media: bool = False) -> str | None
     if lead is None:
         if not is_trigger(text):
             RECEPTION_MESSAGES_TOTAL.labels(result="ignored").inc()
-            logger.info(f"[reception] {phone} sin frase de activación — aviso de uso privado")
+            # El texto (recortado) entra al log: el 6-oct-2026 un visitante que
+            # llegó desde richardx.dev recibió este aviso y sin el texto no
+            # había forma de saber si borró la frase del enlace o si falló otra cosa.
+            logger.info(
+                f"[reception] {phone} sin frase de activación — aviso de uso privado "
+                f"(texto: {text[:80]!r}, media={has_media})"
+            )
             return prompts.REPLY_PRIVATE
         lead = storage.get_or_create(phone)
         RECEPTION_LEADS_TOTAL.labels(event="created").inc()

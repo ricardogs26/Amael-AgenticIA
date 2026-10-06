@@ -51,6 +51,11 @@ EXPECTED_ISSUE_TYPES = {
     "MEMORY_LEAK_PREDICTED",
 }
 
+# El schedule semanal ya no entrena MEMORY_LEAK_PREDICTED: `sre-train-memory-leak`
+# (cosyvoice, domingos) se retiró el 4-sep-2026 tras 5 meses sin una sola
+# detección (raphael 1.1.31). El experimento suelto 1x sigue existiendo.
+SCHEDULED_ISSUE_TYPES = EXPECTED_ISSUE_TYPES - {"MEMORY_LEAK_PREDICTED"}
+
 # Duraciones: convierte "3m", "10m", "1h" → segundos
 def _parse_duration(d: str) -> int:
     m = re.match(r"^(\d+)(s|m|h)$", d)
@@ -111,10 +116,11 @@ class TestExperimentFilesExist:
             docs = _load_experiment_docs(path)
             assert len(docs) >= 1, f"{path.name} está vacío"
 
-    def test_schedule_file_has_7_documents(self):
+    def test_schedule_file_has_one_document_per_scheduled_type(self):
         docs = _load_experiment_docs(SCHEDULE_FILE)
-        assert len(docs) == 7, (
-            f"31-sre-training-schedule.yaml debe tener 7 Schedules (uno por día), tiene {len(docs)}"
+        assert len(docs) == len(SCHEDULED_ISSUE_TYPES), (
+            f"31-sre-training-schedule.yaml debe tener {len(SCHEDULED_ISSUE_TYPES)} "
+            f"Schedules, tiene {len(docs)}"
         )
 
 
@@ -335,7 +341,7 @@ class TestScheduleCRDs:
             issue_type = doc.get("metadata", {}).get("labels", {}).get("issue-type", "")
             if issue_type:
                 covered.add(issue_type)
-        missing = EXPECTED_ISSUE_TYPES - covered
+        missing = SCHEDULED_ISSUE_TYPES - covered
         assert not missing, f"Schedules no cubren: {missing}"
 
     def test_schedule_inner_chaos_selector_has_label(self, schedule_docs):

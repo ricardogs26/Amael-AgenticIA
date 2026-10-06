@@ -458,3 +458,75 @@ def test_sin_redis_se_alerta_igual(monkeypatch):
     watchdog.notify(["`amael-ia/redis` SIN RÉPLICAS DISPONIBLES (0/1)."])
 
     assert len(enviados) == 1
+
+
+# ── Runner self-hosted que no toma jobs ─────────────────────────────────────
+# Caso disparador: 6-oct-2026. La imagen del runner traía 2.332.0 y GitHub
+# exigía 2.337.0: el runner bajaba la actualización, salía, y el contenedor
+# reiniciaba desde la imagen vieja. Pod Running, runner «online», y el build
+# del backend 1.18.5 ~50 min en cola. Nada pintaba rojo.
+
+def _gh_actions(monkeypatch, runs, jobs_by_run, exc=None):
+    import requests
+
+    def _get(url, headers=None, params=None, timeout=None):
+        if exc:
+            raise exc
+        if url.endswith("/actions/runs"):
+            st = (params or {}).get("status")
+            return SimpleNamespace(status_code=200, json=lambda: {
+                "workflow_runs": [r for r in runs if r["status"] == st]})
+        run_id = int(url.rstrip("/").split("/")[-2])
+        return SimpleNamespace(status_code=200, json=lambda: {"jobs": jobs_by_run[run_id]})
+
+    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(watchdog, "_GH_TOKEN", "ghp_falso")
+    monkeypatch.setattr(watchdog, "_GH_REPOS", "ricardogs26/Amael-AgenticIA")
+
+
+def _ago(minutes):
+    from datetime import UTC, datetime, timedelta
+    return (datetime.now(UTC) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _job(name, status, labels, minutes_ago):
+    return {"name": name, "status": status, "labels": labels, "created_at": _ago(minutes_ago)}
+
+
+def test_job_self_hosted_atorado_se_reporta(monkeypatch):
+    _gh_actions(monkeypatch,
+                runs=[{"id": 1, "status": "in_progress"}],
+                jobs_by_run={1: [
+                    _job("Tests & Lint", "completed", ["ubuntu-latest"], 60),
+                    _job("Build & Push image", "queued", ["self-hosted", "amael-lab"], 45),
+                ]})
+    problem = watchdog.check_runner_queue()
+    assert problem and "`github/runner`" in problem
+    assert "Build & Push image" in problem
+    assert "Runner update in progress" in problem  # dice dónde mirar
+
+
+def test_job_recien_encolado_no_reporta(monkeypatch):
+    _gh_actions(monkeypatch,
+                runs=[{"id": 1, "status": "in_progress"}],
+                jobs_by_run={1: [_job("Build & Push image", "queued", ["self-hosted"], 3)]})
+    assert watchdog.check_runner_queue() is None
+
+
+def test_job_hospedado_por_github_no_cuenta(monkeypatch):
+    """Una cola larga en ubuntu-latest es problema de GitHub, no de nuestro runner."""
+    _gh_actions(monkeypatch,
+                runs=[{"id": 1, "status": "queued"}],
+                jobs_by_run={1: [_job("Tests", "queued", ["ubuntu-latest"], 90)]})
+    assert watchdog.check_runner_queue() is None
+
+
+def test_runner_queue_incomunicado_no_inventa_problema(monkeypatch):
+    """Sin internet el PAT ya avisa; la cola no duplica el aviso."""
+    _gh_actions(monkeypatch, runs=[], jobs_by_run={}, exc=ConnectionError("sin red"))
+    assert watchdog.check_runner_queue() is None
+
+
+def test_runner_queue_desactivable_sin_token(monkeypatch):
+    monkeypatch.setattr(watchdog, "_GH_TOKEN", "")
+    assert watchdog.check_runner_queue() is None
