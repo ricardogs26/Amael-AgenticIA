@@ -52,7 +52,7 @@ def get_current_user(
         )
 
     try:
-        from jose import jwt
+        import jwt
 
         from config.settings import settings
 

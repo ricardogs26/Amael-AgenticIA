@@ -65,13 +65,12 @@ jobs:
         run: pip install -e ".[all]" --quiet
 
       - name: Scan de vulnerabilidades en dependencias
-        # PYSEC-2026-1325: ecdsa (dependencia transitiva de python-jose) SIN
-        # versión con fix publicada — no hay acción posible salvo migrar a
-        # PyJWT. Se ignora explícitamente; quitar el ignore cuando haya fix.
+        # Sin ignores desde el 6-oct-2026: la migración python-jose → PyJWT
+        # sacó ecdsa (PYSEC-2026-1325) y CVE-2026-85394 del árbol.
         # El reporte se imprime también al log: el summary no es accesible por
         # API y diagnosticar a ciegas costó una tarde (7-ago-2026).
         run: |
-          pip-audit --ignore-vuln PYSEC-2026-1325 \
+          pip-audit \
             --format=markdown --output=dep-scan-report.md \
             || (cat dep-scan-report.md && cat dep-scan-report.md >> $GITHUB_STEP_SUMMARY && exit 1)
 

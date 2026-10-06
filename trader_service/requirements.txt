@@ -36,7 +36,7 @@ opentelemetry-instrumentation-httpx>=0.46b0
 opentelemetry-exporter-otlp-proto-grpc>=1.26
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
-python-jose[cryptography]>=3.3
+PyJWT>=2.10.1
 
 # ── Env ───────────────────────────────────────────────────────────────────────
 python-dotenv>=1.0

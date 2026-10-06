@@ -15,9 +15,9 @@ from __future__ import annotations
 import logging
 from urllib.parse import urlencode
 
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
-from jose import jwt
 
 from config.settings import settings
 from interfaces.api.auth import get_current_user

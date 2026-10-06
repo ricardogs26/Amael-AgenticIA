@@ -40,7 +40,7 @@ opentelemetry-instrumentation-httpx>=0.46b0
 opentelemetry-exporter-otlp-proto-grpc>=1.26
 
 # ── Auth / JWT (require_internal_secret + fallback get_current_user) ──────────
-python-jose[cryptography]>=3.3
+PyJWT>=2.10.1
 
 # ── Env ───────────────────────────────────────────────────────────────────────
 python-dotenv>=1.0

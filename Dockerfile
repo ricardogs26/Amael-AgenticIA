@@ -5,7 +5,7 @@ WORKDIR /build
 
 # Build deps:
 #   gcc         — extensiones C (grpcio, numpy)
-#   libffi-dev  — cryptography (python-jose)
+#   libffi-dev  — cryptography
 #   libssl-dev  — cryptography / ssl
 #   libpq-dev   — psycopg2 (aunque usamos la versión binary, alguna dep transitiva puede necesitarlo)
 RUN apt-get update && apt-get install -y --no-install-recommends \
