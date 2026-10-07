@@ -148,6 +148,15 @@ spec:
           protocol: TCP
 
     # whatsapp-bridge — notificaciones SRE (notify_whatsapp_sre en reporter.py).
+    # Alertas CRITICAL en voz (idea 5): cosyvoice /tts.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: cosyvoice
+      ports:
+        - port: 8010
+          protocol: TCP
+
     - to:
         - podSelector:
             matchLabels:

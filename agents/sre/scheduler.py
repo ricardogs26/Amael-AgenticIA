@@ -377,6 +377,15 @@ def sre_autonomous_loop(
         # mismo ciclo (p.ej. OOM_KILLED + DEPLOYMENT_DEGRADED simultáneos).
         _gitops_dispatched_this_run: set[str] = set()
 
+        # Idea 5: CRITICAL persistentes también por voz. Se sigue ANTES del
+        # dedup — una anomalía persistente no vuelve a procesarse cada ciclo y
+        # aquí hay que verla en todos para medir cuánto lleva activa.
+        try:
+            from agents.sre import voice_alerts
+            voice_alerts.track(anomalies)
+        except Exception as exc:
+            logger.warning(f"[scheduler] voice_alerts falló (no crítico): {exc}")
+
         for anomaly in anomalies:
             if is_duplicate_incident(anomaly.incident_key):
                 logger.debug(f"[scheduler] Incidente duplicado: {anomaly.incident_key}")
