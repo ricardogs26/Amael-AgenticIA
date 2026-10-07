@@ -24,10 +24,10 @@ spec:
           containers:
           - name: morning-audio
             # Imagen propia: python + ffmpeg + morning_audio.py
-            # Flujo: raphael /sre estado+status+incidentes (frase en código, 1.0.5+)
+            # Flujo: raphael /sre estado+status+incidentes + trader + leads (frase en código, 1.1.0)
             #        -> CosyVoice3 /tts (WAV) -> ffmpeg WAV→OGG/opus
             #        -> bridge /send-audio (nota de voz, ptt)
-            image: registry.richardx.dev/morning-audio:1.0.7
+            image: registry.richardx.dev/morning-audio:1.1.1
             imagePullPolicy: IfNotPresent
             env:
             - name: BOT_JWT_TOKEN
