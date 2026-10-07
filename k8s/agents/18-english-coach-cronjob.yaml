@@ -1,0 +1,46 @@
+# english-coach — mini lección de inglés diaria por WhatsApp (idea 4, 7-oct-2026)
+# Código: Amael-IA/english-coach. El código elige la frase de una lista curada
+# (phrases.py) y el LLM solo redacta significado, ejemplos y quiz; el código
+# valida todo. Texto + nota de voz en inglés con la voz de Ricardo (CosyVoice
+# en GPU) hasta que haya una referencia nativa.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: amael-english-coach
+  namespace: amael-ia
+spec:
+  # Lunes a viernes 6:30 hora de México (después del audio de las 6:00)
+  schedule: "30 6 * * 1-5"
+  timeZone: "America/Mexico_City"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 1200
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: english-coach
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: english-coach
+            image: registry.richardx.dev/english-coach:1.0.0
+            imagePullPolicy: IfNotPresent
+            env:
+            - name: ADMIN_PHONE
+              valueFrom:
+                configMapKeyRef:
+                  name: amael-agentic-configmap
+                  key: ADMIN_PHONE
+            - name: COACH_LEVEL
+              value: "B2"
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
