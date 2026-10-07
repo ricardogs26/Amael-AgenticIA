@@ -60,6 +60,17 @@ spec:
         - port: 8002
           protocol: TCP
 
+    # Audio matutino (CronJob 6:00) — /sre estado, /sre status e incidentes.
+    # Desde morning-audio 1.0.5 lee a raphael directo en vez de pasar por
+    # /api/chat (el planner daba algo distinto cada mañana).
+    - from:
+        - podSelector:
+            matchLabels:
+              app: morning-audio
+      ports:
+        - port: 8002
+          protocol: TCP
+
     # Camael — catch-up / status queries opcionales (reverse handoff, polling).
     - from:
         - podSelector:
