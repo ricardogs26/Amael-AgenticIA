@@ -1,4 +1,9 @@
-# cosyvoice-service — TTS via Fun-CosyVoice3-0.5B (CPU only)
+# cosyvoice-service — TTS via Fun-CosyVoice3-0.5B
+# Desde 2.3.0 (7-oct-2026) corre en la GPU junto al LLM de ollama: pesos fp16
+# (~1.6 GiB), tope de 3.5 GiB por proceso, CPU si no hay ≥4 GiB libres al
+# arrancar o si la GPU falla en caliente. ~1 s por segundo de audio (antes ~45).
+# NO pide nvidia.com/gpu (esa la tiene ollama): containerd usa el runtime nvidia
+# por defecto y NVIDIA_VISIBLE_DEVICES basta. Rollback: COSYVOICE_DEVICE=cpu.
 # El modelo se descarga manualmente al PVC antes del primer despliegue
 # (huggingface_hub.snapshot_download('FunAudioLLM/Fun-CosyVoice3-0.5B-2512',
 #  local_dir='/models/Fun-CosyVoice3-0.5B') desde cualquier pod con el PVC montado).
@@ -32,10 +37,8 @@ spec:
     matchLabels:
       app: cosyvoice
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 0
-      maxUnavailable: 1
+    # Dos pods cargando el modelo a la vez duplicarían la VRAM junto al LLM.
+    type: Recreate
   template:
     metadata:
       labels:
@@ -44,7 +47,7 @@ spec:
     spec:
       containers:
         - name: cosyvoice
-          image: registry.richardx.dev/cosyvoice-service:2.2.0
+          image: registry.richardx.dev/cosyvoice-service:2.3.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8010
@@ -62,17 +65,37 @@ spec:
               value: "/models/reference/ricardo.wav"
             - name: TTS_MAX_CHARS
               value: "500"
+            # ── GPU compartida con ollama (2.3.0) ──────────────────────────
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "compute,utility"        # utility = nvidia-smi (medir VRAM libre)
+            - name: COSYVOICE_DEVICE
+              value: "auto"                   # rollback: "cpu"
+            - name: COSYVOICE_MIN_FREE_GIB
+              value: "4.0"                    # la carga pasa por fp32 (~3.7 GiB)
+            - name: COSYVOICE_MAX_VRAM_GIB
+              value: "3.5"                    # tope en operación (medido: pico 3.4)
+            - name: COSYVOICE_HALF_WEIGHTS
+              value: "true"
+            - name: PYTORCH_CUDA_ALLOC_CONF
+              value: "expandable_segments:True"
+            # wetext bajaba sus .fst de modelscope.cn en CADA arranque (~5 min):
+            # la caché vive en el PVC.
+            - name: MODELSCOPE_CACHE
+              value: "/models/modelscope-cache"
 
           resources:
             requests:
-              cpu: "2"
-              memory: "6Gi"
+              cpu: "500m"
+              memory: "4Gi"
             limits:
+              # Los límites se quedan: si cae a CPU (respaldo) vuelve a necesitar
+              # ~4 núcleos y ~8-12 GiB de RAM.
               cpu: "4"
               memory: "14Gi"
-            # Sin nvidia.com/gpu — CPU only, la GPU queda exclusiva para Ollama
-            # CosyVoice2-0.5B: llm.pt (1.9G) + tokenizers (950M) + flow (700M)
-            # + PyTorch buffer overhead en CPU → necesita ~8-12GB real
+            # Sin nvidia.com/gpu — esa la reserva ollama; la GPU se comparte vía
+            # NVIDIA_VISIBLE_DEVICES (ver encabezado).
 
           volumeMounts:
             - name: models
@@ -84,7 +107,7 @@ spec:
               port: 8010
             initialDelaySeconds: 60
             periodSeconds: 10
-            failureThreshold: 54   # hasta 10 min: 60 + 54*10 = 600s (modelo CPU pesado + .fst downloads)
+            failureThreshold: 54   # hasta 10 min: margen si arranca en CPU o sin caché de .fst
           livenessProbe:
             httpGet:
               path: /health

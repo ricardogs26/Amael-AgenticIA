@@ -5,7 +5,9 @@ Capacidades:
   synthesize(text, language)                   — genera audio WAV base64
   synthesize_and_send(text, phone, language)   — genera + envía nota de voz por WhatsApp
 
-El cosyvoice-service corre en CPU (sin GPU) en el mismo cluster.
+El cosyvoice-service corre en GPU desde 2.3.0 (7-oct-2026, ~1 s por segundo de
+audio) y cae a CPU (~45 s por segundo) si no hay VRAM o la GPU falla; los topes de
+este módulo siguen dimensionados para el peor caso (CPU).
 El whatsapp-bridge acepta audio vía /send-audio (OGG OPUS, ptt=True).
 """
 from __future__ import annotations
@@ -119,8 +121,8 @@ class CosyVoiceTool(BaseTool):
             logger.error(f"[cosyvoice_tool] synthesize error: {exc}")
             return ToolOutput.fail(str(exc), source=self.name)
 
-    # CosyVoice3 en CPU tiene RTF ~12x: 300 chars ≈ 20s de audio ≈ 4 min de
-    # síntesis. Cap corto + timeout amplio; siempre llamar vía asyncio.to_thread.
+    # Dimensionado para el respaldo en CPU (RTF ~12-45x): 300 chars ≈ 20s de
+    # audio ≈ 4+ min de síntesis; en GPU son ~20 s. Cap corto + timeout amplio; siempre llamar vía asyncio.to_thread.
     _CLONE_MAX_CHARS = 300
     _CLONE_TIMEOUT_S = 480
 

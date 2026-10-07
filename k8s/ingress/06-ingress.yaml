@@ -55,14 +55,10 @@ spec:
             port:
               number: 80
 
-      # ── TTS (sin cambios) ─────────────────────────────────────────────
-      - path: /tts
-        pathType: Prefix
-        backend:
-          service:
-            name: cosyvoice-service
-            port:
-              number: 8000
+      # /tts se retiró el 7-oct-2026: apuntaba a cosyvoice-service:8000 (el
+      # servicio escucha en 8010) y por eso daba 503 — protegido por accidente.
+      # CosyVoice no tiene autenticación y /tts/clone clona cualquier voz; con
+      # la GPU detrás, no debe quedar expuesto. Se usa solo dentro del cluster.
 
       # ── Health/Ready del backend (antes de /) ────────────────────────
       - path: /ready
