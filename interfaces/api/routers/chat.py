@@ -235,8 +235,10 @@ async def chat(
         #     coseno no recupera «prefiere respuestas cortas» cuando la
         #     pregunta es sobre Kong. Cacheado en Redis, tope duro en código.
         #   - episodios: lo circunstancial sí se recupera por similitud.
+        # Con la pregunta: los hechos personales solo entran si son relevantes
+        # (un «hola» llevaba datos de salud y «planta los domingos»; 7-oct-2026).
         profile_block = await _run_in_thread_safe(
-            _render_profile_block, effective_user
+            _render_profile_block, effective_user, question
         )
         memory_ctx = await _retrieve_memory_context(effective_user, question)
 
@@ -778,9 +780,9 @@ def _persist_message(
         logger.warning(f"[chat] No se pudo persistir mensaje: {exc}")
 
 
-def _render_profile_block(user_id: str) -> str:
+def _render_profile_block(user_id: str, question: str | None = None) -> str:
     from agents.memory_agent.profile import render_profile_block
-    return render_profile_block(user_id)
+    return render_profile_block(user_id, question)
 
 
 async def _run_in_thread_safe(fn, *args) -> str:

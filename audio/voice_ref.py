@@ -67,14 +67,55 @@ def register_voice_reference(phone: str, wav_b64: str, prompt_text: str) -> None
                 f"({len(wav_bytes)} bytes, prompt {len(prompt_text)} chars)")
 
 
+_SQL_SIBLINGS = (
+    "SELECT other.identity_value FROM user_identities me "
+    "JOIN user_identities other ON other.canonical_user_id = me.canonical_user_id "
+    "WHERE me.identity_value = %s AND other.identity_type = 'whatsapp' "
+    "AND other.identity_value <> %s"
+)
+
+
+def _sibling_identities(safe: str) -> list[str]:
+    """Otras identidades de WhatsApp del MISMO usuario canónico.
+
+    7-oct-2026: WhatsApp empezó a entregar los mensajes de Ricardo con su @lid
+    (130554506788994) y no con su número (5219993437008), que es donde está
+    registrada su voz: la respuesta salió con la voz neutral. La voz es del
+    usuario, no del identificador con el que llegó el mensaje.
+    """
+    try:
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(_SQL_SIBLINGS, (safe, safe))
+                return [r[0] for r in cur.fetchall() if r and r[0]]
+    except Exception as exc:
+        logger.info(f"[voice_ref] Sin identidades hermanas para {safe}: {exc}")
+        return []
+
+
 def get_voice_reference(phone: str) -> tuple[str, str] | None:
     """
-    Retorna (wav_base64, prompt_text) de la voz clonada del número, o None.
-    Transcripción desde Redis (rehidrata desde MinIO si falta el key).
+    Retorna (wav_base64, prompt_text) de la voz clonada del usuario, o None.
+    Busca por el identificador recibido y, si no hay, por las otras
+    identidades de WhatsApp del mismo usuario (número ↔ @lid).
     """
+    safe = _safe_phone(phone)
+    ref = _get_by_key(safe)
+    if ref is not None:
+        return ref
+    for sibling in _sibling_identities(safe):
+        ref = _get_by_key(_safe_phone(sibling))
+        if ref is not None:
+            logger.info(f"[voice_ref] Voz de {safe} encontrada por su identidad hermana {sibling}")
+            return ref
+    return None
+
+
+def _get_by_key(safe: str) -> tuple[str, str] | None:
+    """Referencia guardada exactamente bajo `safe`, o None."""
     from storage.redis.client import get_redis_client
 
-    safe = _safe_phone(phone)
     try:
         minio = _get_minio()
         resp = minio.get_object(_BUCKET, f"{safe}.wav")
@@ -115,7 +156,8 @@ def delete_voice_reference(phone: str) -> bool:
     from storage.redis.client import get_redis_client
 
     safe = _safe_phone(phone)
-    existed = get_voice_reference(safe) is not None
+    # Solo la clave exacta: borrar no debe alcanzar la voz de otra identidad.
+    existed = _get_by_key(safe) is not None
     minio = _get_minio()
     for obj in (f"{safe}.wav", f"{safe}.txt"):
         try:

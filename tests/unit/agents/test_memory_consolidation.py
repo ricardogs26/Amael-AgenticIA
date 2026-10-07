@@ -267,3 +267,62 @@ def test_json_de_sintesis_respeta_el_esquema():
     finally:
         mp.undo()
     assert hechos == [{"text": "válido", "type": "preference"}]
+
+
+# ── Filtro de relevancia por pregunta (7-oct-2026) ───────────────────────────
+# Ricardo saludó por voz («Hola, Mael, ¿cómo estás? Muy buenos días») y el
+# modelo rápido remató con «…y plantas tus vegetales este domingo a las 8 AM»:
+# el perfil inyectaba TODOS los hechos en cada prompt (incluidos datos de salud
+# y familia) y el «no lo cites» del encabezado no bastó. Ahora las preferencias
+# van siempre y los demás hechos solo si comparten una raíz con la pregunta.
+
+_HECHOS_RICARDO = [
+    {"text": "Prefiere respuestas cortas y directas", "fact_type": "preference", "importance": 0.9},
+    {"text": "Hace hoyo y planta plantas los domingos a las 8 AM", "fact_type": "fact", "importance": 0.6},
+    {"text": "Tiene una hija de 11 años llamada Regis", "fact_type": "fact", "importance": 0.8},
+    {"text": "Trabaja en infraestructura de Kubernetes", "fact_type": "fact", "importance": 0.7},
+]
+
+
+@pytest.fixture
+def perfil_ricardo(monkeypatch, redis_falso):
+    llamadas = []
+    monkeypatch.setattr(profile, "_fetch_facts",
+                        lambda u: llamadas.append(1) or _HECHOS_RICARDO)
+    return llamadas
+
+
+def test_un_saludo_solo_lleva_preferencias(perfil_ricardo):
+    bloque = profile.render_profile_block("u@x.com", "Hola, Mael, ¿cómo estás? Muy buenos días.")
+    assert "respuestas cortas" in bloque
+    assert "planta" not in bloque and "Regis" not in bloque and "Kubernetes" not in bloque
+
+
+def test_hecho_relevante_si_entra(perfil_ricardo):
+    bloque = profile.render_profile_block("u@x.com", "¿Qué le puedo regalar a mi hija?")
+    assert "Regis" in bloque and "planta" not in bloque
+
+
+def test_raices_comparten_aunque_cambie_la_palabra(perfil_ricardo):
+    """«plantar» encuentra «plantas»; «kubernetes» con mayúsculas y sin acento."""
+    assert "planta" in profile.render_profile_block("u@x.com", "¿Cuándo toca plantar?")
+    assert "Kubernetes" in profile.render_profile_block("u@x.com", "un pod de KUBERNETES falla")
+
+
+def test_verbos_comunes_no_cuentan_como_relevancia(perfil_ricardo):
+    """«hace»/«tiene» están en casi cualquier pregunta y en casi cualquier hecho."""
+    bloque = profile.render_profile_block("u@x.com", "¿Qué hace el cluster y qué tiene raphael?")
+    assert "planta" not in bloque and "Regis" not in bloque
+
+
+def test_sin_pregunta_van_todos_los_hechos(perfil_ricardo):
+    """El day planner no manda pregunta: conserva el comportamiento de siempre."""
+    bloque = profile.render_profile_block("u@x.com")
+    assert all(x in bloque for x in ("cortas", "planta", "Regis", "Kubernetes"))
+
+
+def test_la_cache_sirve_para_cualquier_pregunta(perfil_ricardo):
+    profile.render_profile_block("u@x.com", "hola")
+    profile.render_profile_block("u@x.com", "¿y mi hija?")
+    profile.render_profile_block("u@x.com")
+    assert len(perfil_ricardo) == 1, "un solo scroll a Qdrant; el filtro se aplica después"
