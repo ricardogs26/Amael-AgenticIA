@@ -332,6 +332,89 @@ class CosyVoiceTool(BaseTool):
             logger.error(f"[cosyvoice_tool] send-audio error: {exc}")
             return ToolOutput.fail(str(exc), source=self.name)
 
+    async def speak(
+        self,
+        text: str,
+        phone: str,
+        *,
+        voice: str | None = None,
+        clone_ref: tuple[str, str] | None = None,
+        language: str = "es",
+    ) -> ToolOutput:
+        """Lee `text` en una sola nota de voz, por largo que sea (idea 3).
+
+        Recorta al tope del dispositivo en fin de frase (2 500 chars en GPU,
+        500 en CPU), parte en fragmentos de ≤450 (cosyvoice acepta 500), los
+        sintetiza en orden —con la voz clonada si viene `clone_ref`
+        (wav_b64, transcripción), si no con `voice`— y une los WAV.
+        Todo el pipeline corre en un hilo: nada bloquea el event loop.
+        """
+        import asyncio
+
+        from tools.cosyvoice import chunking
+
+        phone = phone or _ADMIN_PHONE
+        if not phone:
+            return ToolOutput.fail("Sin número destino", source=self.name)
+        device = await self.device()
+        body = chunking.truncate_at_sentence(text, chunking.max_chars_for(device))
+        chunks = chunking.split_for_tts(body)
+        if not chunks:
+            return ToolOutput.fail("Texto vacío", source=self.name)
+
+        def _one(chunk: str) -> bytes:
+            if clone_ref:
+                url = f"{_COSYVOICE_URL}/tts/clone"
+                payload = {"text": chunk, "reference_audio_base64": clone_ref[0],
+                           "prompt_text": clone_ref[1], "language": language}
+                timeout = self._CLONE_TIMEOUT_S
+            else:
+                url = f"{_COSYVOICE_URL}/tts"
+                payload = {"text": chunk, "language": language}
+                if voice:
+                    payload["voice"] = voice
+                timeout = 120 if device == "cuda" else self._CLONE_TIMEOUT_S
+            resp = _req.post(url, json=payload, timeout=timeout)
+            if resp.status_code != 200:
+                raise RuntimeError(f"cosyvoice-service HTTP {resp.status_code}: {resp.text[:200]}")
+            return base64.b64decode(resp.json()["audio_base64"])
+
+        def _pipeline() -> ToolOutput:
+            wavs = [_one(c) for c in chunks]
+            wav = chunking.concat_wavs(wavs) if len(wavs) > 1 else wavs[0]
+            ogg_b64 = self._wav_to_ogg_opus(base64.b64encode(wav).decode())
+            resp = _req.post(
+                f"{_WA_BRIDGE_URL}/send-audio",
+                json={"phoneNumber": phone, "base64": ogg_b64,
+                      "mimetype": "audio/ogg; codecs=opus", "ptt": True},
+                timeout=60,
+            )
+            if resp.status_code not in (200, 201):
+                return ToolOutput.fail(
+                    f"whatsapp-bridge /send-audio HTTP {resp.status_code}: {resp.text[:200]}",
+                    source=self.name,
+                )
+            import io as _io
+            import wave as _wave
+            with _wave.open(_io.BytesIO(wav), "rb") as w:
+                duration = w.getnframes() / w.getframerate()
+            logger.info(
+                f"[cosyvoice_tool] Nota de voz enviada a {phone} ({duration:.1f}s, "
+                f"{len(body)} chars en {len(chunks)} fragmento(s), "
+                f"{'clonada' if clone_ref else voice or 'default'}, {device})"
+            )
+            return ToolOutput.ok(
+                data={"sent": True, "phone": phone, "duration_seconds": duration,
+                      "chars": len(body), "chunks": len(chunks), "truncated": len(body) < len(text.strip())},
+                source=self.name,
+            )
+
+        try:
+            return await asyncio.to_thread(_pipeline)
+        except Exception as exc:
+            logger.error(f"[cosyvoice_tool] speak error: {exc}")
+            return ToolOutput.fail(str(exc), source=self.name)
+
     async def health_check(self) -> bool:
         """Verifica que CosyVoice responde (non-blocking)."""
         import asyncio

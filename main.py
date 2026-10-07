@@ -357,6 +357,8 @@ def create_app() -> FastAPI:
     app.include_router(trader_router)       # /api/trader/* — proxy a trader-service
     from interfaces.api.routers.reception import router as reception_router
     app.include_router(reception_router)    # /api/reception/* — recepcionista WhatsApp
+    from interfaces.api.routers.voice import router as voice_router
+    app.include_router(voice_router)        # /api/voice/* — «léeme esto» (/voz)
 
     return app
 

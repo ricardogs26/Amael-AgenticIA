@@ -33,21 +33,19 @@ def engines(monkeypatch):
     import tools.cosyvoice.tool as cv
     import tools.piper.tool as pp
 
-    state = {"ref": None, "device": "cuda", "fail": set(), "calls": []}
+    state = {"ref": None, "device": "cuda", "fail": set(), "calls": [], "texts": []}
 
     monkeypatch.setattr(vr, "get_voice_reference", lambda phone: state["ref"])
 
     async def device(self):
         return state["device"]
 
-    async def clone_send(self, inp):
-        state["calls"].append("clone")
-        return ToolOutput.fail("x", source="t") if "clone" in state["fail"] else \
-            ToolOutput.ok(data={"duration_seconds": 1}, source="t")
-
-    async def cosy_send(self, inp):
-        state["calls"].append(f"cosy:{inp.voice}")
-        return ToolOutput.fail("x", source="t") if "cosy" in state["fail"] else \
+    async def speak(self, text, phone, *, voice=None, clone_ref=None, language="es"):
+        kind = "clone" if clone_ref else f"cosy:{voice}"
+        state["calls"].append(kind)
+        state["texts"].append(text)
+        failing = "clone" if clone_ref else "cosy"
+        return ToolOutput.fail("x", source="t") if failing in state["fail"] else \
             ToolOutput.ok(data={"duration_seconds": 1}, source="t")
 
     async def piper_send(self, inp):
@@ -56,15 +54,14 @@ def engines(monkeypatch):
             ToolOutput.ok(data={"duration_seconds": 1}, source="t")
 
     monkeypatch.setattr(cv.CosyVoiceTool, "device", device)
-    monkeypatch.setattr(cv.CosyVoiceTool, "synthesize_clone_and_send", clone_send)
-    monkeypatch.setattr(cv.CosyVoiceTool, "synthesize_and_send", cosy_send)
+    monkeypatch.setattr(cv.CosyVoiceTool, "speak", speak)
     monkeypatch.setattr(pp.PiperTool, "synthesize_and_send", piper_send)
     return state
 
 
 async def _send(text="Hola, mañana tienes cita a las diez."):
     from interfaces.api.routers.chat import _send_voice_note
-    await _send_voice_note("5215550001111", text)
+    return await _send_voice_note("5215550001111", text)
 
 
 async def test_con_voz_propia_y_gpu_usa_la_clonada(engines):
@@ -115,3 +112,24 @@ async def test_cosyvoice_inalcanzable_se_trata_como_cpu(engines):
 async def test_texto_vacio_no_hace_nada(engines):
     await _send("   ")
     assert engines["calls"] == []
+
+
+
+# ── idea 3: «léeme esto» (textos largos, motor devuelto) ─────────────────────
+
+async def test_devuelve_el_motor_que_respondio(engines):
+    engines["ref"] = ("wavb64", "t")
+    assert await _send() == "clone"
+    engines["ref"] = None
+    assert await _send() == "neutral"
+    engines["fail"] = {"cosy"}
+    assert await _send() == "piper"
+    engines["fail"] = {"cosy", "piper"}
+    assert await _send() is None
+
+
+async def test_texto_largo_llega_completo_a_cosyvoice(engines):
+    """El tope de 500 vivía en _send_voice_note; ahora lo aplica speak() según el dispositivo."""
+    largo = "Esta es una frase del correo. " * 60   # ~1 800 chars
+    await _send(largo)
+    assert len(engines["texts"][0]) > 1500

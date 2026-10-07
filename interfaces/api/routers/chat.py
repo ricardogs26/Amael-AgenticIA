@@ -857,6 +857,9 @@ _VOICE_KEYWORDS = (
     "nota de voz", "audio", "por audio", "en audio",
     "mándame un audio", "escuchar", "dime en voz",
     "respóndeme en voz", "voice note", "send audio",
+    # idea 3 «léeme esto» (7-oct-2026)
+    "léeme", "leeme", "lee en voz", "en voz alta", "lée", "read me", "read it to me",
+    "read aloud", "read out loud",
 )
 
 
@@ -898,9 +901,10 @@ def _strip_for_tts(text: str) -> str:
 _NEUTRAL_VOICE = os.environ.get("COSYVOICE_NEUTRAL_VOICE", "es_MX_female")
 
 
-async def _send_voice_note(phone: str, text: str) -> None:
+async def _send_voice_note(phone: str, text: str) -> str | None:
     """
-    Sintetiza el texto y lo envía como nota de voz PTT.
+    Lee el texto como nota de voz PTT. Devuelve el motor que la mandó
+    ("clone" | "neutral" | "piper") o None si ninguno pudo.
 
     Orden (7-oct-2026, CosyVoice en GPU: ~1 s por segundo de audio):
       CosyVoice en GPU:
@@ -910,26 +914,27 @@ async def _send_voice_note(phone: str, text: str) -> None:
       CosyVoice en CPU o caído (una nota tardaría minutos):
         1. Piper.
         2. CosyVoice neutral, como último recurso.
-    El orden viejo (clonada → Piper → CosyVoice voz por defecto) era de cuando
-    CosyVoice solo corría en CPU, y su último recurso respondía a cualquier
-    usuario con la voz de Ricardo.
-    Fire-and-forget: nunca lanza excepción ni bloquea la respuesta de texto.
+    CosyVoice lee textos largos (idea 3): CosyVoiceTool.speak() parte en
+    fragmentos y une el audio — hasta ~2 500 chars en GPU, 500 en CPU. Piper
+    sigue con 500 en fin de frase.
+    Nunca lanza excepción ni bloquea la respuesta de texto.
     """
-    truncated = _strip_for_tts(text)[:500]
-    if not truncated:
-        return
+    from core import lang
+    from tools.cosyvoice.chunking import truncate_at_sentence
+
+    clean = _strip_for_tts(text)
+    if not clean:
+        return None
+    language = lang.detect(clean) if lang.detect(clean) in lang.LANGS else "es"
 
     from tools.cosyvoice.tool import CosyVoiceTool
-    from tools.cosyvoice.tool import SynthesizeAndSendInput as CosyInput
 
     cosy = CosyVoiceTool()
     fast = (await cosy.device()) == "cuda"
 
     async def _cosy_neutral() -> bool:
         try:
-            result = await cosy.synthesize_and_send(
-                CosyInput(text=truncated, phone=phone, language="es", voice=_NEUTRAL_VOICE)
-            )
+            result = await cosy.speak(clean, phone, voice=_NEUTRAL_VOICE, language=language)
             if result.success:
                 logger.info(
                     f"[chat] Nota de voz CosyVoice ({_NEUTRAL_VOICE}) enviada a {phone} "
@@ -946,7 +951,7 @@ async def _send_voice_note(phone: str, text: str) -> None:
             from tools.piper.tool import PiperTool
             from tools.piper.tool import SynthesizeAndSendInput as PiperInput
             result = await PiperTool().synthesize_and_send(
-                PiperInput(text=truncated, phone=phone)
+                PiperInput(text=truncate_at_sentence(clean, 500), phone=phone)
             )
             if result.success:
                 logger.info(
@@ -961,9 +966,9 @@ async def _send_voice_note(phone: str, text: str) -> None:
 
     if not fast:
         logger.info("[chat] CosyVoice no está en GPU — Piper primero")
-        if not await _piper():
-            await _cosy_neutral()
-        return
+        if await _piper():
+            return "piper"
+        return "neutral" if await _cosy_neutral() else None
 
     # 0. Voz clonada del usuario si hay referencia registrada
     try:
@@ -972,29 +977,20 @@ async def _send_voice_note(phone: str, text: str) -> None:
         from audio.voice_ref import get_voice_reference
         ref = await _aio.to_thread(get_voice_reference, phone)
         if ref is not None:
-            wav_b64, prompt_text = ref
-            from tools.cosyvoice.tool import SynthesizeCloneAndSendInput
-            result = await cosy.synthesize_clone_and_send(
-                SynthesizeCloneAndSendInput(
-                    text=truncated,
-                    phone=phone,
-                    reference_audio_base64=wav_b64,
-                    prompt_text=prompt_text,
-                )
-            )
+            result = await cosy.speak(clean, phone, clone_ref=ref, language=language)
             if result.success:
                 logger.info(
                     f"[chat] Nota de voz CLONADA enviada a {phone} "
                     f"({result.data.get('duration_seconds', 0):.1f}s)"
                 )
-                return
+                return "clone"
             logger.warning(f"[chat] Voz clonada falló: {result.error}")
     except Exception as exc:
         logger.warning(f"[chat] Voz clonada excepción: {exc}")
 
     if await _cosy_neutral():
-        return
-    await _piper()
+        return "neutral"
+    return "piper" if await _piper() else None
 
 
 # ── P7-004: Response cache helpers ────────────────────────────────────────────
