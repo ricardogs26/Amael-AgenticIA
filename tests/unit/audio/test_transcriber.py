@@ -17,7 +17,9 @@ def modelo(monkeypatch):
     """Sustituye el modelo de whisper y captura los kwargs de transcribe()."""
     m = MagicMock()
     m.transcribe.return_value = ([_Seg("hola")], MagicMock(language="es"))
+    m.detect_language.return_value = ("es", 0.9, [("es", 0.9), ("en", 0.05), ("de", 0.03)])
     monkeypatch.setattr(transcriber, "_get_model", lambda: m)
+    monkeypatch.setattr(transcriber, "_decode", lambda path: "AUDIO")
     return m
 
 
@@ -90,3 +92,36 @@ def test_modelo_por_defecto_es_small():
     import os
     if "WHISPER_MODEL" not in os.environ:
         assert importlib.reload(transcriber)._WHISPER_MODEL_SIZE == "small"
+
+
+
+# ── es,en: detección restringida (7-oct-2026) ────────────────────────────────
+
+def test_lista_elige_ingles_si_es_el_mas_probable(modelo, monkeypatch):
+    monkeypatch.setattr(transcriber, "_WHISPER_LANGUAGE", "es,en")
+    modelo.detect_language.return_value = ("en", 0.59, [("en", 0.59), ("es", 0.25)])
+    transcriber.transcribe_audio_base64(_b64())
+    kw = modelo.transcribe.call_args.kwargs
+    assert kw["language"] == "en"
+    assert kw["initial_prompt"].startswith("Voice message for Amael")
+
+
+def test_lista_ignora_idiomas_fuera_de_la_lista(modelo, monkeypatch):
+    """El «hola» de agosto salió alemán con 0.48: con la lista gana el español."""
+    monkeypatch.setattr(transcriber, "_WHISPER_LANGUAGE", "es,en")
+    modelo.detect_language.return_value = ("de", 0.48, [("de", 0.48), ("es", 0.30), ("en", 0.10)])
+    transcriber.transcribe_audio_base64(_b64())
+    assert modelo.transcribe.call_args.kwargs["language"] == "es"
+
+
+def test_si_la_deteccion_falla_usa_el_primero_de_la_lista(modelo, monkeypatch):
+    monkeypatch.setattr(transcriber, "_WHISPER_LANGUAGE", "es,en")
+    modelo.detect_language.side_effect = RuntimeError("boom")
+    transcriber.transcribe_audio_base64(_b64())
+    assert modelo.transcribe.call_args.kwargs["language"] == "es"
+
+
+def test_idioma_fijo_no_detecta(modelo, monkeypatch):
+    monkeypatch.setattr(transcriber, "_WHISPER_LANGUAGE", "es")
+    transcriber.transcribe_audio_base64(_b64())
+    modelo.detect_language.assert_not_called()

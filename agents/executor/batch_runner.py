@@ -241,18 +241,21 @@ def run_reasoning_step(
     user_question = with_history(state.get("question", ""), state.get("history"))
     user_id = state.get("user_id", "")
 
-    # Idioma preferido: configuración del perfil > heurística sobre la pregunta
-    pref_lang = _get_user_language_preference(user_id)
+    # Idioma (7-oct-2026): manda el de la PREGUNTA; la preferencia guardada solo
+    # decide si no se detecta. Antes la preferencia «es» ganaba siempre y una
+    # pregunta en inglés se contestaba —o se traducía— al español.
+    from core import lang as _lang
+    pref_lang = _lang.effective(state.get("question", ""), _get_user_language_preference(user_id))
     if pref_lang == "es":
         lang_rule = (
-            "REGLA ABSOLUTA DE IDIOMA: El usuario configuró ESPAÑOL como su idioma preferido. "
+            "REGLA ABSOLUTA DE IDIOMA: el usuario escribe en ESPAÑOL. "
             "Responde SIEMPRE en español, sin excepción, aunque el contexto esté en inglés — "
             "traduce y sintetiza al español."
         )
     elif pref_lang == "en":
         lang_rule = (
-            "LANGUAGE ABSOLUTE RULE: The user configured ENGLISH as their preferred language. "
-            "Always respond in English, without exception."
+            "LANGUAGE ABSOLUTE RULE: the user is writing in ENGLISH. "
+            "Always respond in English, without exception, even if the context is in Spanish."
         )
     else:
         lang_rule = (
@@ -309,7 +312,7 @@ def run_reasoning_step(
     # forzar traducción con prompt dedicado (más confiable que instrucciones en el mismo system prompt).
     # Dispara si:  preferencia explícita "es"  → respuesta no es español
     #              pregunta detectada como ES   → respuesta es inglés o indeterminada ("und")
-    _target_es = (pref_lang == "es") or (_detect_language(user_question) == "es" if user_question else False)
+    _target_es = pref_lang == "es"
     if _target_es and _detect_language(new_answer) != "es":
         logger.info("[executor] Respuesta en inglés detectada para pregunta en español — traduciendo")
         trans_input = new_answer

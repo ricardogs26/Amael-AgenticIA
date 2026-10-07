@@ -21,7 +21,7 @@ _fast_llm = None
 _lock = threading.Lock()
 
 _SYSTEM_PROMPT = (
-    "Eres Amael, un asistente personal en español de México. "
+    "Eres Amael, un asistente personal. "
     "Responde de forma breve, cálida y natural, sin tecnicismos innecesarios. "
     "Si el usuario solo saluda o agradece, responde con naturalidad y ofrece ayuda "
     "en una frase. No inventes datos ni ejecutes acciones. "
@@ -76,6 +76,14 @@ _MAX_HISTORY_MSGS  = 10
 _MAX_HISTORY_CHARS = 1200
 
 
+def _with_language(system_prompt: str, question: str) -> str:
+    """Idioma decidido en código (core.lang): el de la pregunta. El prompt decía
+    fijo «en español de México» y una pregunta en inglés se contestaba en
+    español (7-oct-2026)."""
+    from core import lang
+    return f"{system_prompt}\n{lang.INSTRUCTION[lang.effective(question)]}"
+
+
 def _build_messages(system_prompt: str, question: str, history: list | None) -> list:
     """
     Arma la lista de mensajes para el LLM: system → historial → pregunta actual.
@@ -126,7 +134,7 @@ async def handle_fast_chat(
     """
     t0 = time.monotonic()
     llm = _get_fast_llm()
-    messages = _build_messages(_SYSTEM_PROMPT, question, history)
+    messages = _build_messages(_with_language(_SYSTEM_PROMPT, question), question, history)
 
     try:
         resp = await asyncio.to_thread(llm.invoke, messages)
@@ -161,7 +169,7 @@ async def handle_fast_chat(
 _ESCALATE_TOKEN = "NECESITA_PIPELINE"
 
 _TRIAGE_SYSTEM = (
-    "Eres Amael, asistente personal en español de México.\n"
+    "Eres Amael, asistente personal.\n"
     "Tu tarea es decidir cómo responder al mensaje del usuario:\n"
     "- Si es charla, o una pregunta de CONOCIMIENTO GENERAL que puedes responder "
     "tú solo (definiciones, explicaciones de conceptos, traducciones, matemáticas "
@@ -196,7 +204,7 @@ async def handle_fast_triage(
     """
     t0 = time.monotonic()
     llm = _get_fast_llm()
-    messages = _build_messages(_TRIAGE_SYSTEM, question, history)
+    messages = _build_messages(_with_language(_TRIAGE_SYSTEM, question), question, history)
 
     resp = await asyncio.to_thread(llm.invoke, messages)  # excepción → el dispatcher escala
     answer = (resp.content if hasattr(resp, "content") else str(resp) or "").strip()

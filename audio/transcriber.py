@@ -34,13 +34,60 @@ _WHISPER_CACHE_DIR   = os.environ.get("WHISPER_CACHE_DIR", "/app/whisper-cache")
 # estás? buenos días» de 2.2 s salió como alemán con probabilidad 0.48 y se
 # transcribió «Hola, como ist das bei uns die Sammeln?». Amael contestó que no
 # entendía la pregunta, y el fallo se leía como del agente y no del audio.
-_WHISPER_LANGUAGE    = os.environ.get("WHISPER_LANGUAGE", "es")
+#
+# 7-oct-2026: con «es» fijo, una nota en inglés se TRADUCÍA al transcribir
+# («I'm fine and thank you» → «Bien, y gracias») y Amael contestaba en español.
+# Ahora acepta una lista: «es,en» = detección restringida a esos idiomas (gana
+# el más probable de la lista; el alemán de agosto ya no puede ganar). Medido
+# con 7 notas reales: 7/7 bien. Un solo código = fijo; «auto»/"" = libre.
+_WHISPER_LANGUAGE    = os.environ.get("WHISPER_LANGUAGE", "es,en")
 # Pista de VOCABULARIO, no de contenido: le enseña el nombre «Amael». Un saludo
 # literal como pista («Hola Amael, ¿cómo estás?») también acertaba, pero empuja
 # a whisper a escribir ese saludo cuando el audio no se entiende. "" la apaga.
 _WHISPER_PROMPT      = os.environ.get(
     "WHISPER_INITIAL_PROMPT", "Mensaje de voz para Amael, el asistente personal de Ricardo."
 )
+_WHISPER_PROMPT_EN   = os.environ.get(
+    "WHISPER_INITIAL_PROMPT_EN", "Voice message for Amael, Ricardo's personal assistant."
+)
+
+
+def _prompt_for(language: str | None) -> str | None:
+    """Pista de vocabulario en el idioma de la nota (una pista en español
+    empuja a whisper a escribir en español)."""
+    if language == "en":
+        return _WHISPER_PROMPT_EN or None
+    if language == "es":
+        return _WHISPER_PROMPT or None
+    return None
+
+
+def _decode(path: str):
+    from faster_whisper import decode_audio
+    return decode_audio(path)
+
+
+def _pick_language(model, audio) -> str | None:
+    """None = autodetección libre; un código = fijo; lista = el más probable
+    de la lista según detect_language (cualquier otro idioma se ignora)."""
+    idioma = _WHISPER_LANGUAGE.strip().lower()
+    if idioma in ("", "auto"):
+        return None
+    langs = [x.strip() for x in idioma.split(",") if x.strip()]
+    if len(langs) == 1:
+        return langs[0]
+    try:
+        _, _, probs = model.detect_language(audio=audio, vad_filter=True)
+        dist = dict(probs)
+        best = max(langs, key=lambda code: dist.get(code, 0.0))
+        logger.info(
+            "[transcriber] Idioma: " + ", ".join(f"{c}={dist.get(c, 0.0):.2f}" for c in langs)
+            + f" → {best}"
+        )
+        return best
+    except Exception as exc:
+        logger.warning(f"[transcriber] detect_language falló ({exc}); uso {langs[0]}")
+        return langs[0]
 
 # ── Singleton lazy del modelo ─────────────────────────────────────────────────
 _model: WhisperModelType | None = None
@@ -100,15 +147,15 @@ def transcribe_audio_base64(
             tmp_path = tmp.name
 
         model = _get_model()
-        idioma = _WHISPER_LANGUAGE.strip().lower()
+        audio = _decode(tmp_path)      # una sola decodificación para detectar y transcribir
+        language = _pick_language(model, audio)
         segments, info = model.transcribe(
-            tmp_path,
+            audio,
             beam_size=5,
-            # Fijo por defecto; "auto"/"" delega en la detección de whisper.
-            language=None if idioma in ("", "auto") else idioma,
+            language=language,
             vad_filter=True,        # filtra silencios
             vad_parameters={"min_silence_duration_ms": 500},
-            initial_prompt=_WHISPER_PROMPT or None,
+            initial_prompt=_prompt_for(language),
         )
 
         text = " ".join(seg.text.strip() for seg in segments).strip()

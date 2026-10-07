@@ -64,7 +64,7 @@ spec:
 
       containers:
       - name: amael-agentic-backend
-        image: registry.richardx.dev/amael-agentic-backend:1.18.10
+        image: registry.richardx.dev/amael-agentic-backend:1.18.11
         imagePullPolicy: Always
         ports:
         - name: http
@@ -191,12 +191,12 @@ spec:
               name: servicenow-credentials
               key: password
 
-        # Idioma de las notas de voz. En audios de ~2 s la autodetección de
-        # whisper es una apuesta: un «hola, ¿cómo estás?» salió como alemán con
-        # probabilidad 0.48 y Amael contestó que no entendía la pregunta.
-        # "auto" devuelve la detección automática.
+        # Idioma de las notas de voz. En audios de ~2 s la autodetección LIBRE
+        # es una apuesta (un «hola» salió alemán con 0.48), y fijo en "es" las
+        # notas en inglés se traducían al transcribir (7-oct-2026). "es,en" =
+        # detección restringida a esos dos. Un código = fijo; "auto" = libre.
         - name: WHISPER_LANGUAGE
-          value: "es"
+          value: "es,en"
 
         # ── SRE — WhatsApp notifications ─────────────────────────────────────
         - name: OWNER_PHONE
