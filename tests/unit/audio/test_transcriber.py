@@ -66,3 +66,27 @@ def test_un_fallo_del_modelo_no_propaga(modelo, monkeypatch):
     modelo.transcribe.side_effect = RuntimeError("boom")
 
     assert transcriber.transcribe_audio_base64(_b64()) == ""
+
+
+
+def test_pista_de_vocabulario_con_el_nombre_amael(modelo, monkeypatch):
+    """«Hola Amael» salía «Háblame el contacto» (7-oct-2026): la pista enseña el nombre."""
+    monkeypatch.setattr(transcriber, "_WHISPER_LANGUAGE", "es")
+    transcriber.transcribe_audio_base64(_b64())
+    prompt = modelo.transcribe.call_args.kwargs["initial_prompt"]
+    assert "Amael" in prompt
+    assert "cómo estás" not in prompt.lower(), "pista de vocabulario, no un saludo que copiar"
+
+
+def test_pista_vacia_se_apaga(modelo, monkeypatch):
+    monkeypatch.setattr(transcriber, "_WHISPER_LANGUAGE", "es")
+    monkeypatch.setattr(transcriber, "_WHISPER_PROMPT", "")
+    transcriber.transcribe_audio_base64(_b64())
+    assert modelo.transcribe.call_args.kwargs["initial_prompt"] is None
+
+
+def test_modelo_por_defecto_es_small():
+    import importlib
+    import os
+    if "WHISPER_MODEL" not in os.environ:
+        assert importlib.reload(transcriber)._WHISPER_MODEL_SIZE == "small"

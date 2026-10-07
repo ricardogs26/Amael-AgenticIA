@@ -22,7 +22,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger("audio.transcriber")
 
 # ── Configuración ─────────────────────────────────────────────────────────────
-_WHISPER_MODEL_SIZE  = os.environ.get("WHISPER_MODEL", "base")
+# 7-oct-2026: «base» convirtió «Hola Amael, ¿cómo estás?» (2 s) en «Háblame el
+# contacto muy buenos días» y Amael contestó sobre un contacto. Medido con 4
+# notas reales: base 1/4 correctas, small+prompt 4/4, ~6 s por nota en CPU.
+_WHISPER_MODEL_SIZE  = os.environ.get("WHISPER_MODEL", "small")
 _WHISPER_DEVICE      = "cpu"
 _WHISPER_COMPUTE     = "int8"
 _WHISPER_CACHE_DIR   = os.environ.get("WHISPER_CACHE_DIR", "/app/whisper-cache")
@@ -32,6 +35,12 @@ _WHISPER_CACHE_DIR   = os.environ.get("WHISPER_CACHE_DIR", "/app/whisper-cache")
 # transcribió «Hola, como ist das bei uns die Sammeln?». Amael contestó que no
 # entendía la pregunta, y el fallo se leía como del agente y no del audio.
 _WHISPER_LANGUAGE    = os.environ.get("WHISPER_LANGUAGE", "es")
+# Pista de VOCABULARIO, no de contenido: le enseña el nombre «Amael». Un saludo
+# literal como pista («Hola Amael, ¿cómo estás?») también acertaba, pero empuja
+# a whisper a escribir ese saludo cuando el audio no se entiende. "" la apaga.
+_WHISPER_PROMPT      = os.environ.get(
+    "WHISPER_INITIAL_PROMPT", "Mensaje de voz para Amael, el asistente personal de Ricardo."
+)
 
 # ── Singleton lazy del modelo ─────────────────────────────────────────────────
 _model: WhisperModelType | None = None
@@ -99,6 +108,7 @@ def transcribe_audio_base64(
             language=None if idioma in ("", "auto") else idioma,
             vad_filter=True,        # filtra silencios
             vad_parameters={"min_silence_duration_ms": 500},
+            initial_prompt=_WHISPER_PROMPT or None,
         )
 
         text = " ".join(seg.text.strip() for seg in segments).strip()
