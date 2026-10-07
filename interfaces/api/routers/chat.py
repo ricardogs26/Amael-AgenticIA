@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import urllib.request
 import uuid
@@ -890,19 +891,76 @@ def _strip_for_tts(text: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", clean).strip()
 
 
+# Voz para quien no registró la suya: nunca la voz por defecto de cosyvoice
+# (es la clonada de Ricardo) para responderle a otra persona.
+_NEUTRAL_VOICE = os.environ.get("COSYVOICE_NEUTRAL_VOICE", "es_MX_female")
+
+
 async def _send_voice_note(phone: str, text: str) -> None:
     """
     Sintetiza el texto y lo envía como nota de voz PTT.
 
-    Prioridad:
-      0. Voz clonada del usuario (CosyVoice3 /tts/clone) si registró referencia
-         en amael-voice-refs. Lenta en CPU (~minutos) pero es fire-and-forget.
-      1. Piper (rápido, estable, acento latinoamericano).
-      2. CosyVoice voz por defecto (último recurso).
+    Orden (7-oct-2026, CosyVoice en GPU: ~1 s por segundo de audio):
+      CosyVoice en GPU:
+        0. Voz clonada del usuario (/tts/clone) si registró referencia.
+        1. CosyVoice con la voz neutral (_NEUTRAL_VOICE).
+        2. Piper.
+      CosyVoice en CPU o caído (una nota tardaría minutos):
+        1. Piper.
+        2. CosyVoice neutral, como último recurso.
+    El orden viejo (clonada → Piper → CosyVoice voz por defecto) era de cuando
+    CosyVoice solo corría en CPU, y su último recurso respondía a cualquier
+    usuario con la voz de Ricardo.
     Fire-and-forget: nunca lanza excepción ni bloquea la respuesta de texto.
     """
     truncated = _strip_for_tts(text)[:500]
     if not truncated:
+        return
+
+    from tools.cosyvoice.tool import CosyVoiceTool
+    from tools.cosyvoice.tool import SynthesizeAndSendInput as CosyInput
+
+    cosy = CosyVoiceTool()
+    fast = (await cosy.device()) == "cuda"
+
+    async def _cosy_neutral() -> bool:
+        try:
+            result = await cosy.synthesize_and_send(
+                CosyInput(text=truncated, phone=phone, language="es", voice=_NEUTRAL_VOICE)
+            )
+            if result.success:
+                logger.info(
+                    f"[chat] Nota de voz CosyVoice ({_NEUTRAL_VOICE}) enviada a {phone} "
+                    f"({result.data.get('duration_seconds', 0):.1f}s)"
+                )
+                return True
+            logger.warning(f"[chat] CosyVoice neutral falló: {result.error}")
+        except Exception as exc:
+            logger.warning(f"[chat] CosyVoice neutral excepción: {exc}")
+        return False
+
+    async def _piper() -> bool:
+        try:
+            from tools.piper.tool import PiperTool
+            from tools.piper.tool import SynthesizeAndSendInput as PiperInput
+            result = await PiperTool().synthesize_and_send(
+                PiperInput(text=truncated, phone=phone)
+            )
+            if result.success:
+                logger.info(
+                    f"[chat] Nota de voz Piper enviada a {phone} "
+                    f"({result.data.get('duration_seconds', 0):.1f}s)"
+                )
+                return True
+            logger.warning(f"[chat] Piper falló: {result.error}")
+        except Exception as exc:
+            logger.warning(f"[chat] Piper excepción: {exc}")
+        return False
+
+    if not fast:
+        logger.info("[chat] CosyVoice no está en GPU — Piper primero")
+        if not await _piper():
+            await _cosy_neutral()
         return
 
     # 0. Voz clonada del usuario si hay referencia registrada
@@ -913,11 +971,8 @@ async def _send_voice_note(phone: str, text: str) -> None:
         ref = await _aio.to_thread(get_voice_reference, phone)
         if ref is not None:
             wav_b64, prompt_text = ref
-            from tools.cosyvoice.tool import (
-                CosyVoiceTool,
-                SynthesizeCloneAndSendInput,
-            )
-            result = await CosyVoiceTool().synthesize_clone_and_send(
+            from tools.cosyvoice.tool import SynthesizeCloneAndSendInput
+            result = await cosy.synthesize_clone_and_send(
                 SynthesizeCloneAndSendInput(
                     text=truncated,
                     phone=phone,
@@ -931,37 +986,13 @@ async def _send_voice_note(phone: str, text: str) -> None:
                     f"({result.data.get('duration_seconds', 0):.1f}s)"
                 )
                 return
-            logger.warning(f"[chat] Voz clonada falló, fallback a Piper: {result.error}")
+            logger.warning(f"[chat] Voz clonada falló: {result.error}")
     except Exception as exc:
-        logger.warning(f"[chat] Voz clonada excepción, fallback a Piper: {exc}")
+        logger.warning(f"[chat] Voz clonada excepción: {exc}")
 
-    # 1. Piper (rápido, estable, voz latina consistente)
-    try:
-        from tools.piper.tool import PiperTool
-        from tools.piper.tool import SynthesizeAndSendInput as PiperInput
-        result = await PiperTool().synthesize_and_send(
-            PiperInput(text=truncated, phone=phone)
-        )
-        if result.success:
-            logger.info(f"[chat] Nota de voz Piper enviada a {phone} ({result.data.get('duration_seconds', 0):.1f}s)")
-            return
-        logger.warning(f"[chat] Piper falló, intentando CosyVoice: {result.error}")
-    except Exception as exc:
-        logger.warning(f"[chat] Piper excepción, intentando CosyVoice: {exc}")
-
-    # 2. Fallback a CosyVoice
-    try:
-        from tools.cosyvoice.tool import CosyVoiceTool
-        from tools.cosyvoice.tool import SynthesizeAndSendInput as CosyInput
-        result = await CosyVoiceTool().synthesize_and_send(
-            CosyInput(text=truncated, phone=phone, language="es")
-        )
-        if result.success:
-            logger.info(f"[chat] Nota de voz CosyVoice enviada a {phone} ({result.data.get('duration_seconds', 0):.1f}s)")
-        else:
-            logger.warning(f"[chat] CosyVoice también falló: {result.error}")
-    except Exception as exc:
-        logger.debug(f"[chat] _send_voice_note fallback CosyVoice: {exc}")
+    if await _cosy_neutral():
+        return
+    await _piper()
 
 
 # ── P7-004: Response cache helpers ────────────────────────────────────────────

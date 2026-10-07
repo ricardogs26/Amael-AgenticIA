@@ -41,11 +41,13 @@ class SynthesizeInput(ToolInput):
     text:     str
     language: str = "es"
     speed:    float = 1.0
+    voice:    str | None = None   # WAV de /models/reference (cosyvoice ≥2.4.0); None = default
 
 class SynthesizeAndSendInput(ToolInput):
     text:     str
     phone:    str | None = None   # Usa ADMIN_PHONE si no se especifica
     language: str = "es"
+    voice:    str | None = None
 
 class SynthesizeCloneInput(ToolInput):
     text:                   str
@@ -90,17 +92,40 @@ class CosyVoiceTool(BaseTool):
             source=self.name,
         )
 
+    async def device(self) -> str | None:
+        """'cuda' | 'cpu' según /health de cosyvoice (≥2.3.0); None si no responde.
+
+        Las respuestas en voz eligen motor con esto: en CPU una nota tarda
+        minutos y conviene Piper.
+        """
+        import asyncio
+
+        def _get() -> str | None:
+            try:
+                resp = _req.get(f"{_COSYVOICE_URL}/health", timeout=3)
+                data = resp.json() if resp.status_code == 200 else {}
+                return data.get("device") if data.get("status") == "ok" else None
+            except Exception as exc:
+                logger.warning(f"[cosyvoice_tool] /health no respondió: {exc}")
+                return None
+
+        return await asyncio.to_thread(_get)
+
     async def synthesize(self, input: SynthesizeInput) -> ToolOutput:
         """Genera audio WAV base64 desde texto."""
+        import asyncio
         try:
-            resp = _req.post(
-                f"{_COSYVOICE_URL}/tts",
-                json={
-                    "text":     input.text[:500],
-                    "language": input.language,
-                    "speed":    input.speed,
-                },
-                timeout=120,
+            payload = {
+                "text":     input.text[:500],
+                "language": input.language,
+                "speed":    input.speed,
+            }
+            if input.voice:
+                payload["voice"] = input.voice
+            # requests es bloqueante: dentro de un async congelaba el event loop
+            # del backend mientras CosyVoice sintetizaba (minutos en CPU).
+            resp = await asyncio.to_thread(
+                _req.post, f"{_COSYVOICE_URL}/tts", json=payload, timeout=120,
             )
             if resp.status_code != 200:
                 return ToolOutput.fail(
@@ -256,7 +281,7 @@ class CosyVoiceTool(BaseTool):
 
         # 1. Síntesis
         synth_result = await self.synthesize(
-            SynthesizeInput(text=input.text, language=input.language)
+            SynthesizeInput(text=input.text, language=input.language, voice=input.voice)
         )
         if not synth_result.success:
             return synth_result
@@ -264,16 +289,18 @@ class CosyVoiceTool(BaseTool):
         wav_b64  = synth_result.data["audio_base64"]
         duration = synth_result.data.get("duration_seconds", 0)
 
-        # 2. Convertir WAV → OGG OPUS
+        # 2. Convertir WAV → OGG OPUS (ffmpeg es bloqueante: fuera del event loop)
+        import asyncio
         try:
-            ogg_b64 = self._wav_to_ogg_opus(wav_b64)
+            ogg_b64 = await asyncio.to_thread(self._wav_to_ogg_opus, wav_b64)
         except Exception as exc:
             logger.error(f"[cosyvoice_tool] WAV→OGG error: {exc}")
             return ToolOutput.fail(f"Error convirtiendo audio: {exc}", source=self.name)
 
         # 3. Enviar al bridge como nota de voz PTT (OGG OPUS)
         try:
-            resp = _req.post(
+            resp = await asyncio.to_thread(
+                _req.post,
                 f"{_WA_BRIDGE_URL}/send-audio",
                 json={
                     "phoneNumber": phone,
