@@ -359,6 +359,8 @@ def create_app() -> FastAPI:
     app.include_router(reception_router)    # /api/reception/* — recepcionista WhatsApp
     from interfaces.api.routers.voice import router as voice_router
     app.include_router(voice_router)        # /api/voice/* — «léeme esto» (/voz)
+    from interfaces.api.routers.english import router as english_router
+    app.include_router(english_router)      # /api/english/* — calificar ejercicios del coach
 
     return app
 
