@@ -73,6 +73,13 @@ _SPOKEN_NUM = re.compile(
 )
 
 
+_TWO_THEN_LETTER = re.compile(
+    r"\s(?:number\s+)?(?:two|second)\b\s*[:,.\-]?\s*"
+    r"(?=(?:option\s+|letter\s+)?(?:[abc]|ay|eh|bee?|see|sea|si)\W*$)",
+    re.IGNORECASE,
+)
+
+
 def _letter(segment: str) -> str | None:
     f = re.sub(r"^(?:option|letter|the)\s+", "", _fold(segment)).strip()
     return _LETTER_WORDS.get(f)
@@ -90,6 +97,10 @@ def spoken_to_text(transcript: str) -> str:
     t = _SPOKEN_NUM.sub(
         lambda m: f" {'1' if m.group(1).lower() in ('one', 'first') else '2'}) ", t
     ).strip()
+    # Whisper a veces no puntúa: «One, look after two, letter B.» — un «two»
+    # seguido de una letra al final también abre el ejercicio 2.
+    if "2)" not in t:
+        t = _TWO_THEN_LETTER.sub(" 2) ", t).strip()
     if "2)" in t:
         head, tail = t.rsplit("2)", 1)
         letter = _letter(tail)

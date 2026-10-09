@@ -82,6 +82,8 @@ def test_id_de_la_leccion_en_la_cita():
     ("See", None, "C"),
     ("Circle back.", "circle back", None),
     ("number two, A", None, "A"),
+    ("One, look after two, letter B.", "look after", "B"),     # whisper sin puntuar (8-oct)
+    ("One circle back two bee", "circle back", "B"),
 ])
 def test_lo_hablado_se_convierte_al_formato_escrito(dicho, ex1, ex2):
     r = g.parse_reply(g.spoken_to_text(dicho))
