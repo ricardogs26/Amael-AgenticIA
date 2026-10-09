@@ -57,3 +57,28 @@ def test_leccion_vencida(client):
 
 def test_cita_sin_id(client):
     assert "Quote" in _post(client, "otro mensaje", "B").json()["reply"]
+
+
+
+def test_nota_de_voz_se_transcribe_en_ingles_sin_pista_de_la_respuesta(client, monkeypatch):
+    import audio.transcriber as tr
+    seen = {}
+
+    def fake(b64, mimetype, language, prompt):
+        seen.update(language=language, prompt=prompt)
+        return "Number one, circle back. Number two, bee."
+
+    monkeypatch.setattr(tr, "transcribe_audio_base64", fake)
+    r = client.post("/api/english/answer", headers=_auth(), json={
+        "phone": "130554506788994@lid", "quoted_text": "🆔 EN-2026-10-08", "audio_base64": "T0dH"})
+    reply = r.json()["reply"]
+    assert reply.startswith("🎧 I heard:") and "2/2" in reply
+    assert seen["language"] == "en" and "circle back" not in seen["prompt"]
+
+
+def test_nota_de_voz_vacia(client, monkeypatch):
+    import audio.transcriber as tr
+    monkeypatch.setattr(tr, "transcribe_audio_base64", lambda *a: "")
+    r = client.post("/api/english/answer", headers=_auth(), json={
+        "phone": "130554506788994@lid", "quoted_text": "🆔 EN-2026-10-08", "audio_base64": "T0dH"})
+    assert "couldn't hear" in r.json()["reply"]

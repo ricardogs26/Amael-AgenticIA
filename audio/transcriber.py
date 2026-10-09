@@ -126,6 +126,8 @@ def _ext_for_mimetype(mimetype: str) -> str:
 def transcribe_audio_base64(
     audio_base64: str,
     mimetype: str = "audio/ogg; codecs=opus",
+    language: str | None = None,
+    prompt: str | None = None,
 ) -> str:
     """
     Transcribe un audio codificado en base64 a texto.
@@ -148,14 +150,16 @@ def transcribe_audio_base64(
 
         model = _get_model()
         audio = _decode(tmp_path)      # una sola decodificación para detectar y transcribir
-        language = _pick_language(model, audio)
+        # language/prompt por llamada: las respuestas del english-coach se
+        # transcriben forzadas a inglés y con su propia pista (8-oct-2026).
+        language = language or _pick_language(model, audio)
         segments, info = model.transcribe(
             audio,
             beam_size=5,
             language=language,
             vad_filter=True,        # filtra silencios
             vad_parameters={"min_silence_duration_ms": 500},
-            initial_prompt=_prompt_for(language),
+            initial_prompt=prompt if prompt is not None else _prompt_for(language),
         )
 
         text = " ".join(seg.text.strip() for seg in segments).strip()

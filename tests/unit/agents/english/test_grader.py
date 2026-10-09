@@ -69,3 +69,32 @@ def test_soluciones():
 def test_id_de_la_leccion_en_la_cita():
     assert g.lesson_id("…blah\n🆔 EN-2026-10-08") == "EN-2026-10-08"
     assert g.lesson_id("sin id") is None
+
+
+# ── Respuestas por nota de voz (Whisper en inglés) ───────────────────────────
+
+@pytest.mark.parametrize("dicho,ex1,ex2", [
+    ("Number one, circle back. Number two, B.", "circle back", "B"),
+    ("One: circle back. Two: bee.", "circle back", "B"),
+    ("First, circle back. Second, letter C.", "circle back", "C"),
+    ("Circle back and option B.", "circle back", "B"),
+    ("Bee.", None, "B"),
+    ("See", None, "C"),
+    ("Circle back.", "circle back", None),
+    ("number two, A", None, "A"),
+])
+def test_lo_hablado_se_convierte_al_formato_escrito(dicho, ex1, ex2):
+    r = g.parse_reply(g.spoken_to_text(dicho))
+    assert (r.ex1 and g._fold(r.ex1), r.ex2) == (ex1, ex2)
+
+
+def test_lo_hablado_no_rompe_frases_con_one():
+    """«someone» / «one's» no son el número uno."""
+    r = g.parse_reply(g.spoken_to_text("Can I pick someone's brain? Number two, A."))
+    assert r.ex2 == "A" and "someone" in r.ex1
+
+
+def test_retro_de_voz_dice_lo_que_se_escucho():
+    msg = g.feedback(g.parse_reply(g.spoken_to_text("Number one, circle back. Number two, bee.")), REC,
+                     heard="Number one, circle back. Number two, bee.")
+    assert msg.startswith("🎧 I heard:") and "2/2" in msg

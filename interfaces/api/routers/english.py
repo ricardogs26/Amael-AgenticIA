@@ -25,9 +25,18 @@ router = APIRouter(prefix="/api/english", tags=["english"],
 
 
 class AnswerIn(BaseModel):
-    phone:       str = Field(min_length=6, max_length=64)
-    quoted_text: str = Field(default="", max_length=4000)
-    answer:      str = Field(default="", max_length=500)
+    phone:        str = Field(min_length=6, max_length=64)
+    quoted_text:  str = Field(default="", max_length=4000)
+    answer:       str = Field(default="", max_length=500)
+    # Respuesta por nota de voz (8-oct-2026): OGG/opus en base64 (~10 MB máx).
+    audio_base64: str | None = Field(default=None, max_length=14_000_000)
+    mimetype:     str = Field(default="audio/ogg; codecs=opus", max_length=80)
+
+
+# Pista NEUTRAL: no lleva la frase de la lección. Con ella whisper tiende a
+# «oír» la respuesta correcta aunque se haya pronunciado mal, y la práctica de
+# pronunciación pierde sentido.
+_VOICE_PROMPT = "Answers to an English exercise: number one, number two, option A, B or C."
 
 
 class AnswerOut(BaseModel):
@@ -58,6 +67,16 @@ async def english_answer(body: AnswerIn) -> AnswerOut:
         return AnswerOut(reply="I can't check your answers right now. Try again in a minute.")
     if not rec:
         return AnswerOut(reply=f"I don't have lesson {lesson_id} anymore (lessons are kept 8 days).")
-    reply = grader.feedback(grader.parse_reply(body.answer), rec)
+    heard = None
+    answer = body.answer
+    if body.audio_base64:
+        from audio.transcriber import transcribe_audio_base64
+        heard = await asyncio.to_thread(
+            transcribe_audio_base64, body.audio_base64, body.mimetype, "en", _VOICE_PROMPT,
+        )
+        if not heard:
+            return AnswerOut(reply="🎧 I couldn't hear anything in that voice note. Try again, a bit closer to the mic.")
+        answer = grader.spoken_to_text(heard)
+    reply = grader.feedback(grader.parse_reply(answer), rec, heard=heard)
     logger.info(f"[english] {lesson_id} «{body.answer[:60]}» → {reply.splitlines()[0][:60]}")
     return AnswerOut(reply=reply)

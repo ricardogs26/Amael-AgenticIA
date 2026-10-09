@@ -125,3 +125,13 @@ def test_idioma_fijo_no_detecta(modelo, monkeypatch):
     monkeypatch.setattr(transcriber, "_WHISPER_LANGUAGE", "es")
     transcriber.transcribe_audio_base64(_b64())
     modelo.detect_language.assert_not_called()
+
+
+
+def test_idioma_y_pista_por_llamada(modelo, monkeypatch):
+    """Las respuestas del english-coach: inglés forzado, pista propia, sin detectar."""
+    monkeypatch.setattr(transcriber, "_WHISPER_LANGUAGE", "es,en")
+    transcriber.transcribe_audio_base64(_b64(), language="en", prompt="Answers to an English exercise.")
+    kw = modelo.transcribe.call_args.kwargs
+    assert kw["language"] == "en" and kw["initial_prompt"] == "Answers to an English exercise."
+    modelo.detect_language.assert_not_called()

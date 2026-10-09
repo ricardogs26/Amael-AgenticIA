@@ -44,6 +44,9 @@ def parse_reply(text: str) -> Reply:
     marks = list(_NUMBERED.finditer(raw))
     if marks:
         out = Reply()
+        prefix = raw[: marks[0].start()].strip(" ,;\n")
+        if prefix and marks[0].group(1) == "2":
+            out.ex1 = prefix         # «look after, 2) A» / voz: «… Number two, A»
         for i, m in enumerate(marks):
             end = marks[i + 1].start() if i + 1 < len(marks) else len(raw)
             val = raw[m.end():end].strip(" ,;\n")
@@ -59,6 +62,45 @@ def parse_reply(text: str) -> Reply:
         rest = raw[: letter.start(1)].strip(" ,;")
         return Reply(ex1=rest or None, ex2=letter.group(1).upper())
     return Reply(ex1=raw or None)
+
+
+# ── Respuestas por nota de voz (8-oct-2026) ──────────────────────────────────
+_LETTER_WORDS = {"a": "A", "ay": "A", "eh": "A", "b": "B", "be": "B", "bee": "B",
+                 "c": "C", "see": "C", "sea": "C", "si": "C"}
+_SPOKEN_NUM = re.compile(
+    r"(?:^|(?<=[.,;!?])\s*|\band\s+)(?:number\s+)?(one|first|two|second)\b\s*[:,.\-]?\s*",
+    re.IGNORECASE,
+)
+
+
+def _letter(segment: str) -> str | None:
+    f = re.sub(r"^(?:option|letter|the)\s+", "", _fold(segment)).strip()
+    return _LETTER_WORDS.get(f)
+
+
+def spoken_to_text(transcript: str) -> str:
+    """Whisper → formato escrito: «Number one, look after. Number two, bee.» →
+    «1) look after. 2) B». Los números solo cuentan al inicio, tras puntuación
+    o tras «and» («someone»/«one's» no son el uno); las letras habladas
+    (bee/see/ay, «option B», «letter C») se vuelven A/B/C."""
+    t = (transcript or "").strip()
+    whole = _letter(t)
+    if whole:
+        return whole
+    t = _SPOKEN_NUM.sub(
+        lambda m: f" {'1' if m.group(1).lower() in ('one', 'first') else '2'}) ", t
+    ).strip()
+    if "2)" in t:
+        head, tail = t.rsplit("2)", 1)
+        letter = _letter(tail)
+        return f"{head}2) {letter}" if letter else t
+    m = re.search(r"[,\s]+(?:and\s+)?(?:option|letter)\s+([abcABC])\W*$", t)
+    if m:
+        return f"{t[: m.start()].strip()}, {m.group(1).upper()}"
+    m = re.search(r"[,\s]+(?:and\s+)?(bee|be|see|sea|si)\W*$", t, re.IGNORECASE)
+    if m:
+        return f"{t[: m.start()].strip()}, {_LETTER_WORDS[m.group(1).lower()]}"
+    return t
 
 
 def check_ex1(answer: str, rec: dict) -> bool:
@@ -91,7 +133,14 @@ def check_ex2(answer: str, rec: dict) -> bool:
     return _fold(a) == _fold(ex2["options"][ex2["correct"]])
 
 
-def feedback(reply: Reply, rec: dict) -> str:
+def feedback(reply: Reply, rec: dict, heard: str | None = None) -> str:
+    """`heard`: lo que Whisper entendió de una nota de voz. Va arriba: si
+    escuchó otra cosa, es una pista de pronunciación."""
+    body = _feedback(reply, rec)
+    return f"🎧 I heard: «{heard.strip()}»\n\n{body}" if heard else body
+
+
+def _feedback(reply: Reply, rec: dict) -> str:
     ex2 = rec["ex2"]
     correct2 = f"{ex2['correct']}) {ex2['options'][ex2['correct']]}"
     if reply.reveal:
