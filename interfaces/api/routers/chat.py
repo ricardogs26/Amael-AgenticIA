@@ -538,11 +538,21 @@ async def _route_with_followup(user_id: str, question: str):
 # respuesta corta se fusiona con ese texto antes de rutear.
 
 _PASTE_INSTRUCTION_RE = re.compile(
-    r"resume|res[uú]me|recu[eé]rd|anota|apunta|guarda|analiza|explica|"
-    r"traduce|agenda|ayuda|puedes|podr[ií]as|qué\b|cómo\b|cuándo\b|¿|"
+    # Solo órdenes dirigidas a Amael (imperativo + «me/lo/la», o «recuerda
+    # que…»). El remitente de un reenvío habla en tercera persona: «te
+    # recuerda tu cita», «con gusto te ayudamos», «agenda tu cita llamando
+    # al…» (caso real 10-oct-2026: Dentalitos) — nada de eso es instrucción.
+    r"resume|res[uú]me|recu[eé]rda(me|lo|la)?\b(?!\s+(tu|su|sus|tus)\b)|"
+    r"recordarme|anota|apunta|guarda|analiza|explica|"
+    r"traduce|ag[eé]nda(me|lo|la)\b|agendar\b|agenda\s+(esta|esto|este|la|el)\b|"
+    r"ay[uú]da(me)?\b(?!\s*mos)|ayudarme|puedes|podr[ií]as|qué\b|cómo\b|cuándo\b|¿|"
     r"dime|hazme|necesito|quiero|busca|revisa",
     re.IGNORECASE,
 )
+
+# Un texto más largo que esto sin instrucción es, casi seguro, un reenvío.
+# Era 400 y el recordatorio de Dentalitos medía exactamente 400 (10-oct-2026).
+_PASTE_MIN_CHARS = 300
 
 # Un "?" de cierre solo cuenta como pregunta si aparece cerca del inicio del
 # mensaje — en un aviso largo puede aparecer por azar mucho más adelante
@@ -556,9 +566,9 @@ _PASTE_PENDING_TTL_S    = 600
 _PASTE_PENDING_MAX_CHARS = 4000
 
 _PASTE_PENDING_PROMPT = (
-    "Recibí un texto largo 📄 ¿Qué hago con él? Puedo: crear un recordatorio "
-    "de la fecha que menciona, anotarlo como pendiente, resumirlo, guardarlo "
-    "en tus documentos, o nada."
+    "Recibí un texto largo 📄 ¿Qué hago con él? Puedo: agendarlo en tu "
+    "calendario, crear un recordatorio de la fecha que menciona, anotarlo "
+    "como pendiente, resumirlo, guardarlo en tus documentos, o nada."
 )
 
 
@@ -577,10 +587,10 @@ def _has_instruction(text: str) -> bool:
 
 
 def _is_bare_paste(question: str) -> bool:
-    """True si `question` es un texto largo (> 400 chars) SIN instrucción —
-    probable reenvío (aviso escolar, correo) que requiere preguntar qué
-    hacer antes de dispatchar."""
-    return len(question) > 400 and not _has_instruction(question)
+    """True si `question` es un texto largo (>= _PASTE_MIN_CHARS) SIN
+    instrucción — probable reenvío (aviso escolar, correo, recordatorio de
+    cita) que requiere preguntar qué hacer antes de dispatchar."""
+    return len(question) >= _PASTE_MIN_CHARS and not _has_instruction(question)
 
 
 def _merge_paste(instruction: str, stored: str) -> str:

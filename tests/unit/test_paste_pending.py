@@ -228,3 +228,66 @@ class TestWiringRouteWithFollowup:
         mensaje_largo = "¿qué pods hay en el cluster? " + "x" * 400
         q, decision = await chat._route_with_followup("u@x.com", mensaje_largo)
         assert q == mensaje_largo
+
+
+# ── Caso real 10-oct-2026: recordatorio de cita del dentista ─────────────────
+# Mide EXACTAMENTE 400 chars (el umbral viejo era `> 400`), y el remitente dice
+# «te recuerda tu cita» / «con gusto» — tercera persona, no una orden a Amael.
+# Amael lo mandó a memoria («Esto encontré en tu historial sobre hola /
+# escribimos / dentalitos»).
+
+DENTALITOS = (
+    "👋🏼 Hola!\n"
+    "Te escribimos de Dentalitos 🌈🦷✨🪥 — con gusto la la Dra. Luz María  Frank  "
+    "Ruiz te recuerda tu cita:\n\n"
+    "📅 Fecha:  sábado 24 octubre\n"
+    "🕕 Hora: 01:30 PM\n"
+    "👧🏻 Paciente: REGINA GUZMAN VALENCIA\n"
+    "👩🏻‍⚕ Doctora: la Dra. Luz María  Frank  Ruiz\n\n"
+    "⸻\n\n"
+    "📲 Medios de contacto:\n"
+    "\t•\tWhatsApp: 999 907 4598\n"
+    "\t•\tTeléfono consultorio: 999 709 4916\n"
+    "\t•     📍 Ubicación en Google Maps: https://maps.app.goo.gl/oydBgFHdDFEXw71"
+)
+assert len(DENTALITOS) == 400
+
+
+class TestTerceraPersonaNoEsInstruccion:
+    def test_te_recuerda_tu_cita_no_es_instruccion(self):
+        assert chat._has_instruction(DENTALITOS) is False
+
+    def test_con_gusto_te_ayudamos_no_es_instruccion(self):
+        assert chat._has_instruction(
+            "Hola, con gusto te ayudamos con tu pedido. " + AVISO_ESCOLAR
+        ) is False
+
+    def test_agenda_tu_cita_del_remitente_no_es_instruccion(self):
+        assert chat._has_instruction(
+            "Agenda tu cita llamando al consultorio. " + AVISO_ESCOLAR
+        ) is False
+
+    @pytest.mark.parametrize("texto", [
+        "recuérdame la cita del dentista",
+        "recuerda que mañana tengo cita",
+        "agéndalo por favor",
+        "agéndame esto",
+        "ayúdame a agendar esto",
+        "ayudame con esto",
+        "agenda esta cita",
+    ])
+    def test_segunda_persona_si_es_instruccion(self, texto):
+        assert chat._has_instruction(texto + "\n" + AVISO_ESCOLAR) is True
+
+    def test_dentalitos_es_bare_paste(self):
+        assert chat._is_bare_paste(DENTALITOS) is True
+
+    def test_dentalitos_con_orden_al_frente_no_es_bare_paste(self):
+        assert chat._is_bare_paste("agéndame esto:\n" + DENTALITOS) is False
+
+    def test_umbral_300(self):
+        # Un recordatorio de cita corto (300–400) también es texto pegado.
+        corto = DENTALITOS[:320]
+        assert 300 <= len(corto) < 400
+        assert chat._is_bare_paste(corto) is True
+        assert chat._is_bare_paste("x" * 299) is False

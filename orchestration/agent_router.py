@@ -33,6 +33,19 @@ class RoutingDecision:
 
 # ── Reglas keyword (orden importa: más específico primero) ────────────────────
 _KEYWORD_RULES = [
+    # Crear evento de calendario — Haniel `create_event`. Va PRIMERO: «agenda
+    # esta cita» no es un pendiente ni una lectura de agenda. Solo se evalúa
+    # sobre el ENCABEZADO del mensaje (ver _CALENDAR_HEAD_CHARS en route()):
+    # la orden viene al frente y el reenvío fusionado detrás puede decir
+    # «agenda tu cita» en tercera persona.
+    (r"\b(ag[eé]nda(me|lo|la)|(?<!necesito\s)(?<!que\s)agendar(lo|la|me)?|"
+     r"agenda\s+(esta|esto|este|la|el|una?)\b|"
+     r"pon(me|lo|la)?\s+(en\s+)?(mi|el|la)\s+(calendario|agenda)|"
+     r"mete(me|lo|la)?\s+(en\s+)?(mi|el|la)\s+(calendario|agenda)|"
+     r"a[ñn]ade(me|lo|la)?\s+(a|en)\s+(mi|el|la)\s+(calendario|agenda)|"
+     r"anota(me|lo|la)?\s+en\s+(mi|el|la)\s+(calendario|agenda)|"
+     r"crea(me)?\s+(un\s+)?evento)\b",
+     "calendar_create", ["productivity"]),
     # Recordatorios / tareas programadas — Cassiel.
     # DEBE ir antes que "memory" (cuyo patrón atrapa recuerda|recordar) y que
     # "productivity" (que atrapa schedule|agenda): «recuérdame X cada lunes» es
@@ -62,6 +75,13 @@ _KEYWORD_RULES = [
     # Monitoreo / métricas
     (r"\b(prometheus|grafana|metric|alert|latency|dashboard|log)\b",
      "monitoring", ["sre", "devops"]),
+    # Memoria / historial — SOLO cuando el usuario pregunta («¿recuerdas…?»,
+    # «¿te acuerdas…?», «¿qué te dije…?»). El `recuerdas?` viejo atrapaba
+    # «te recuerda tu cita» de un recordatorio reenviado (10-oct-2026) y
+    # Zaphkiel contestaba con el historial de «hola».
+    (r"\b(remember|recall|history|last\s*time|previously|recuerdas|recuerdo|"
+     r"te\s+acuerdas|qu[eé]\s+(te\s+)?dije|historial|recordar)\b",
+     "memory", ["memory"]),
     # Productividad. OJO: esta regla se salta para textos largos pegados
     # (> _PRODUCTIVITY_MAX_LEN) — un aviso escolar que MENCIONA «agenda» no es
     # una petición de calendario/correo (caso real 17-ago). Ver route().
@@ -79,9 +99,6 @@ _KEYWORD_RULES = [
     # Investigación / documentos
     (r"\b(search|find|look\s*up|documentation|explain|buscar|documento|pdf|docx)\b",
      "research", ["researcher"]),
-    # Memoria / historial
-    (r"\b(remember|recall|history|last\s*time|previously|recuerdas?|recordar)\b",
-     "memory", ["memory"]),
     # QA / validación — Phanuel. `tests?` cubre singular Y plural: la regla
     # vieja pedía `\btest\b` y «qué tests debo correr» caía a general (10-ago).
     # También rutea por nombre («Phanuel…») y por vocabulario de QA.
@@ -98,8 +115,13 @@ _KEYWORD_RULES = [
 # las keywords (agenda, correo, fecha…) aparecen como MENCIÓN, no como orden.
 _PRODUCTIVITY_MAX_LEN = 400
 
+# La orden de agendar se busca solo al frente del mensaje: lo que sigue a
+# «[Texto reenviado previamente…]» es texto ajeno.
+_CALENDAR_HEAD_CHARS = 200
+
 
 _INTENT_TO_AGENTS = {
+    "calendar_create": ["productivity"],
     "reminder":     ["scheduler"],
     "sre":          ["sre"],
     "kubernetes":   ["devops", "sre"],
@@ -173,7 +195,8 @@ class AgentRouter:
         for pattern, intent, agents in _KEYWORD_RULES:
             if intent == "productivity" and len(question) > _PRODUCTIVITY_MAX_LEN:
                 continue
-            if re.search(pattern, q_lower, re.IGNORECASE):
+            haystack = q_lower[:_CALENDAR_HEAD_CHARS] if intent == "calendar_create" else q_lower
+            if re.search(pattern, haystack, re.IGNORECASE):
                 _record_routing_metric(intent, "keyword")
                 return RoutingDecision(
                     intent=intent,

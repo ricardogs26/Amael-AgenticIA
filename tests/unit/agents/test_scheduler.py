@@ -41,7 +41,7 @@ async def test_frases_de_recordatorio_rutean_a_cassiel(frase):
     # "recuerdas" — el \b no corta antes de la s; eso ya caía a general)
     ("recuerda lo que te dije del proyecto", "memory"),
     # Calendario ≠ recordatorio: agenda va a Haniel.
-    ("agenda una reunión con Marco el jueves", "productivity"),
+    ("agenda una reunión con Marco el jueves", "calendar_create"),  # desde 1.18.17 crea el evento
 ])
 async def test_los_intents_vecinos_no_se_rompen(frase, intent):
     assert (await AgentRouter().route(frase)).intent == intent

@@ -125,9 +125,15 @@ def create_calendar_event(
     description: str = "",
     location: str = "",
     timezone_id: str = "America/Mexico_City",
+    planner_mark: bool = True,
 ) -> dict[str, Any] | None:
     """
     Crea un evento en el calendario principal del usuario.
+
+    `planner_mark=False` para eventos que pide el USUARIO desde el chat: el
+    brief de la mañana borra todo lo que lleve la marca del planner
+    (`delete_planner_events`), y una cita del dentista no puede desaparecer
+    al día siguiente.
 
     Args:
         credentials: Google OAuth Credentials.
@@ -137,9 +143,13 @@ def create_calendar_event(
         description: Descripción opcional.
         location:    Ubicación opcional.
         timezone_id: Zona horaria (default: America/Mexico_City).
+        planner_mark: True = evento del brief (se borra en la siguiente corrida).
 
     Returns:
         Evento creado (dict) o None si hubo error.
+
+    Raises:
+        GoogleAuthRevocada: el token ya no sirve — el usuario debe reautorizar.
     """
     try:
         service = _build_calendar_service(credentials)
@@ -149,17 +159,20 @@ def create_calendar_event(
             "location":    location,
             "start": {"dateTime": start_iso, "timeZone": timezone_id},
             "end":   {"dateTime": end_iso,   "timeZone": timezone_id},
+        }
+        if planner_mark:
             # Marca de autoría, invisible en la UI de Google Calendar. Sin ella
             # no hay forma de distinguir lo que escribió el brief de lo que puso
             # el usuario, y cada corrida se apila sobre la anterior: el dedup
             # por título+hora no cubre nada cuando el LLM reescribe los títulos.
-            "extendedProperties": {"private": {_MARCA_PLANNER: "1"}},
-        }
+            event["extendedProperties"] = {"private": {_MARCA_PLANNER: "1"}}
         created = service.events().insert(calendarId="primary", body=event).execute()
         logger.info(f"[calendar] Evento creado: {summary!r} ({start_iso})")
         return created
     except Exception as exc:
         logger.error(f"[calendar] create_calendar_event error: {exc}")
+        if _es_auth_revocada(exc):
+            raise GoogleAuthRevocada(detalle=str(exc)[:200]) from exc
         return None
 
 

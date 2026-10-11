@@ -52,6 +52,7 @@ _DIRECT_DISPATCH: dict[str, str] = {
     "memory":       "zaphkiel",   # Zaphkiel — búsqueda en el historial propio
     "sre":          "raphael",    # Raphael — SRE autónomo
     "productivity": "haniel",     # Haniel — Calendar/Gmail
+    "calendar_create": "haniel",  # Haniel — crear evento desde el chat
     "research":     "sandalphon", # Sandalphon — RAG + web
     "cto":          "raziel",     # Raziel — estrategia técnica
     "dev":          "gabriel",    # Gabriel — código y PRs
@@ -281,13 +282,15 @@ class AgentDispatcher:
             )
             task = {"query": question}
 
-        elif intent == "productivity":
+        elif intent in ("productivity", "calendar_create"):
             ctx = ContextFactory.build_productivity_context(
                 user_id=user_id,
                 request_id=request_id,
                 conversation_id=conversation_id,
             )
             task = {"user_email": user_id, "query": question}
+            if intent == "calendar_create":
+                task["action"] = "create_event"
 
         elif intent == "research":
             ctx = ContextFactory.build_researcher_context(

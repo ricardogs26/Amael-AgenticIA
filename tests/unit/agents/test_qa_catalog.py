@@ -121,7 +121,7 @@ async def test_las_frases_de_qa_rutean_a_phanuel(frase):
 @pytest.mark.parametrize("frase,intent", [
     # No robar de vecinos: estas NO son QA.
     ("recuérdame revisar el PR el lunes", "reminder"),
-    ("agenda una reunión el jueves", "productivity"),
+    ("agenda una reunión el jueves", "calendar_create"),
     ("qué pods están en crashloop", "sre"),
 ])
 async def test_no_roba_a_otros_intents(frase, intent):

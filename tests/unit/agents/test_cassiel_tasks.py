@@ -376,7 +376,7 @@ class TestRuteo:
         ("recuerda lo que te dije del proyecto", "memory"),
         # «la semana pasada» NO es la referencia temporal «la próxima semana»
         ("¿recuerdas qué hablamos la semana pasada?", "memory"),
-        ("agenda una reunión con Marco el jueves", "productivity"),
+        ("agenda una reunión con Marco el jueves", "calendar_create"),  # desde 1.18.17 crea el evento
         ("necesito el estado del cluster", "kubernetes"),
     ])
     async def test_no_se_come_otros_intents(self, frase, intent):
@@ -414,7 +414,8 @@ class TestRuteo:
     async def test_peticiones_cortas_de_productivity_intactas(self, frase):
         from orchestration.agent_router import AgentRouter
         decision = await AgentRouter().route(frase)
-        assert decision.intent == "productivity"
+        # calendar_create también es Haniel (desde 1.18.17 «agenda X» crea el evento)
+        assert decision.intent in ("productivity", "calendar_create")
 
 
 class TestRenderToolOutput:

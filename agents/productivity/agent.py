@@ -23,8 +23,21 @@ _SUPPORTED_ACTIONS = {
     "organize_day",
     "get_events",
     "get_emails",
+    "create_event",
     "credentials_status",
 }
+
+# Cuando Google rechaza el token, el usuario necesita saber QUÉ HACER, no el
+# error crudo («invalid_grant: Token has been expired or revoked» — 10-oct).
+_FRONTEND_URL = "https://amael-ia.richardx.dev"
+_MSG_AUTH_REVOCADA = (
+    "🔑 Tu acceso a Google Calendar/Gmail caducó o fue revocado. "
+    f"Reautorízalo en {_FRONTEND_URL} (botón «Calendar») y vuelve a pedírmelo."
+)
+_MSG_SIN_CREDENCIALES = (
+    "🔑 Aún no has conectado tu Google Calendar. "
+    f"Conéctalo en {_FRONTEND_URL} (botón «Calendar») y vuelve a pedírmelo."
+)
 
 
 @AgentRegistry.register
@@ -34,7 +47,7 @@ class HanielAgent(BaseAgent):
 
     task dict esperado:
         {
-            "action":     "organize_day" | "get_events" | "get_emails" | "credentials_status",
+            "action":     "organize_day" | "get_events" | "get_emails" | "create_event" | "credentials_status",
             "user_email": str,
             "query":      str,   # para contexto conversacional (opcional)
         }
@@ -49,6 +62,7 @@ class HanielAgent(BaseAgent):
     capabilities = [
         "organize_day",
         "get_calendar_events",
+        "create_calendar_event",
         "get_unread_emails",
         "sync_plan_to_calendar",
         "vault_oauth_credentials",
@@ -78,6 +92,8 @@ class HanielAgent(BaseAgent):
             return await self._handle_get_events(user_email)
         elif action == "get_emails":
             return await self._handle_get_emails(user_email)
+        elif action == "create_event":
+            return await self._handle_create_event(user_email, query)
         elif action == "credentials_status":
             return await self._handle_credentials_status(user_email)
         else:
@@ -138,7 +154,7 @@ class HanielAgent(BaseAgent):
                     success=False,
                     output={"events": []},
                     agent_name=self.name,
-                    error="no_credentials",
+                    error=_MSG_SIN_CREDENCIALES,
                 )
             events = get_todays_events(creds)
             return AgentResult(
@@ -153,7 +169,7 @@ class HanielAgent(BaseAgent):
                 success=False,
                 output=None,
                 agent_name=self.name,
-                error=str(exc),
+                error=self._error_usuario(exc),
             )
 
     async def _handle_get_emails(self, user_email: str) -> AgentResult:
@@ -168,7 +184,7 @@ class HanielAgent(BaseAgent):
                     success=False,
                     output={"emails": []},
                     agent_name=self.name,
-                    error="no_credentials",
+                    error=_MSG_SIN_CREDENCIALES,
                 )
             emails = get_unread_emails(creds)
             return AgentResult(
@@ -183,8 +199,68 @@ class HanielAgent(BaseAgent):
                 success=False,
                 output=None,
                 agent_name=self.name,
-                error=str(exc),
+                error=self._error_usuario(exc),
             )
+
+    @staticmethod
+    def _error_usuario(exc: Exception) -> str:
+        from agents.productivity.errors import GoogleAuthRevocada
+        return _MSG_AUTH_REVOCADA if isinstance(exc, GoogleAuthRevocada) else str(exc)
+
+    async def _handle_create_event(self, user_email: str, query: str) -> AgentResult:
+        """Crea un evento desde el chat: LLM extrae, código valida y crea,
+        y la respuesta dice exactamente qué quedó agendado (ver
+        event_extractor.py). Una sola repregunta fija si falta fecha u hora."""
+        import asyncio
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from agents.productivity import calendar_manager, event_extractor
+        from agents.productivity.vault_credentials import get_user_credentials
+
+        if not query.strip():
+            return AgentResult(success=False, output=None, agent_name=self.name,
+                               error="Dime qué agendar (qué, cuándo y a qué hora).")
+        try:
+            creds = get_user_credentials(user_email)
+            if not creds:
+                return AgentResult(success=False, output=None, agent_name=self.name,
+                                   error=_MSG_SIN_CREDENCIALES)
+
+            tz = ZoneInfo("America/Mexico_City")
+            now = datetime.now(tz)
+            # El LLM es bloqueante: fuera del event loop (regla de la casa).
+            parsed = await asyncio.to_thread(event_extractor.extract_event_fields, query, now)
+            try:
+                spec = event_extractor.resolve_event(parsed, query, now)
+            except event_extractor.EventoIncompleto as inc:
+                return AgentResult(success=True, agent_name=self.name,
+                                   output={"response": event_extractor.format_incomplete(inc.faltan)})
+
+            created = await asyncio.to_thread(
+                calendar_manager.create_calendar_event,
+                creds,
+                summary=spec.title,
+                start_iso=spec.start_iso,
+                end_iso=spec.end_iso,
+                description=spec.notes,
+                location=spec.location,
+                planner_mark=False,
+            )
+            if not created:
+                return AgentResult(success=False, output=None, agent_name=self.name,
+                                   error="Google Calendar no aceptó el evento; inténtalo de nuevo.")
+            link = created.get("htmlLink", "") if isinstance(created, dict) else ""
+            logger.info(f"[productivity] create_event ok {user_email} {spec.start_iso} {spec.title!r}")
+            return AgentResult(
+                success=True, agent_name=self.name,
+                output={"response": event_extractor.format_confirmation(spec, link)},
+                metadata={"start": spec.start_iso, "event_id": created.get("id") if isinstance(created, dict) else None},
+            )
+        except Exception as exc:
+            logger.error(f"[productivity] create_event error: {exc}")
+            return AgentResult(success=False, output=None, agent_name=self.name,
+                               error=self._error_usuario(exc))
 
     async def _handle_credentials_status(self, user_email: str) -> AgentResult:
         """Verifica si el usuario tiene credenciales OAuth válidas en Vault."""
