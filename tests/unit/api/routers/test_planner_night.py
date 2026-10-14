@@ -36,10 +36,13 @@ def test_sin_secreto_es_401_o_403():
 def test_con_secreto_corre_el_nocturno_y_devuelve_resultados(monkeypatch):
     monkeypatch.setattr("agents.scheduler.night_analysis.run_night_analysis_sync",
                         lambda: [{"user": "u@x.com", "commitments": {"registrados": 2}}])
-    r = TestClient(_app()).post(
-        "/api/planner/night",
-        headers={"Authorization": f"Bearer {os.environ['INTERNAL_API_SECRET']}"},
-    )
+    # El singleton `settings` puede haberse creado en otro test con otro
+    # secreto (dependencia de orden conocida del CI): se sustituye la
+    # dependencia en vez de adivinar el valor.
+    from interfaces.api.auth import require_internal_secret
+    app = _app()
+    app.dependency_overrides[require_internal_secret] = lambda: None
+    r = TestClient(app).post("/api/planner/night")
     assert r.status_code == 200
     assert r.json()["processed"] == 1
     assert r.json()["results"][0]["commitments"]["registrados"] == 2
