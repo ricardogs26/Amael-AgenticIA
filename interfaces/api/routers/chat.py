@@ -60,6 +60,10 @@ class ChatRequest(BaseModel):
     audio_mimetype:  str | None = Field(default="audio/ogg; codecs=opus")
     # image: imagen enviada por WhatsApp — se analiza con modelo de visión
     image:           str | None = None
+    # quoted_text: texto del mensaje que el usuario CITÓ al responder (lo manda
+    # el bridge cuando el citado es nuestro). Si es el brief del día o un nudge
+    # de pendientes, la respuesta va a Cassiel con ese texto como contexto.
+    quoted_text:     str | None = Field(default=None, max_length=4000)
 
     @property
     def effective_question(self) -> str:
@@ -226,7 +230,8 @@ async def chat(
     try:
         from orchestration import dispatch
 
-        question, decision = await _route_with_followup(effective_user, question)
+        question, decision = await _route_with_followup(
+            effective_user, question, quoted_text=body.quoted_text)
         tools_map = _build_tools_map(effective_user)
 
         # Enriquecer con memoria (best-effort, no bloquea si falla).
@@ -417,7 +422,8 @@ async def chat_stream(
                 yield _sse("status", msg="Analizando tu pregunta…")
                 # Mismo hook de followup que /chat: consume la pregunta
                 # abierta de Cassiel para que no secuestre otro canal después.
-                question, decision = await _route_with_followup(user_id, question)
+                question, decision = await _route_with_followup(
+                    user_id, question, quoted_text=body.quoted_text)
 
             yield _sse("status", msg="Procesando respuesta…")
 
@@ -488,10 +494,14 @@ async def chat_stream(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-async def _route_with_followup(user_id: str, question: str):
+async def _route_with_followup(user_id: str, question: str, quoted_text: str | None = None):
     """
     Routing con continuidad conversacional — compartido por /chat y
     /chat/stream.
+
+    0. brief citado — si el usuario responde CITANDO el brief del día o un
+       nudge de pendientes («ya pagué la de Telcel»), va directo a Cassiel
+       con el brief como contexto (Fase 2 F). El intent lo decide el código.
 
     Dos mecanismos de continuidad, en este orden:
 
@@ -512,6 +522,12 @@ async def _route_with_followup(user_id: str, question: str):
     from agents.scheduler.agent import merge_followup, pop_followup
     from orchestration import AgentRouter, RoutingDecision
 
+    if _is_brief_quote(quoted_text):
+        return _merge_brief_quote(question, quoted_text), RoutingDecision(
+            intent="reminder", agents=["scheduler"], confidence=1.0,
+            routing_reason="brief_reply",
+        )
+
     # OJO: comprobar la longitud ANTES de hacer pop — GETDEL es incondicional
     # y destructivo (un solo uso). Si un follow-up largo hiciera el pop sin
     # ir a fusionarse, el texto guardado se perdía sin que nadie lo usara.
@@ -528,6 +544,29 @@ async def _route_with_followup(user_id: str, question: str):
             routing_reason="cassiel_followup",
         )
     return question, await AgentRouter().route(question)
+
+
+# ── brief citado (Fase 2 F) ──────────────────────────────────────────────────
+
+_BRIEF_QUOTE_MARKS = ("Brief del día", "📝 *Pendientes*", "⏰ *Vence esta semana*",
+                      "pendientes que necesitan atención")
+_BRIEF_QUOTE_MAX = 1200
+
+
+def _is_brief_quote(quoted_text) -> bool:
+    """¿Lo citado es el brief del día o un nudge de pendientes? Marcas fijas
+    que solo escribe el código (brief_builder / runner), no el LLM."""
+    if not quoted_text or not isinstance(quoted_text, str):
+        return False
+    return any(m in quoted_text for m in _BRIEF_QUOTE_MARKS)
+
+
+def _merge_brief_quote(question: str, quoted_text: str) -> str:
+    """Cassiel entiende «[Contexto: …] + petición» (es su formato de
+    continuación). El brief se recorta: los ids y títulos van al inicio."""
+    recorte = quoted_text.strip()[:_BRIEF_QUOTE_MAX]
+    return (f"[Contexto: el usuario responde citando el brief del día:\n{recorte}]\n"
+            f"{question.strip()}")
 
 
 # ── paste:pending — texto reenviado sin instrucción ──────────────────────────

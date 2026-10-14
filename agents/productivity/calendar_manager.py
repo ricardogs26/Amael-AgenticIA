@@ -9,7 +9,7 @@ Migrado desde productivity-service/app/services/:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from agents.productivity.errors import GoogleAuthRevocada
@@ -78,6 +78,43 @@ def get_todays_events(credentials) -> list[dict[str, Any]]:
             raise GoogleAuthRevocada(detalle=str(exc)[:200]) from exc
         # Un fallo pasajero de la API sí devuelve vacío: no vale la pena tumbar
         # el brief entero por un 503 de Google.
+        return []
+
+
+def get_upcoming_events(credentials, now: datetime | None = None, days: int = 7) -> list[dict[str, Any]]:
+    """
+    Eventos de mañana a `days` días, en la zona horaria de `now` (entrega D,
+    14-oct-2026): el brief avisa «mañana Dentalitos 13:30» el día anterior.
+    `now` tz-aware; sin él, UTC. Token muerto → GoogleAuthRevocada; otro
+    fallo → [] (un 503 no tumba el brief).
+    """
+    try:
+        now = now or datetime.now(UTC)
+        inicio = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        fin = inicio + timedelta(days=days)
+        service = _build_calendar_service(credentials)
+        result = (
+            service.events()
+            .list(calendarId="primary", timeMin=inicio.isoformat(), timeMax=fin.isoformat(),
+                  singleEvents=True, orderBy="startTime")
+            .execute()
+        )
+        items = result.get("items", [])
+        logger.info(f"[calendar] {len(items)} eventos en los próximos {days} días.")
+        return [
+            {
+                "summary":     e.get("summary", "(sin título)"),
+                "start":       e.get("start", {}).get("dateTime", e.get("start", {}).get("date", "")),
+                "end":         e.get("end", {}).get("dateTime", e.get("end", {}).get("date", "")),
+                "description": e.get("description", ""),
+                "location":    e.get("location", ""),
+            }
+            for e in items
+        ]
+    except Exception as exc:
+        logger.error(f"[calendar] get_upcoming_events error: {exc}")
+        if _es_auth_revocada(exc):
+            raise GoogleAuthRevocada(detalle=str(exc)[:200]) from exc
         return []
 
 

@@ -72,6 +72,15 @@ def start_scheduler_loop() -> None:
         id="night_analysis", replace_existing=True,
         max_instances=1,
     )
+    # Reposición del brief (Fase 2 E): el vie 10-oct-2026 el CronJob de las
+    # 7:00 no corrió (nodo abajo) y nadie lo repuso. Cada 10 min de 7:10 a
+    # 11:59 en día hábil, si falta la marca diaria, se dispara desde aquí.
+    _scheduler.add_job(
+        _brief_catchup, "cron", day_of_week="mon-fri", hour="7-11", minute="*/10",
+        timezone="America/Mexico_City",
+        id="brief_catchup", replace_existing=True,
+        max_instances=1,
+    )
     _scheduler.start()
     for job in _scheduler.get_jobs():
         logger.info(f"[scheduler] Job agendado: {job.id} → próxima {job.next_run_time}")
@@ -123,6 +132,44 @@ async def _memory_consolidation() -> None:
         )
     except Exception as exc:
         logger.error(f"[scheduler] Consolidación de memoria falló: {exc}")
+
+
+_BRIEF_RATE_KEY = "rate_limit:planner_daily"   # la pone planner._check_planner_rate_limit
+
+
+def _ahora_mx() -> datetime:
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("America/Mexico_City"))
+
+
+def brief_catchup_needed(now: datetime, key_exists: bool) -> bool:
+    """Pure. Día hábil, entre 7:10 y 11:59, y el brief de hoy no ha corrido."""
+    if key_exists or now.weekday() >= 5:
+        return False
+    minutos = now.hour * 60 + now.minute
+    return 7 * 60 + 10 <= minutos < 12 * 60
+
+
+async def _brief_catchup() -> None:
+    """Repone el brief de las 7:00 si el CronJob no corrió. La marca Redis
+    de 20 h la escribe el propio brief, así que esto corre a lo sumo una vez."""
+    try:
+        from storage.redis.client import get_redis_client
+        existe = bool(get_redis_client().exists(_BRIEF_RATE_KEY))
+    except Exception as exc:
+        logger.warning(f"[scheduler] brief_catchup: Redis no disponible ({exc}); no se repone.")
+        return
+    if not brief_catchup_needed(_ahora_mx(), existe):
+        return
+    if not _acquire_daily_lock("brief_catchup", ttl_s=540):
+        return
+    logger.warning("[scheduler] El brief de hoy no corrió a las 7:00 — reponiéndolo.")
+    try:
+        from interfaces.api.routers.planner import run_daily_for_all
+        res = await run_daily_for_all()
+        logger.info(f"[scheduler] Brief repuesto: {getattr(res, 'processed', '?')} usuario(s).")
+    except Exception as exc:
+        logger.error(f"[scheduler] Reposición del brief falló: {exc}")
 
 
 async def _night_analysis() -> None:

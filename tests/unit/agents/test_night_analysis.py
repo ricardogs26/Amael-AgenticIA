@@ -85,3 +85,13 @@ class TestSeccionPendientes:
 
     def test_encabezado(self):
         assert na.build_pending_section(TAREAS, HOY, analysis="").startswith("📝 *Pendientes*")
+
+
+class TestIdsComoLosEscribeElLLM:
+    """Sondeo real 14-oct-2026: el 9b devolvió {"top": ["#4", "#1"]} — con el
+    numeral, como aparecen en la lista. Hay que aceptarlo."""
+
+    def test_ids_con_numeral_o_como_texto(self):
+        txt = na.render_analysis({"top": ["#4", " 1 "], "stalled": ["#3"]}, TAREAS, HOY)
+        assert "Cita dental Regina" in txt and "Pagar factura Telcel" in txt
+        assert "Leer Rewired" in txt

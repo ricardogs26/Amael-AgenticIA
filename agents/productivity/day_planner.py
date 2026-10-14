@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from datetime import date, datetime
 from typing import Any
@@ -25,6 +26,9 @@ _TZ_DEFAULT = "America/Mexico_City"
 
 # Singleton LLM
 _planner_llm = None
+# Espera del plan: el cliente tiene 180 s; aquí 150 s (la lección de raphael
+# 1.1.31: cliente y espera nunca se escriben por separado sin relación).
+_LLM_WAIT_S = int(os.environ.get("PLANNER_LLM_WAIT_S", "150"))
 
 
 def _parse_plan(raw: Any) -> dict:
@@ -99,7 +103,7 @@ EVENTOS DE HOY:
 
 EMAILS NO LEÍDOS:
 {emails}
-
+{pendientes}
 Genera un plan de día en formato JSON con esta estructura exacta:
 {{
   "summary": "Resumen breve del día en 2-3 oraciones",
@@ -123,11 +127,14 @@ Reglas:
   ninguno listado, deja los bloques genéricos.
 - Los eventos ya agendados NO se repiten en el plan: ya existen en el
   calendario. Planifica ALREDEDOR de ellos.
+- Si hay PENDIENTES listados, los bloques deben servir para avanzarlos (usa
+  su título); los vencidos o de hoy van primero.
 - Responde ÚNICAMENTE con el JSON, sin explicaciones adicionales.
 """.strip()
 
 
-def _build_planning_prompt(date: str, events: list, emails: list, perfil: str = "") -> str:
+def _build_planning_prompt(date: str, events: list, emails: list, perfil: str = "",
+                           pendientes: str = "") -> str:
     """
     Arma el prompt del plan. `perfil` son los hechos que la memoria destiló del
     usuario (proyectos en curso, preferencias); sin ellos el LLM solo puede
@@ -142,11 +149,13 @@ def _build_planning_prompt(date: str, events: list, emails: list, perfil: str = 
         if perfil and perfil.strip()
         else ""
     )
+    bloque_pend = f"\nPENDIENTES DEL USUARIO:\n{pendientes.strip()}\n" if pendientes.strip() else ""
     return _PLANNING_PROMPT.format(
         date=date,
         profile=bloque,
         events=_format_events(events),
         emails=_format_emails(emails),
+        pendientes=bloque_pend,
     )
 
 
@@ -185,15 +194,29 @@ def _hoy_para(user_email: str) -> datetime:
         return datetime.now()
 
 
-def _seccion_pendientes(user_email: str, hoy: date) -> str:
-    """Sección «Pendientes» (Cassiel Fase 2): top-3 por código + análisis
-    nocturno si existe. Best-effort — nunca bloquea el brief."""
-    from agents.scheduler.night_analysis import pending_section_for
-    return pending_section_for(user_email, hoy)
+def _pendientes_de(user_email: str) -> list:
+    """Pendientes de Cassiel. Best-effort — nunca bloquea el brief."""
+    try:
+        from agents.scheduler.tasks_storage import list_pending
+        return list_pending(user_email)
+    except Exception as exc:
+        logger.warning(f"[planner] No se pudieron leer los pendientes de {user_email}: {exc}")
+        return []
 
 
-def _con_pendientes(summary: str, pendientes: str) -> str:
-    return f"{summary}\n\n{pendientes}" if pendientes else summary
+def _analisis_de(user_email: str, hoy: date) -> str:
+    """Análisis del nocturno (task_briefs) para hoy, o '' si no corrió."""
+    from agents.scheduler.night_analysis import get_brief_analysis
+    return get_brief_analysis(user_email, hoy)
+
+
+def _format_pendientes_prompt(tareas: list, hoy: date) -> str:
+    from agents.scheduler.tasks_storage import sorted_pending
+    lineas = []
+    for t in sorted_pending(tareas, hoy)[:8]:
+        fecha = f" (límite {t.due_date})" if t.due_date else ""
+        lineas.append(f"- #{t.id} {t.title} [{t.priority}]{fecha}")
+    return "\n".join(lineas)
 
 
 def _perfil_de(user_email: str) -> str:
@@ -234,117 +257,131 @@ def _format_emails(emails: list) -> str:
 
 async def organize_day_for_user(user_email: str) -> dict[str, Any]:
     """
-    Pipeline completo de organización del día para un usuario:
-      1. Obtiene credenciales Google desde Vault
-      2. Recupera eventos del calendario y emails no leídos
-      3. Genera plan con LLM
-      4. Sincroniza al calendario
-      5. Retorna resumen
-
-    Migrado desde productivity-service/app/services/planner_service.py → organize_day_for_user()
+    Brief del día de un usuario (Fase 2 C/D, 14-oct-2026) — el CÓDIGO reúne y
+    ordena; el LLM solo reparte bloques:
+      0. Pendientes de Cassiel + análisis nocturno (no dependen de Google)
+      1. Credenciales Google desde Vault
+      2. Eventos de hoy, próximos 7 días y correos no leídos
+      3. Plan de bloques con el LLM → validado en código (horario, choques)
+      4. Bloques válidos al calendario (reemplazando el plan anterior)
+      5. Brief ensamblado por secciones fijas; si el LLM falla, sale sin 🧭
     """
-    from agents.productivity.calendar_manager import get_todays_events, sync_plan_to_calendar
+    from agents.productivity import brief_builder as bb
+    from agents.productivity.calendar_manager import (
+        get_todays_events,
+        get_upcoming_events,
+        sync_plan_to_calendar,
+    )
     from agents.productivity.email_manager import get_unread_emails
     from agents.productivity.errors import GoogleAuthRevocada
     from agents.productivity.vault_credentials import get_user_credentials
+    from agents.scheduler.night_analysis import build_pending_section
 
-    # 0. Pendientes de Cassiel: no dependen de Google, van en TODOS los caminos.
     hoy = _hoy_para(user_email)
-    pendientes = await asyncio.to_thread(_seccion_pendientes, user_email, hoy.date())
+    fecha = hoy.date()
+    alertas: list[str] = []
+    error: str | None = None
 
-    # 1. Credenciales
+    # 0. Pendientes
+    tareas = await asyncio.to_thread(_pendientes_de, user_email)
+    try:
+        analisis = await asyncio.to_thread(_analisis_de, user_email, fecha)
+    except Exception as exc:
+        logger.warning(f"[planner] Sin análisis nocturno para {user_email}: {exc}")
+        analisis = ""
+    pending_txt = build_pending_section(tareas, fecha, analisis)
+    due_txt = bb.section_due_week(tareas, fecha)
+
+    # 1-2. Google
+    events: list = []
+    emails: list = []
+    proximos: list = []
     credentials = get_user_credentials(user_email)
     if not credentials:
-        return {
-            "summary": _con_pendientes(
-                "❌ No se encontraron credenciales de Google Calendar para este usuario. "
-                "Por favor, autoriza el acceso en /api/auth/calendar", pendientes),
-            "tasks_created": 0,
-            "error": "no_credentials",
-        }
+        error = "no_credentials"
+        alertas.append("🔑 No hay credenciales de Google: no pude leer tu calendario ni tu "
+                       "correo. Autorízalas en https://amael-ia.richardx.dev (botón «Calendar»).")
+    else:
+        # Si la autorización está revocada hay que DECIRLO: el lector devolvía
+        # [] y el brief concluía «tu día está libre» con el calendario lleno
+        # (14-ago-2026). Y no se escribe nada en un calendario que no se pudo leer.
+        try:
+            events = get_todays_events(credentials)
+            emails = get_unread_emails(credentials)
+            proximos = get_upcoming_events(credentials, now=hoy)
+        except GoogleAuthRevocada as exc:
+            logger.error(f"[planner] Credenciales revocadas para {user_email}: {exc}")
+            error = "auth_revocada"
+            events, emails, proximos = [], [], []
+            alertas.append("🔑 Tu autorización de Google caducó o fue revocada, así que no "
+                           "pude leer tu calendario ni tu correo. No es que no tengas nada "
+                           "hoy: no puedo verlo. Reautoriza en https://amael-ia.richardx.dev "
+                           "(botón «Calendar») y el brief de mañana sale normal.")
 
-    # 2. Datos. Si la autorización de Google está revocada hay que DECIRLO: el
-    # lector devolvía [] y el brief concluía «tu día está libre» con el
-    # calendario lleno (14-ago-2026). Y no se escribe nada en un calendario que
-    # no se pudo leer — sin saber qué hay, cualquier bloque pisa algo.
-    try:
-        events = get_todays_events(credentials)
-        emails = get_unread_emails(credentials)
-    except GoogleAuthRevocada as exc:
-        logger.error(f"[planner] Credenciales revocadas para {user_email}: {exc}")
-        return {
-            "summary": _con_pendientes(
-                "🔑 Tu autorización de Google caducó o fue revocada, así que no "
-                "pude leer tu calendario ni tu correo. No es que no tengas nada "
-                "hoy: no puedo verlo. Vuelve a autorizar el acceso en "
-                "/api/auth/calendar y el brief de mañana sale normal.", pendientes),
-            "tasks_created": 0,
-            "error": "auth_revocada",
-        }
+    # 3-4. Plan de bloques (solo con Google vivo y algo que planificar)
+    plan_data: dict | None = None
+    bloques: list[dict] = []
+    tasks_created = 0
+    plan_txt = ""
+    if credentials and error is None:
+        if not events and not emails and not tareas:
+            plan_txt = "✅ Día libre: sin eventos, correos ni pendientes."
+        else:
+            perfil = await asyncio.to_thread(_perfil_de, user_email)
+            prompt = _build_planning_prompt(
+                date=hoy.strftime("%Y-%m-%d (%A)"), events=events, emails=emails,
+                perfil=perfil, pendientes=_format_pendientes_prompt(tareas, fecha),
+            )
+            try:
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                    future = ex.submit(_get_llm().invoke, prompt)
+                    raw = future.result(timeout=_LLM_WAIT_S)
+                plan_data = _parse_plan(raw)
+            except concurrent.futures.TimeoutError:
+                logger.warning(f"[planner] LLM timeout para {user_email}")
+                error = "llm_timeout"
+                alertas.append("⚠️ El plan de bloques no se generó: el LLM tardó demasiado. "
+                               "Lo demás del brief es de hoy.")
+            except Exception as exc:
+                logger.error(f"[planner] Error generando plan para {user_email}: {exc}")
+                error = f"plan: {exc}"
+                alertas.append(f"⚠️ El plan de bloques no se generó ({str(exc)[:80]}). "
+                               "Lo demás del brief es de hoy.")
 
-    if not events and not emails:
-        return {
-            "summary": _con_pendientes(
-                "✅ ¡Tu día está libre! No hay eventos ni emails pendientes.", pendientes),
-            "tasks_created": 0,
-        }
+            if plan_data is not None:
+                bloques, descartados = bb.validate_plan_tasks(plan_data.get("tasks") or [], events)
+                # `reemplazar`: el plan del día es UNO — solo se tocan eventos con
+                # la marca del planner, nunca los del usuario.
+                tasks_created = sync_plan_to_calendar(
+                    credentials, {"tasks": bloques, "date": fecha.isoformat()},
+                    existentes=events, reemplazar=True,
+                )
+                plan_txt = bb.section_plan(plan_data, bloques)
+                alertas += [f"Bloque descartado — {d}" for d in descartados]
+                alertas += [str(w) for w in (plan_data.get("warnings") or [])]
 
-    # 3. Generar plan con LLM, con los hechos que la memoria sabe del usuario
-    perfil = await asyncio.to_thread(_perfil_de, user_email)
-    today  = hoy.strftime("%Y-%m-%d (%A)")
-    prompt = _build_planning_prompt(date=today, events=events, emails=emails, perfil=perfil)
-
-    try:
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-            future = ex.submit(_get_llm().invoke, prompt)
-            raw    = future.result(timeout=60)
-
-        plan_data = _parse_plan(raw)
-    except concurrent.futures.TimeoutError:
-        logger.warning(f"[planner] LLM timeout para {user_email}")
-        return {
-            "summary": "⚠️ El LLM tardó demasiado en generar el plan. Intenta más tarde.",
-            "tasks_created": 0,
-            "error": "llm_timeout",
-        }
-    except (json.JSONDecodeError, Exception) as exc:
-        logger.error(f"[planner] Error generando plan para {user_email}: {exc}")
-        return {
-            "summary": f"❌ No se pudo generar un plan válido: {exc}",
-            "tasks_created": 0,
-            "error": str(exc),
-        }
-
-    # 4. Sincronizar al calendario, sin recrear lo que el usuario ya tiene
-    plan_data["date"] = hoy.strftime("%Y-%m-%d")
-    # `reemplazar`: el plan del día es UNO. Si el brief ya escribió hoy (cron
-    # repetido, o el usuario pidiendo replanificar), su plan anterior se borra
-    # antes de escribir el nuevo en vez de apilarse — solo se tocan los eventos
-    # que llevan la marca del planner, nunca los del usuario.
-    tasks_created = sync_plan_to_calendar(
-        credentials, plan_data, existentes=events, reemplazar=True
+    # 5. Ensamble
+    summary = bb.assemble(
+        today=fecha,
+        section_today_txt=bb.section_today(events) if credentials and error != "auth_revocada" else "",
+        upcoming_txt=bb.section_upcoming(proximos, fecha),
+        due_txt=due_txt,
+        pending_txt=pending_txt,
+        plan_txt=plan_txt,
+        alerts_txt=bb.section_alerts([], alertas),
     )
-
-    # 5. Resumen
-    summary      = plan_data.get("summary", "Plan generado.")
-    priorities   = plan_data.get("priorities", [])
-    warnings     = plan_data.get("warnings", [])
-
-    full_summary = summary
-    if priorities:
-        full_summary += "\n\n**Prioridades:**\n" + "\n".join(f"• {p}" for p in priorities)
-    if warnings:
-        full_summary += "\n\n**⚠️ Alertas:**\n" + "\n".join(f"• {w}" for w in warnings)
-    full_summary = _con_pendientes(full_summary, pendientes)
-
     logger.info(
-        f"[planner] Plan generado para {user_email}: "
-        f"{tasks_created} tareas, {len(events)} eventos, {len(emails)} emails"
+        f"[planner] Brief para {user_email}: {tasks_created} bloques, {len(events)} eventos, "
+        f"{len(proximos)} próximos, {len(emails)} emails, {len(tareas)} pendientes"
+        + (f", error={error}" if error else "")
     )
-    return {
-        "summary":       full_summary,
+    out: dict[str, Any] = {
+        "summary":       summary,
         "tasks_created": tasks_created,
         "events_count":  len(events),
         "emails_count":  len(emails),
     }
+    if error:
+        out["error"] = error
+    return out

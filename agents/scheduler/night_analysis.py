@@ -140,7 +140,7 @@ def render_analysis(parsed, tasks: list, today: date) -> str:
         out = []
         for v in vals:
             try:
-                i = int(v)
+                i = int(str(v).strip().lstrip("#").strip())   # el 9b escribe «#4»
             except (TypeError, ValueError):
                 continue
             if i in por_id and i not in out:

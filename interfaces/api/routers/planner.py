@@ -69,6 +69,14 @@ async def run_daily_planner() -> PlannerResult:
 
     Requiere: Authorization: Bearer {INTERNAL_API_SECRET}
     """
+    return await run_daily_for_all()
+
+
+async def run_daily_for_all() -> PlannerResult:
+    """Cuerpo del brief diario, compartido por el endpoint y por la reposición
+    automática del scheduler (Fase 2 E: si el CronJob no corrió a las 7:00
+    porque el nodo estaba abajo, el backend lo dispara entre 7:10 y 11:59).
+    Lanza HTTPException 429 si ya corrió hoy (marca Redis de 20 h)."""
     _check_planner_rate_limit()
     from storage.postgres.client import get_connection
 

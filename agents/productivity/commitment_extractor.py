@@ -46,7 +46,7 @@ _SYSTEM = """Eres Cassiel, el asistente de pendientes de Amael. Recibes una list
    "due_date": "YYYY-MM-DD" | null, "amount": número | null}
 ]}
 
-Un compromiso es algo que el usuario TIENE QUE HACER antes de una fecha: pagar un recibo, renovar algo que vence, asistir a una cita, contestar algo que le pidieron. NO son compromisos: boletines, promociones, confirmaciones de pagos YA hechos, notificaciones informativas, recibos domiciliados que dicen «se cargará automáticamente».
+Un compromiso es algo que el usuario TIENE QUE HACER antes de una fecha: pagar un recibo, renovar algo que vence, asistir a una cita, contestar algo que una PERSONA le pidió. NO son compromisos: boletines, promociones y ofertas («solo hoy», «compra puntos»), confirmaciones de cosas YA hechas (pagado, cancelado), notificaciones automáticas (Google Calendar, Google Play, GitHub, Drive), recibos domiciliados que dicen «se cargará automáticamente». Si dudas, no lo incluyas.
 Reglas:
 - Copia la fecha límite del correo. Si no da fecha, pon null (el código lo descarta).
 - «20 de octubre» sin año → usa el año que corresponda a partir de hoy.
@@ -102,6 +102,25 @@ _EMAIL_RE = re.compile(r"<([^>]+)>")
 # marcó «Pagar recibo CFE (domiciliado)» (sondeo 14-oct-2026). Regla en código:
 # un PAGO cuyo correo anuncia cargo automático se descarta. Solo aplica a
 # `pago`/`vencimiento` — una cita del mismo remitente sí pasa.
+# Ruido de la primera corrida real (14-oct-2026, 40 correos, 4 de 5 falsos):
+# avisos de Google Calendar (nuestros propios eventos rebotando), «responder»
+# a un noreply, «(ya cancelado)», y urgencia de marketing. Cada caso es una
+# regla de código; el prompt también los menciona, pero el prompt no frena.
+_EXCLUDED_SENDERS = frozenset(
+    x.strip().lower() for x in os.environ.get(
+        "COMMITMENT_EXCLUDED_SENDERS",
+        "calendar-notification@google.com,googleplay-noreply@google.com,"
+        "drive-shares-noreply@google.com,comments-noreply@docs.google.com,"
+        "no-reply@accounts.google.com,noreply@github.com,notifications@github.com",
+    ).split(",") if x.strip()
+)
+_NOREPLY_RE = re.compile(r"no-?reply|notification|notificaciones|donotreply|mailer-daemon", re.I)
+_YA_HECHO_RE = re.compile(r"\bya\s+(cancelad|pagad|procesad|hech|enviad|realizad|confirmad)", re.I)
+_MARKETING_RE = re.compile(
+    r"\b(oferta|ofertas|promoci[oó]n|descuento|puntos|rebaja|cup[oó]n|solo\s+hoy|"
+    r"[uú]ltimo\s+d[ií]a|newsletter|iluv)\b", re.I,
+)
+
 _AUTO_CARGO_RE = re.compile(
     r"se\s+cargar[áa]\s+autom|cargo\s+autom[áa]tico|domicilia|"
     r"no\s+necesitas\s+hacer\s+nada|pago\s+autom[áa]tico",
@@ -162,6 +181,17 @@ def resolve_commitments(parsed: dict, emails: list[dict], today: date) -> list[C
             logger.info(f"[commitments] cargo automático, no es compromiso: {title!r}")
             continue
         sender = _sender_address(em.get("from", ""))
+        if sender in _EXCLUDED_SENDERS:
+            continue
+        if tipo == "respuesta" and _NOREPLY_RE.search(sender):
+            continue   # nadie contesta a un noreply
+        if _YA_HECHO_RE.search(title):
+            continue   # el propio LLM dice que ya está hecho
+        texto = f"{em.get('subject', '')} {em.get('snippet', '')} {title}"
+        if tipo in ("pago", "vencimiento") and (
+            _MARKETING_RE.search(texto) or _MARKETING_RE.search(sender)
+        ):
+            continue   # urgencia de marketing, no un vencimiento
         out.append(Commitment(
             title=title, type=tipo, due_date=due,
             priority=_priority_for(due, today),

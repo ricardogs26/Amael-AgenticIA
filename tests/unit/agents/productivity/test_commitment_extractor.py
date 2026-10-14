@@ -142,3 +142,42 @@ class TestDomiciliados:
         parsed = {"commitments": [{"email_index": 0, "type": "cita", "title": "Visita CFE",
                                    "due_date": "2026-10-18"}]}
         assert len(ce.resolve_commitments(parsed, emails, HOY)) == 1
+
+
+class TestRuidoRealDeProduccion:
+    """Primera corrida real (14-oct-2026, 40 correos): 4 de 5 «compromisos»
+    eran ruido. Cada caso baja a una regla de código."""
+
+    def _uno(self, sender, subject, snippet, tipo="pago", title="x", due="2026-10-16"):
+        emails = [{"id": "r1", "from": sender, "subject": subject, "snippet": snippet}]
+        parsed = {"commitments": [{"email_index": 0, "type": tipo, "title": title, "due_date": due}]}
+        return ce.resolve_commitments(parsed, emails, HOY)
+
+    def test_avisos_de_google_calendar_no_son_compromisos(self):
+        # Son nuestros propios eventos (el planner los escribe) rebotando por correo.
+        assert self._uno("Google Calendar <calendar-notification@google.com>",
+                         "Notificación: Bloque Amael", "Deadline…", tipo="respuesta") == []
+
+    def test_no_se_puede_responder_a_un_noreply(self):
+        assert self._uno("Google Play <googleplay-noreply@google.com>", "Suscripción",
+                         "…", tipo="respuesta") == []
+        assert self._uno("GitHub <notifications@github.com>", "PR", "…", tipo="respuesta") == []
+
+    def test_un_pago_desde_noreply_si_pasa(self):
+        # Las facturas sí llegan de noreply: la regla anterior es solo para «respuesta».
+        assert len(self._uno("Izzi <noreply@izzi.mx>", "Tu factura", "Vence el 16 de octubre")) == 1
+
+    def test_lo_que_el_llm_marca_como_ya_hecho_se_descarta(self):
+        assert self._uno("Google Play <googleplay-noreply@google.com>", "Suscripción cancelada",
+                         "…", title="Cancelar suscripción Skillion (ya cancelado)") == []
+        assert self._uno("Banco <avisos@banco.mx>", "Pago aplicado", "…",
+                         title="Pagar tarjeta — ya pagado") == []
+
+    def test_urgencia_de_marketing_no_es_vencimiento(self):
+        assert self._uno("Southwest <southwestairlines@iluv.southwest.com>",
+                         "¡Solo hoy! Puntos extra", "Compra puntos antes de fin del día",
+                         tipo="vencimiento", title="Comprar puntos Southwest") == []
+
+    def test_remitentes_excluidos_por_env_se_descartan(self, monkeypatch):
+        monkeypatch.setattr(ce, "_EXCLUDED_SENDERS", frozenset({"avisos@spam.mx"}))
+        assert self._uno("Spam <avisos@spam.mx>", "Paga ya", "Vence el 16") == []
