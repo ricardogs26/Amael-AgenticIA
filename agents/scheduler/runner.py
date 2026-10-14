@@ -63,6 +63,15 @@ def start_scheduler_loop() -> None:
         id="task_nudges", replace_existing=True,
         max_instances=1,
     )
+    # Nocturno de pendientes (spec Fase 2 §4) — 03:45 México, tras la
+    # consolidación de memoria: compromisos del correo + análisis que el
+    # brief de las 7:00 anexa. Corre en el 9b de GPU, que a esa hora está libre.
+    _scheduler.add_job(
+        _night_analysis, "cron", hour=3, minute=45,
+        timezone="America/Mexico_City",
+        id="night_analysis", replace_existing=True,
+        max_instances=1,
+    )
     _scheduler.start()
     for job in _scheduler.get_jobs():
         logger.info(f"[scheduler] Job agendado: {job.id} → próxima {job.next_run_time}")
@@ -114,6 +123,20 @@ async def _memory_consolidation() -> None:
         )
     except Exception as exc:
         logger.error(f"[scheduler] Consolidación de memoria falló: {exc}")
+
+
+async def _night_analysis() -> None:
+    """Compromisos desde correo + análisis de pendientes (ver night_analysis).
+    Lock Redis: con 2 réplicas, el segundo pod no corre."""
+    if not _acquire_daily_lock("night_analysis"):
+        logger.info("[scheduler] Nocturno de pendientes: otra réplica lo tomó.")
+        return
+    from agents.scheduler.night_analysis import run_night_analysis_sync
+    try:
+        resultados = await asyncio.to_thread(run_night_analysis_sync)
+        logger.info(f"[scheduler] Nocturno de pendientes: {len(resultados)} usuario(s).")
+    except Exception as exc:
+        logger.error(f"[scheduler] Nocturno de pendientes falló: {exc}")
 
 
 async def _task_nudges() -> None:

@@ -177,3 +177,27 @@ def _send_brief_whatsapp(user_email: str, summary: str) -> None:
             logger.warning(f"[planner] WhatsApp /send respondió {resp.status_code} para {phone}")
     except Exception as exc:
         logger.warning(f"[planner] No se pudo enviar brief por WhatsApp: {exc}")
+
+
+class NightResult(BaseModel):
+    processed: int
+    results:   list[dict[str, Any]]
+
+
+@router.post(
+    "/night",
+    response_model=NightResult,
+    dependencies=[Depends(require_internal_secret)],
+)
+async def run_night_analysis_now() -> NightResult:
+    """
+    Dispara a mano el nocturno de pendientes (Cassiel Fase 2): compromisos
+    desde el correo + análisis de pendientes para el brief. El scheduler lo
+    corre solo a las 03:45 México; esto es para probarlo o reponerlo.
+    Requiere: Authorization: Bearer {INTERNAL_API_SECRET}
+    """
+    import asyncio
+
+    from agents.scheduler.night_analysis import run_night_analysis_sync
+    resultados = await asyncio.to_thread(run_night_analysis_sync)
+    return NightResult(processed=len(resultados), results=resultados)

@@ -105,3 +105,55 @@ def get_unread_emails(
         if _es_auth_revocada(exc):
             raise GoogleAuthRevocada(detalle=str(exc)[:200]) from exc
         return []
+
+
+# Compromisos (14-oct-2026): para detectar pagos y vencimientos NO basta con
+# «no leído» — el recibo de la línea telefónica se abre y desaparece del
+# brief, y Gmail lo clasifica en `updates`. Este barrido lee leídos o no,
+# de los últimos N días, excluyendo solo promociones y redes.
+_FILTRO_COMPROMISOS = "-category:promotions -category:social"
+
+
+def get_recent_emails(
+    credentials,
+    days: int = 7,
+    max_results: int = 40,
+) -> list[dict[str, Any]]:
+    """Correos recientes del inbox, leídos o no. Devuelve dicts con `id`,
+    subject, from, date, snippet. Lanza GoogleAuthRevocada si el token murió;
+    otro fallo devuelve [] (un 503 de Google no tumba el nocturno)."""
+    try:
+        service = _build_gmail_service(credentials)
+        result = (
+            service.users().messages()
+            .list(userId="me", labelIds=["INBOX"], maxResults=max_results,
+                  q=f"newer_than:{int(days)}d {_FILTRO_COMPROMISOS}")
+            .execute()
+        )
+        emails = []
+        for ref in result.get("messages", []):
+            try:
+                msg = (
+                    service.users().messages()
+                    .get(userId="me", id=ref["id"], format="metadata",
+                         metadataHeaders=["Subject", "From", "Date"])
+                    .execute()
+                )
+                headers = {h["name"].lower(): h["value"]
+                           for h in msg.get("payload", {}).get("headers", [])}
+                emails.append({
+                    "id":      ref["id"],
+                    "subject": headers.get("subject", "(sin asunto)"),
+                    "from":    headers.get("from", ""),
+                    "date":    headers.get("date", ""),
+                    "snippet": msg.get("snippet", ""),
+                })
+            except Exception as exc:
+                logger.warning(f"[email] Error leyendo mensaje {ref.get('id')}: {exc}")
+        logger.info(f"[email] {len(emails)} correos recientes ({days} d) recuperados.")
+        return emails
+    except Exception as exc:
+        logger.error(f"[email] get_recent_emails error: {exc}")
+        if _es_auth_revocada(exc):
+            raise GoogleAuthRevocada(detalle=str(exc)[:200]) from exc
+        return []

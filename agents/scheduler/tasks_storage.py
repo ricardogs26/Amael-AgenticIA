@@ -42,6 +42,20 @@ CREATE TABLE IF NOT EXISTS user_tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_user_tasks_user ON user_tasks (user_id, status);
 CREATE INDEX IF NOT EXISTS idx_user_tasks_due  ON user_tasks (status, due_date);
+-- Origen del pendiente (14-oct-2026): 'chat' (lo dictó el usuario) o 'email'
+-- (lo extrajo el nocturno de un correo). source_ref = 'gmail:<message id>'
+-- deduplica; source_sender permite «no me interesa X» → excluir remitente.
+ALTER TABLE user_tasks ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'chat';
+ALTER TABLE user_tasks ADD COLUMN IF NOT EXISTS source_ref TEXT;
+ALTER TABLE user_tasks ADD COLUMN IF NOT EXISTS source_sender TEXT;
+ALTER TABLE user_tasks ADD COLUMN IF NOT EXISTS amount NUMERIC;
+CREATE INDEX IF NOT EXISTS idx_user_tasks_source_ref ON user_tasks (user_id, source_ref);
+CREATE TABLE IF NOT EXISTS user_task_exclusions (
+    user_id    TEXT NOT NULL,
+    sender     TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (user_id, sender)
+);
 """
 
 
@@ -61,6 +75,10 @@ class Task:
     last_nudge_at: datetime | None
     created_at: datetime
     completed_at: datetime | None
+    source: str = "chat"
+    source_ref: str | None = None
+    source_sender: str | None = None
+    amount: float | None = None
 
 
 def init_tasks_db() -> None:
@@ -84,13 +102,13 @@ def validate_task_fields(category: str, priority: str, status: str) -> None:
 
 _COLS = ("id, user_id, title, description, category, priority, estimated_minutes, "
          "due_date, status, needs_scheduling, calendar_event_id, last_nudge_at, "
-         "created_at, completed_at")
+         "created_at, completed_at, source, source_ref, source_sender, amount")
 
 _INSERT_SQL = f"""
     INSERT INTO user_tasks
         (user_id, title, description, category, priority, estimated_minutes,
-         due_date, needs_scheduling)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+         due_date, needs_scheduling, source, source_ref, source_sender, amount)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     RETURNING {_COLS}
 """  # nosec B608
 _LIST_SQL = f"""
@@ -101,6 +119,9 @@ _LIST_SQL = f"""
 
 
 def _row_to_task(row: tuple) -> Task:
+    row = tuple(row)
+    if len(row) > 14 and row[17] is not None:
+        row = row[:17] + (float(row[17]),)   # NUMERIC llega como Decimal
     return Task(*row)
 
 
@@ -108,7 +129,9 @@ def create_task(
     user_id: str, title: str, *, description: str = "",
     category: str = "personal", priority: str = "media",
     estimated_minutes: int | None = None, due_date: date | None = None,
-    needs_scheduling: bool = False,
+    needs_scheduling: bool = False, source: str = "chat",
+    source_ref: str | None = None, source_sender: str | None = None,
+    amount: float | None = None,
 ) -> Task:
     from storage.postgres.client import get_connection
 
@@ -130,7 +153,8 @@ def create_task(
             cur.execute(
                 _INSERT_SQL,
                 (user_id, title.strip()[:120], description[:1000], category,
-                 priority, estimated_minutes, due_date, needs_scheduling),
+                 priority, estimated_minutes, due_date, needs_scheduling,
+                 source, source_ref, source_sender, amount),
             )
             task = _row_to_task(cur.fetchone())
         conn.commit()
@@ -291,3 +315,44 @@ def all_pending_with_due() -> list[Task]:
         with conn.cursor() as cur:
             cur.execute(_ALL_DUE_SQL)
             return [_row_to_task(r) for r in cur.fetchall()]
+
+
+# ── Origen email: dedup y exclusión de remitentes ───────────────────────────
+
+def source_ref_exists(user_id: str, source_ref: str) -> bool:
+    """¿Ya se registró este correo? Cuenta cualquier estado: un compromiso
+    cancelado («no me interesa») no debe resucitar en el siguiente barrido."""
+    from storage.postgres.client import get_connection
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM user_tasks WHERE user_id = %s AND source_ref = %s LIMIT 1",
+                (user_id, source_ref),
+            )
+            return cur.fetchone() is not None
+
+
+def sender_excluded(user_id: str, sender: str) -> bool:
+    from storage.postgres.client import get_connection
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM user_task_exclusions WHERE user_id = %s AND sender = %s",
+                (user_id, (sender or "").strip().lower()),
+            )
+            return cur.fetchone() is not None
+
+
+def exclude_sender(user_id: str, sender: str) -> None:
+    """«No me interesa X» sobre un pendiente de origen email: ese remitente ya
+    no genera compromisos para este usuario."""
+    from storage.postgres.client import get_connection
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO user_task_exclusions (user_id, sender) VALUES (%s, %s) "
+                "ON CONFLICT DO NOTHING",
+                (user_id, (sender or "").strip().lower()),
+            )
+        conn.commit()
+    logger.info(f"[tasks] {user_id} excluyó al remitente {sender!r}.")

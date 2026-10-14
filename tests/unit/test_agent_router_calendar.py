@@ -77,3 +77,17 @@ class TestMemoriaSegundaPersona:
     async def test_preguntas_de_memoria(self, router, texto):
         d = await router.route(texto)
         assert d.intent == "memory", d
+
+
+class TestNoMeInteresaVaACassiel:
+    """«No me interesa X» sobre un compromiso del correo es un task_cancel con
+    exclusión de remitente: tiene que llegar a Cassiel (intent reminder)."""
+
+    @pytest.mark.parametrize("frase", [
+        "no me interesa lo de Telcel",
+        "deja de avisarme de las facturas de Izzi",
+    ])
+    async def test_rutea_a_reminder(self, frase):
+        from orchestration.agent_router import AgentRouter
+        d = await AgentRouter().route(frase)
+        assert d.intent == "reminder"

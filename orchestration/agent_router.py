@@ -55,7 +55,7 @@ _KEYWORD_RULES = [
      r"cada\s+(hora|d[ií]a|semana|mes|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)|"
      r"tengo\s+que\b|anota(me)?\b|apunta\b|/?pendientes?\b|"
      r"ya\s+lo\s+hice|ya\s+(compr[eé]|pagu[eé]|termin[eé]|fui)\b|"
-     r"cancela\s+la\s+del?\b|"
+     r"cancela\s+la\s+del?\b|no\s+me\s+interesa\b|deja\s+de\s+avisarme\b|"
      r"necesito\s+(agendar|comprar|llamar|pagar|revisar|renovar|llevar|recoger)\b|"
      r"todos\s+los\s+d[ií]as|tareas?\s+programadas?|mis\s+recordatorios|"
      # Conjugaciones de «recordar» («recuerda de mi mañana…», «me recuerdes

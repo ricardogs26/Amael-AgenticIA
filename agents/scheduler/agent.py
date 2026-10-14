@@ -53,6 +53,7 @@ Esquema:
     "needs_scheduling": false
   },
   "task_ref": "id o parte del título",   // done/cancel/postpone
+  "exclude_sender": false,               // task_cancel: «no me interesa», «deja de avisarme de X»
   "new_due": "YYYY-MM-DD",               // solo task_postpone
   "filter": "personal" | "laboral" | "hoy" | null   // task_list
 }
@@ -69,6 +70,9 @@ Reglas:
 - Infiere category/priority/estimated_minutes con sentido común; due_date SOLO
   si el usuario dio fecha — no la inventes.
 - «ya lo hice / ya compré X» → task_done con task_ref. «cancela» → task_cancel.
+- «no me interesa X» / «deja de avisarme de X» / «ignora los de X» → task_cancel
+  con exclude_sender=true (los pendientes que vienen del correo se pueden
+  silenciar por remitente).
   «mejor el lunes» → task_postpone con new_due.
 - «/pendientes» o «qué tengo pendiente» → task_list (filter si lo dijo).
 - Si el mensaje trae [Contexto: …], es la continuación de esa petición — únelos."""
@@ -425,8 +429,12 @@ class CassielAgent(BaseAgent):
                              "🟡" if t.due_date == hoy else "•")
                     fecha = f" — para {t.due_date}" if t.due_date else ""
                     mins = f" (~{t.estimated_minutes}m)" if t.estimated_minutes else ""
+                    monto = (f" · ${t.amount:,.0f}" if t.amount is not None
+                             and float(t.amount).is_integer()
+                             else f" · ${t.amount:,.2f}" if t.amount is not None else "")
+                    origen = " (del correo)" if t.source == "email" else ""
                     lineas.append(f"{marca} #{t.id} {t.title} [{t.category}/"
-                                  f"{t.priority}]{mins}{fecha}")
+                                  f"{t.priority}]{mins}{monto}{fecha}{origen}")
                 return "Tus pendientes:\n" + "\n".join(lineas)
 
             # task_done / task_cancel / task_postpone
@@ -443,6 +451,13 @@ class CassielAgent(BaseAgent):
                 return f"✅ Cerrada #{task.id}: *{task.title}*."
             if action == "task_cancel":
                 tasks_storage.set_status(task.id, user_email, "cancelled")
+                # Pendiente que vino del correo + «no me interesa»: el remitente
+                # queda excluido de los barridos nocturnos (falsos positivos
+                # tipo «tu factura ya está disponible» de un servicio domiciliado).
+                if parsed.get("exclude_sender") and task.source == "email" and task.source_sender:
+                    tasks_storage.exclude_sender(user_email, task.source_sender)
+                    return (f"🗑 Cancelada #{task.id}: *{task.title}*. "
+                            f"No te vuelvo a anotar compromisos de {task.source_sender}.")
                 return f"🗑 Cancelada #{task.id}: *{task.title}*."
             nueva = date.fromisoformat(str(parsed.get("new_due") or ""))
             tasks_storage.postpone_task(task.id, user_email, nueva)

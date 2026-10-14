@@ -13,7 +13,7 @@ import asyncio
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 logger = logging.getLogger("agents.productivity.planner")
@@ -185,6 +185,17 @@ def _hoy_para(user_email: str) -> datetime:
         return datetime.now()
 
 
+def _seccion_pendientes(user_email: str, hoy: date) -> str:
+    """Sección «Pendientes» (Cassiel Fase 2): top-3 por código + análisis
+    nocturno si existe. Best-effort — nunca bloquea el brief."""
+    from agents.scheduler.night_analysis import pending_section_for
+    return pending_section_for(user_email, hoy)
+
+
+def _con_pendientes(summary: str, pendientes: str) -> str:
+    return f"{summary}\n\n{pendientes}" if pendientes else summary
+
+
 def _perfil_de(user_email: str) -> str:
     """
     Hechos del usuario, best-effort. Esto corre en un cron a las 7:00 am: si la
@@ -237,14 +248,17 @@ async def organize_day_for_user(user_email: str) -> dict[str, Any]:
     from agents.productivity.errors import GoogleAuthRevocada
     from agents.productivity.vault_credentials import get_user_credentials
 
+    # 0. Pendientes de Cassiel: no dependen de Google, van en TODOS los caminos.
+    hoy = _hoy_para(user_email)
+    pendientes = await asyncio.to_thread(_seccion_pendientes, user_email, hoy.date())
+
     # 1. Credenciales
     credentials = get_user_credentials(user_email)
     if not credentials:
         return {
-            "summary": (
+            "summary": _con_pendientes(
                 "❌ No se encontraron credenciales de Google Calendar para este usuario. "
-                "Por favor, autoriza el acceso en /api/auth/calendar"
-            ),
+                "Por favor, autoriza el acceso en /api/auth/calendar", pendientes),
             "tasks_created": 0,
             "error": "no_credentials",
         }
@@ -259,25 +273,24 @@ async def organize_day_for_user(user_email: str) -> dict[str, Any]:
     except GoogleAuthRevocada as exc:
         logger.error(f"[planner] Credenciales revocadas para {user_email}: {exc}")
         return {
-            "summary": (
+            "summary": _con_pendientes(
                 "🔑 Tu autorización de Google caducó o fue revocada, así que no "
                 "pude leer tu calendario ni tu correo. No es que no tengas nada "
                 "hoy: no puedo verlo. Vuelve a autorizar el acceso en "
-                "/api/auth/calendar y el brief de mañana sale normal."
-            ),
+                "/api/auth/calendar y el brief de mañana sale normal.", pendientes),
             "tasks_created": 0,
             "error": "auth_revocada",
         }
 
     if not events and not emails:
         return {
-            "summary": "✅ ¡Tu día está libre! No hay eventos ni emails pendientes.",
+            "summary": _con_pendientes(
+                "✅ ¡Tu día está libre! No hay eventos ni emails pendientes.", pendientes),
             "tasks_created": 0,
         }
 
     # 3. Generar plan con LLM, con los hechos que la memoria sabe del usuario
     perfil = await asyncio.to_thread(_perfil_de, user_email)
-    hoy    = _hoy_para(user_email)
     today  = hoy.strftime("%Y-%m-%d (%A)")
     prompt = _build_planning_prompt(date=today, events=events, emails=emails, perfil=perfil)
 
@@ -323,6 +336,7 @@ async def organize_day_for_user(user_email: str) -> dict[str, Any]:
         full_summary += "\n\n**Prioridades:**\n" + "\n".join(f"• {p}" for p in priorities)
     if warnings:
         full_summary += "\n\n**⚠️ Alertas:**\n" + "\n".join(f"• {w}" for w in warnings)
+    full_summary = _con_pendientes(full_summary, pendientes)
 
     logger.info(
         f"[planner] Plan generado para {user_email}: "

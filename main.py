@@ -198,11 +198,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Incondicional: con AGENTS_MODE=remote el backend no corre ningún otro
     # APScheduler, así que el tick trae el suyo propio.
     try:
+        from agents.scheduler.night_analysis import init_briefs_db
         from agents.scheduler.runner import start_scheduler_loop
         from agents.scheduler.storage import init_scheduler_db
         from agents.scheduler.tasks_storage import init_tasks_db
         init_scheduler_db()
         init_tasks_db()
+        init_briefs_db()
         start_scheduler_loop()
         logger.info("[startup] Scheduler de user_jobs iniciado")
     except Exception as exc:
