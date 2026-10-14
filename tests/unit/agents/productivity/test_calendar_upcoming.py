@@ -49,3 +49,20 @@ def test_fallo_pasajero_devuelve_vacio(monkeypatch):
     svc.events.return_value.list.return_value.execute.side_effect = Exception("503 backend error")
     monkeypatch.setattr(cm, "_build_calendar_service", lambda creds: svc)
     assert cm.get_upcoming_events(object(), now=AHORA) == []
+
+
+def test_los_eventos_de_hoy_dicen_si_son_del_planner(monkeypatch):
+    """Primer brief real con 1.18.19: «📅 Hoy» listó los bloques que el propio
+    planner escribió a las 7:00 y `validate_plan_tasks` descartó los nuevos
+    por «encimarse» con ellos — que además se borran con `reemplazar`."""
+    svc = MagicMock()
+    svc.events.return_value.list.return_value.execute.return_value = {"items": [
+        {"summary": "Standup", "start": {"dateTime": "2026-10-14T09:00:00-06:00"},
+         "end": {"dateTime": "2026-10-14T09:30:00-06:00"}},
+        {"summary": "Bloque Amael", "start": {"dateTime": "2026-10-14T10:00:00-06:00"},
+         "end": {"dateTime": "2026-10-14T11:00:00-06:00"},
+         "extendedProperties": {"private": {"amael_planner": "1"}}},
+    ]}
+    monkeypatch.setattr(cm, "_build_calendar_service", lambda creds: svc)
+    res = cm.get_todays_events(object())
+    assert [e["planner"] for e in res] == [False, True]

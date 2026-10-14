@@ -141,3 +141,25 @@ async def test_sin_pendientes_no_hay_seccion(monkeypatch):
         res = await day_planner.organize_day_for_user("u@x.com")
     assert "Pendientes" not in res["summary"] and "Vence" not in res["summary"]
     assert "Día libre" in res["summary"]
+
+
+async def test_los_bloques_del_planner_de_hoy_no_cuentan_como_eventos(monkeypatch):
+    _base(monkeypatch, tareas=[])
+    llm = MagicMock()
+    llm.invoke.return_value = MagicMock(content='{"summary": "ok", "tasks": ['
+                                                '{"title": "Bloque nuevo", "start": "10:00", "end": "11:00"}], '
+                                                '"priorities": [], "warnings": []}')
+    monkeypatch.setattr(day_planner, "_get_llm", lambda: llm)
+    eventos = [
+        {"summary": "Standup", "start": "2026-10-14T09:00:00-06:00", "end": "2026-10-14T09:30:00-06:00", "planner": False},
+        {"summary": "Bloque viejo", "start": "2026-10-14T10:00:00-06:00", "end": "2026-10-14T11:00:00-06:00", "planner": True},
+    ]
+    g = _google(events=eventos, emails=[{"from": "a@b.c", "subject": "x", "snippet": "y"}])
+    with g[0], g[1], g[2], g[3], \
+         patch("agents.productivity.calendar_manager.sync_plan_to_calendar", return_value=1) as sync:
+        res = await day_planner.organize_day_for_user("u@x.com")
+    s = res["summary"]
+    assert "Standup" in s and "Bloque viejo" not in s          # Hoy = solo eventos del usuario
+    assert "se encima" not in s                                # el bloque nuevo no choca con el viejo
+    assert [t["title"] for t in sync.call_args.args[1]["tasks"]] == ["Bloque nuevo"]
+    assert "Bloque viejo" not in str(llm.invoke.call_args)     # tampoco va al prompt

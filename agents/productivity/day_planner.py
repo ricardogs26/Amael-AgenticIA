@@ -306,7 +306,11 @@ async def organize_day_for_user(user_email: str) -> dict[str, Any]:
         # [] y el brief concluía «tu día está libre» con el calendario lleno
         # (14-ago-2026). Y no se escribe nada en un calendario que no se pudo leer.
         try:
-            events = get_todays_events(credentials)
+            # Sin los bloques del planner de una corrida anterior: en el primer
+            # brief real de 1.18.19 «📅 Hoy» los listó como eventos y los bloques
+            # nuevos se descartaron por «encimarse» con ellos — justo los que
+            # `reemplazar` borra.
+            events = [e for e in get_todays_events(credentials) if not e.get("planner")]
             emails = get_unread_emails(credentials)
             proximos = get_upcoming_events(credentials, now=hoy)
         except GoogleAuthRevocada as exc:

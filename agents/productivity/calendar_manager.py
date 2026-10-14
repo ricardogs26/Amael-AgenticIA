@@ -69,6 +69,10 @@ def get_todays_events(credentials) -> list[dict[str, Any]]:
                 "end":         e.get("end", {}).get("dateTime", e.get("end", {}).get("date", "")),
                 "description": e.get("description", ""),
                 "location":    e.get("location", ""),
+                # Bloque escrito por el propio planner (se borra y se rehace cada
+                # corrida): no es un evento del usuario ni cuenta para choques.
+                "planner":     (e.get("extendedProperties", {}).get("private", {})
+                                .get(_MARCA_PLANNER) == "1"),
             }
             for e in events
         ]
