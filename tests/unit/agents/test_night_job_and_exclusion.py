@@ -68,7 +68,9 @@ class _Cassiel:
         from agents.scheduler.agent import CassielAgent
         self._apply_task = CassielAgent._apply_task.__get__(self)
         self._set_followup = lambda *a, **k: True
-        self._last_query = ""
+        # Lo que escribió el usuario: la referencia («telcel») tiene que estar
+        # en sus palabras para que Cassiel actúe (grounding, 1.18.21).
+        self._last_query = "no me interesa lo de telcel"
         self._next_followup_round = 1
 
 

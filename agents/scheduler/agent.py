@@ -119,6 +119,45 @@ def _unwrap_chat_context(query: str) -> str:
     return query[idx + len(_CHAT_QUESTION_HEADER):].strip()
 
 
+_CONTEXT_OPEN = "[Contexto:"
+_ID_IN_TEXT_RE = re.compile(r"(?<![\d#])#?\s*(\d+)\b")
+_STOPWORDS_REF = frozenset({
+    "para", "como", "este", "esta", "esto", "esos", "esas", "con", "sin", "del",
+    "las", "los", "una", "uno", "que", "por", "mas", "pero", "sobre", "entre",
+    "hacer", "tengo", "tarea", "pendiente",
+})
+
+
+def _user_words(query: str) -> str:
+    """Pure. Solo lo que ESCRIBIÓ el usuario en este turno: fuera el marcador
+    de ronda y todo bloque «[Contexto: …]» (brief citado, petición previa)."""
+    q = _FOLLOWUP_MARKER_RE.sub("", query or "", count=1)
+    idx = q.find(_CONTEXT_OPEN)
+    if idx != -1:
+        q = q[:idx]
+    return q.strip()
+
+
+def _sin_acentos(s: str) -> str:
+    return (s.lower().replace("á", "a").replace("é", "e").replace("í", "i")
+            .replace("ó", "o").replace("ú", "u").replace("ñ", "n"))
+
+
+def _ref_grounded(user_text: str, task) -> bool:
+    """Pure. ¿La tarea que el LLM eligió está en las palabras del usuario?
+    Caso real 14-oct-2026: el usuario contestó «Deadline fallido» y el LLM
+    devolvió task_ref «#2» sacado del brief citado; se cerró «Inscribir
+    divorcio». Acepta el id numérico o una palabra significativa del título
+    (≥4 letras, raíz de 5, sin acentos)."""
+    texto = _sin_acentos(_user_words(user_text or ""))
+    if any(int(m) == task.id for m in _ID_IN_TEXT_RE.findall(texto)):
+        return True
+    for w in re.findall(r"[a-z0-9]+", _sin_acentos(task.title)):
+        if len(w) >= 4 and w not in _STOPWORDS_REF and w[:5] in texto:
+            return True
+    return False
+
+
 def _strip_followup_wrapper(text: str) -> str:
     """Pure. Si `text` contiene el wrapper de contexto de Cassiel — una vez o
     anidado varias veces, en cualquier posición — se queda solo con el
@@ -446,6 +485,20 @@ class CassielAgent(BaseAgent):
             task = tasks_storage.find_task(user_email, ref)   # ValueError si 2+
             if not task:
                 return f"No encontré ningún pendiente que coincida con {ref!r}."
+            # El LLM propone la tarea; el CÓDIGO exige que esté en las palabras
+            # del usuario (id o palabra del título). Si la sacó del contexto
+            # (brief citado, petición previa), no se toca nada y se le muestra
+            # la lista para que elija — sin otra ronda de preguntas.
+            palabras = _user_words(self._last_query)
+            if not _ref_grounded(palabras, task):
+                hoy = datetime.now(ZoneInfo(tz_name)).date()
+                lista = "\n".join(
+                    f"• #{t.id} {t.title}" for t in
+                    tasks_storage.sorted_pending(tasks_storage.list_pending(user_email), hoy)
+                ) or "(ninguno)"
+                return (f"No encontré un pendiente que coincida con «{palabras[:80]}», "
+                        f"así que no cerré nada. Tus pendientes:\n{lista}\n"
+                        f"Dime el número o el nombre.")
             if action == "task_done":
                 tasks_storage.set_status(task.id, user_email, "done")
                 return f"✅ Cerrada #{task.id}: *{task.title}*."
