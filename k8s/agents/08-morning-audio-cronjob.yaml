@@ -29,7 +29,7 @@ spec:
             #        (validado: ni un número ni un nombre nuevo; si no pasa, frase de código)
             #        -> CosyVoice3 /tts (WAV) -> ffmpeg WAV→OGG/opus
             #        -> bridge /send-audio (nota de voz, ptt)
-            image: registry.richardx.dev/morning-audio:1.2.1
+            image: registry.richardx.dev/morning-audio:1.2.2
             imagePullPolicy: IfNotPresent
             env:
             - name: BOT_JWT_TOKEN

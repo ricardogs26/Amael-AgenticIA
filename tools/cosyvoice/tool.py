@@ -24,6 +24,27 @@ from tools.registry import ToolRegistry
 
 logger = logging.getLogger("tool.cosyvoice")
 
+# Acento (16-oct-2026): instrucción de estilo para CosyVoice3 (cosyvoice 2.5.0,
+# campo `instruct` de /tts). En el A/B con la voz clonada de Ricardo ganó la
+# nota con instrucción; aplica solo al inglés. Vacío = apagado.
+EN_INSTRUCT = os.environ.get(
+    "COSYVOICE_EN_INSTRUCT", "Speak in a natural, fluent American English accent."
+)
+
+
+def tts_payload(text: str, language: str, voice: str | None = None,
+                speed: float | None = None) -> dict:
+    """Cuerpo de POST /tts: añade `instruct` cuando el idioma es inglés."""
+    payload: dict = {"text": text, "language": language}
+    if speed is not None:
+        payload["speed"] = speed
+    if voice:
+        payload["voice"] = voice
+    if EN_INSTRUCT and (language or "").lower().startswith("en"):
+        payload["instruct"] = EN_INSTRUCT
+    return payload
+
+
 _COSYVOICE_URL = os.environ.get(
     "COSYVOICE_SERVICE_URL",
     "http://cosyvoice-service:8010",
@@ -115,13 +136,7 @@ class CosyVoiceTool(BaseTool):
         """Genera audio WAV base64 desde texto."""
         import asyncio
         try:
-            payload = {
-                "text":     input.text[:500],
-                "language": input.language,
-                "speed":    input.speed,
-            }
-            if input.voice:
-                payload["voice"] = input.voice
+            payload = tts_payload(input.text[:500], input.language, input.voice, input.speed)
             # requests es bloqueante: dentro de un async congelaba el event loop
             # del backend mientras CosyVoice sintetizaba (minutos en CPU).
             resp = await asyncio.to_thread(
@@ -370,9 +385,7 @@ class CosyVoiceTool(BaseTool):
                 timeout = self._CLONE_TIMEOUT_S
             else:
                 url = f"{_COSYVOICE_URL}/tts"
-                payload = {"text": chunk, "language": language}
-                if voice:
-                    payload["voice"] = voice
+                payload = tts_payload(chunk, language, voice)
                 timeout = 120 if device == "cuda" else self._CLONE_TIMEOUT_S
             resp = _req.post(url, json=payload, timeout=timeout)
             if resp.status_code != 200:

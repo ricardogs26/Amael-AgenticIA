@@ -119,3 +119,21 @@ def test_nombres_cortos_y_tipos_sin_frase():
     assert va.short_name("frontend-next-deployment-7974dddd85-khjg2") == "frontend-next"
     assert "node is under resource pressure" in va.sentence("NODE_PRESSURE", "lab-home", 12)
     assert "weird thing on qdrant" in va.sentence("WEIRD_THING", "qdrant", 15)
+
+
+def test_la_alerta_en_voz_pide_acento_americano(monkeypatch):
+    import sys
+    import types
+    posts = []
+
+    class _R:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"audio_base64": ""}
+    fake = types.SimpleNamespace(post=lambda url, json=None, timeout=None: posts.append((url, json)) or _R())
+    monkeypatch.setitem(sys.modules, "requests", fake)
+    from tools.cosyvoice import tool as cv
+    monkeypatch.setattr(cv.CosyVoiceTool, "_wav_to_ogg_opus", staticmethod(lambda b: "OGG"))
+    va._speak("Raphael here. Critical alert.")
+    tts = [j for u, j in posts if u.endswith("/tts")]
+    assert tts and tts[0]["instruct"] == cv.EN_INSTRUCT

@@ -73,3 +73,21 @@ async def test_falla_de_cosyvoice_no_lanza(monkeypatch):
     monkeypatch.setattr(cv._req, "post", lambda *a, **k: SimpleNamespace(status_code=500, text="boom"))
     r = await cv.CosyVoiceTool().speak("Hola.", "5215550001111")
     assert not r.success and "500" in r.error
+
+
+# ── Acento americano (16-oct-2026): A/B ganó la nota con `instruct` ──────────
+
+def test_payload_en_ingles_lleva_la_instruccion_de_acento():
+    p = cv.tts_payload("Good morning.", "en")
+    assert p["instruct"] == cv.EN_INSTRUCT and "American" in cv.EN_INSTRUCT
+
+
+def test_payload_en_espanol_no_lleva_instruccion():
+    assert "instruct" not in cv.tts_payload("Buenos días.", "es")
+
+
+async def test_speak_en_ingles_manda_instruct_en_cada_fragmento(red, monkeypatch):
+    _device(monkeypatch, "cuda")
+    await cv.CosyVoiceTool().speak("Hello there. " * 60, "5210000000000", language="en")
+    tts = [j for u, j in red if u.endswith("/tts")]
+    assert tts and all(j.get("instruct") == cv.EN_INSTRUCT for j in tts)

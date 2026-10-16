@@ -170,12 +170,12 @@ def _speak(text: str) -> None:
     """cosyvoice /tts (voz por defecto = la de Ricardo) → OGG → bridge."""
     import requests
 
-    from tools.cosyvoice.tool import CosyVoiceTool
+    from tools.cosyvoice.tool import CosyVoiceTool, tts_payload
     cosy = os.environ.get("COSYVOICE_SERVICE_URL", "http://cosyvoice-service:8010")
     bridge = os.environ.get("WHATSAPP_BRIDGE_URL", "http://whatsapp-bridge-service:3000")
     phone = os.environ.get("OWNER_PHONE") or os.environ.get("ADMIN_PHONE", "")
     try:
-        r = requests.post(f"{cosy}/tts", json={"text": text, "language": "en"}, timeout=120)
+        r = requests.post(f"{cosy}/tts", json=tts_payload(text, "en"), timeout=120)
         r.raise_for_status()
         ogg = CosyVoiceTool._wav_to_ogg_opus(r.json()["audio_base64"])
         s = requests.post(f"{bridge}/send-audio", json={
