@@ -1,4 +1,6 @@
 # cosyvoice-service — TTS via Fun-CosyVoice3-0.5B
+# 2.5.0 (16-oct-2026): `instruct` opcional en /tts — instrucción de estilo para
+# CosyVoice3 (acento, emoción) antes de <|endofprompt|>; la voz no cambia.
 # Desde 2.3.0 (7-oct-2026) corre en la GPU junto al LLM de ollama: pesos fp16
 # (~1.6 GiB), tope de 3.5 GiB por proceso, CPU si no hay ≥4 GiB libres al
 # arrancar o si la GPU falla en caliente. ~1 s por segundo de audio (antes ~45).
@@ -47,7 +49,7 @@ spec:
     spec:
       containers:
         - name: cosyvoice
-          image: registry.richardx.dev/cosyvoice-service:2.4.0
+          image: registry.richardx.dev/cosyvoice-service:2.5.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8010
