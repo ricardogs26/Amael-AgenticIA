@@ -380,8 +380,8 @@ class CosyVoiceTool(BaseTool):
         def _one(chunk: str) -> bytes:
             if clone_ref:
                 url = f"{_COSYVOICE_URL}/tts/clone"
-                payload = {"text": chunk, "reference_audio_base64": clone_ref[0],
-                           "prompt_text": clone_ref[1], "language": language}
+                payload = tts_payload(chunk, language)   # instruct de acento si es inglés
+                payload.update({"reference_audio_base64": clone_ref[0], "prompt_text": clone_ref[1]})
                 timeout = self._CLONE_TIMEOUT_S
             else:
                 url = f"{_COSYVOICE_URL}/tts"

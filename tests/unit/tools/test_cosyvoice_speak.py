@@ -91,3 +91,13 @@ async def test_speak_en_ingles_manda_instruct_en_cada_fragmento(red, monkeypatch
     await cv.CosyVoiceTool().speak("Hello there. " * 60, "5210000000000", language="en")
     tts = [j for u, j in red if u.endswith("/tts")]
     assert tts and all(j.get("instruct") == cv.EN_INSTRUCT for j in tts)
+
+
+async def test_voz_clonada_en_ingles_tambien_lleva_instruct(red, monkeypatch):
+    """Caso real 16-oct: la nota por /api/voice/read usó la voz clonada
+    (/tts/clone) y salió sin acento — solo /tts lo mandaba."""
+    _device(monkeypatch, "cuda")
+    await cv.CosyVoiceTool().speak("Hello Ricardo.", "5215550001111",
+                                   clone_ref=("REF", "transcripción"), language="en")
+    clone = [j for u, j in red if u.endswith("/tts/clone")]
+    assert clone and clone[0]["instruct"] == cv.EN_INSTRUCT
