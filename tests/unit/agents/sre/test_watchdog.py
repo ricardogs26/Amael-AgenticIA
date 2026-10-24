@@ -530,3 +530,91 @@ def test_runner_queue_incomunicado_no_inventa_problema(monkeypatch):
 def test_runner_queue_desactivable_sin_token(monkeypatch):
     monkeypatch.setattr(watchdog, "_GH_TOKEN", "")
     assert watchdog.check_runner_queue() is None
+
+
+# ── WAN (24-oct-2026): avisar cuando el internet sale por el respaldo ──────
+
+class _WanRedis:
+    def __init__(self):
+        self.d = {}
+
+    def get(self, k):
+        return self.d.get(k)
+
+    def set(self, k, v, nx=False, ex=None):
+        if nx and k in self.d:
+            return False
+        self.d[k] = v
+        return True
+
+    def delete(self, k):
+        self.d.pop(k, None)
+
+
+def _wan(monkeypatch, org, ip="1.2.3.4"):
+    monkeypatch.setattr(watchdog, "_wan_actual", lambda: (ip, org))
+
+
+def _t(minutos):
+    from datetime import UTC, datetime, timedelta
+    return datetime(2026, 10, 24, 12, 0, tzinfo=UTC) + timedelta(minutes=minutos)
+
+
+def test_wan_principal_no_reporta(monkeypatch):
+    _wan(monkeypatch, "AS8151 Uninet S.A. de C.V.")
+    assert watchdog.check_wan(_WanRedis(), _t(0)) == (None, None)
+
+
+def test_wan_respaldo_breve_no_avisa(monkeypatch):
+    """Un parpadeo (guardar la config de una WAN) no debe sonar."""
+    _wan(monkeypatch, "AS14593 Space Exploration Technologies Corporation")
+    r = _WanRedis()
+    assert watchdog.check_wan(r, _t(0)) == (None, None)
+    assert watchdog.check_wan(r, _t(10)) == (None, None)
+
+
+def test_wan_respaldo_sostenido_avisa(monkeypatch):
+    _wan(monkeypatch, "AS14593 Space Exploration Technologies Corporation", "129.222.201.136")
+    r = _WanRedis()
+    watchdog.check_wan(r, _t(0))
+    problem, regreso = watchdog.check_wan(r, _t(20))
+    assert regreso is None
+    assert problem.startswith("`red/wan`")
+    assert "AS14593" in problem and "~20 min" in problem
+
+
+def test_wan_sin_redis_avisa_a_la_primera(monkeypatch):
+    _wan(monkeypatch, "AS14593 Space Exploration Technologies Corporation")
+    problem, _ = watchdog.check_wan(None, _t(0))
+    assert problem is not None
+
+
+def test_wan_regreso_se_anuncia_solo_si_hubo_aviso(monkeypatch):
+    r = _WanRedis()
+    _wan(monkeypatch, "AS14593 Space Exploration Technologies Corporation")
+    watchdog.check_wan(r, _t(0))
+    _wan(monkeypatch, "AS8151 Uninet S.A. de C.V.")
+    # Regresó a los 5 min: nunca se avisó la caída, tampoco se anuncia el regreso.
+    assert watchdog.check_wan(r, _t(5)) == (None, None)
+    assert r.get(watchdog._WAN_SINCE_KEY) is None
+
+    _wan(monkeypatch, "AS14593 Space Exploration Technologies Corporation")
+    watchdog.check_wan(r, _t(10))
+    _wan(monkeypatch, "AS8151 Uninet S.A. de C.V.")
+    problem, regreso = watchdog.check_wan(r, _t(40))
+    assert problem is None
+    assert "de regreso" in regreso and "~30 min" in regreso
+
+
+def test_wan_sin_respuesta_calla(monkeypatch):
+    monkeypatch.setattr(watchdog, "_wan_actual", lambda: None)
+    assert watchdog.check_wan(_WanRedis(), _t(0)) == (None, None)
+
+
+def test_alerta_de_wan_no_manda_a_mirar_pods(monkeypatch):
+    sent = {}
+    monkeypatch.setattr(watchdog, "_PHONE", "521")
+    monkeypatch.setattr(watchdog, "_post", lambda text: sent.setdefault("t", text) or True)
+    watchdog.send_alert(["`red/wan` el internet sale por el RESPALDO (AS14593, x)"])
+    assert "internet en respaldo" in sent["t"]
+    assert "kubectl" not in sent["t"]

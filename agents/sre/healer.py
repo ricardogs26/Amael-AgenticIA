@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 from datetime import UTC, datetime
 
@@ -130,6 +131,63 @@ def _get_pod_logs(resource_name: str, namespace: str, lines: int = 50) -> str:
         return ""
 
 
+# Fallas de red HACIA FUERA del cluster en los logs del contenedor caído.
+# Caso disparador (23-oct-2026): Starlink murió a las 02:31 con el enlace
+# arriba, el ER605 siguió repartiendo conexiones por él y el github-runner
+# (pide su token a api.github.com en cada arranque) entró en CrashLoop con
+# «curl: (35) … Connection reset by peer» / «curl: (28) Connection timed out».
+# Raphael hizo dos ROLLOUT_RESTART «verify:ok» que no arreglaron nada: un
+# reinicio no repara el internet de la casa.
+_EXTERNAL_NET_RE = re.compile(
+    r"curl: \((?:6|7|28|35|56)\)"
+    r"|Could not resolve host"
+    r"|Temporary failure in name resolution"
+    r"|Network is unreachable"
+    r"|TLS handshake timeout"
+    r"|Connection reset by peer"
+    r"|Connection timed out"
+    r"|i/o timeout",
+    re.IGNORECASE,
+)
+# Una línea que nombra un destino interno es una dependencia del cluster
+# (postgres, redis, otro Service), no el internet: esa sí puede ser del pod.
+_INTERNAL_DEST_RE = re.compile(
+    r"\.svc\b|cluster\.local|-service\b|localhost|127\.0\.0\.1"
+    r"|\b10\.\d+\.\d+\.\d+|\b192\.168\.\d+\.\d+",
+    re.IGNORECASE,
+)
+# Tipos donde el contenedor muere o reinicia: los únicos con log que leer.
+EXTERNAL_NET_ISSUES = {
+    AnomalyType.CRASH_LOOP,
+    AnomalyType.HIGH_RESTARTS,
+    AnomalyType.POD_FAILED,
+    AnomalyType.DEPLOYMENT_DEGRADED,
+}
+
+
+def find_external_network_error(logs: str) -> str | None:
+    """Última línea del log que delata una falla de red externa, o None."""
+    for line in reversed((logs or "").splitlines()):
+        if _EXTERNAL_NET_RE.search(line) and not _INTERNAL_DEST_RE.search(line):
+            return line.strip()[:200]
+    return None
+
+
+def detect_external_network_failure(anomaly: Anomaly) -> str | None:
+    """
+    Si el pod cae por no poder salir a internet, devuelve la línea que lo
+    prueba (y la deja en `metadata["external_network"]` para decide_action).
+    Determinista y sin LLM: si el log lo dice, no hay nada que razonar.
+    """
+    if anomaly.issue_type not in EXTERNAL_NET_ISSUES:
+        return None
+    logs = _get_pod_logs(anomaly.resource_name, anomaly.namespace, lines=80)
+    line = find_external_network_error(logs)
+    if line:
+        anomaly.metadata = {**(anomaly.metadata or {}), "external_network": line}
+    return line
+
+
 def _restarted_within_verification_window(deployment_name: str, namespace: str) -> bool:
     """
     True si el deployment fue reiniciado hace menos de SRE_VERIFICATION_DELAY.
@@ -244,6 +302,14 @@ def decide_action(anomaly: Anomaly, confidence: float) -> str:
         logger.info(
             f"[healer] {anomaly.namespace}/{anomaly.resource_name} rechazado sin "
             f"controlador que lo reprograme → NOTIFY_HUMAN"
+        )
+        return ActionType.NOTIFY_HUMAN
+
+    # Falla de red externa (ver detect_external_network_failure): reiniciar no
+    # arregla el internet y cada restart «verify:ok» lo hace pasar por curado.
+    if (anomaly.metadata or {}).get("external_network"):
+        logger.info(
+            f"[healer] '{anomaly.resource_name}' cae por red externa → NOTIFY_HUMAN"
         )
         return ActionType.NOTIFY_HUMAN
 
@@ -752,6 +818,14 @@ def execute_sre_action(
             f"Recurso: {anomaly.namespace}/{anomaly.resource_name}\n"
             f"Detalles: {anomaly.details[:200]}"
         )
+        _net = (anomaly.metadata or {}).get("external_network")
+        if _net:
+            msg += (
+                "\n\n🌐 *Falla de red EXTERNA, no del pod* — no se reinicia.\n"
+                f"Log: `{_net[:150]}`\n"
+                "Revisa el internet de la casa (ER605: ¿alguna WAN caída o "
+                "degradada?). El pod se recupera solo cuando vuelva la red."
+            )
         if notify_fn:
             notify_fn(msg, anomaly.severity)
         SRE_ACTIONS_TAKEN_TOTAL.labels(action=action_type, result="notified").inc()

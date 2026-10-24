@@ -412,6 +412,15 @@ def sre_autonomous_loop(
                     f"corrieron. El objeto Pod quedó como lápida en el API server."
                 )
                 confidence = 1.0
+            elif _net_line := healer.detect_external_network_failure(anomaly):
+                # Determinístico: el log del contenedor caído prueba que no
+                # puede salir a internet (23-oct-2026, Starlink muerto). Ni el
+                # LLM ni un reinicio aportan nada.
+                root_cause = (
+                    "Falla de red externa: el contenedor no logra conectarse a "
+                    f"internet («{_net_line[:120]}»). No es un defecto del pod."
+                )
+                confidence = 1.0
             else:
                 root_cause, confidence = diagnoser.diagnose_with_llm(
                     anomaly, vault_knowledge, metrics_knowledge

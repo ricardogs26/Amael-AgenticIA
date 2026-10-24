@@ -81,7 +81,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: watchdog
-              image: registry.richardx.dev/raphael-service:1.1.41
+              image: registry.richardx.dev/raphael-service:1.1.42
               imagePullPolicy: IfNotPresent
               command: ["python", "-m", "agents.sre.watchdog"]
               env:
@@ -124,6 +124,14 @@ spec:
                 # Avisar con una semana es lo que hace la rotación barata.
                 - name: WATCHDOG_GH_EXPIRY_DAYS
                   value: "7"
+                # Internet de la casa (24-oct-2026): Infinitum principal,
+                # Starlink de respaldo en el ER605. El failover es silencioso;
+                # si la IP de salida deja de ser de este ASN más de 15 min, se
+                # avisa (y se avisa al regresar). Vaciar para desactivar.
+                - name: WATCHDOG_WAN_PRIMARY_ASN
+                  value: "AS8151"
+                - name: WATCHDOG_WAN_BACKUP_MIN
+                  value: "15"
                 - name: REDIS_HOST
                   value: "redis-service"
                 - name: REDIS_PORT

@@ -43,6 +43,14 @@ apagado, así que no avisan a nadie. Un Job fallido no pinta rojo ningún
 Deployment. Se lee `status.lastSuccessfulTime` del CronJob — cubre también a
 los jobs lanzados a mano con `--from=cronjob`.
 
+Lo de la WAN entró el 24-oct-2026. La casa tiene dos internet en el ER605:
+Infinitum (principal) y Starlink (respaldo con Link Backup). El 23-oct Starlink
+murió de madrugada con el enlace arriba y el router siguió mandándole tráfico;
+reparado eso, el failover funciona — pero es SILENCIOSO: si Infinitum cae, todo
+sigue andando por Starlink y nadie se entera de que ya no hay respaldo. Se mira
+el ASN de la IP pública de salida (ipinfo.io): si deja de ser el del principal
+por más de WATCHDOG_WAN_BACKUP_MIN, se avisa; al volver, se avisa que regresó.
+
 Uso:
     python -m agents.sre.watchdog
 
@@ -57,6 +65,8 @@ Env vars:
     WATCHDOG_RUNNER_QUEUE_MIN  minutos en cola para avisar del runner (20)
     WATCHDOG_BACKUPS       CSV `namespace/cronjob` de backups ("" desactiva)
     WATCHDOG_BACKUP_MAX_HOURS  antigüedad máxima del último backup exitoso (26)
+    WATCHDOG_WAN_PRIMARY_ASN  ASN de la WAN principal (AS8151 = Infinitum; "" desactiva)
+    WATCHDOG_WAN_BACKUP_MIN   minutos en el respaldo antes de avisar (15)
     OWNER_PHONE            teléfono destino
     WHATSAPP_BRIDGE_URL    bridge (default http://whatsapp-bridge-service:3000)
 
@@ -99,6 +109,10 @@ _GH_API       = os.environ.get("WATCHDOG_GITHUB_API", "https://api.github.com")
 _GH_EXPIRY_D  = int(os.environ.get("WATCHDOG_GH_EXPIRY_DAYS", "7"))
 _GH_REPOS     = os.environ.get("WATCHDOG_GH_REPOS", "ricardogs26/Amael-AgenticIA")
 _RUNNER_QUEUE_MIN = int(os.environ.get("WATCHDOG_RUNNER_QUEUE_MIN", "20"))
+_WAN_PRIMARY_ASN = os.environ.get("WATCHDOG_WAN_PRIMARY_ASN", "AS8151")
+_WAN_BACKUP_MIN  = int(os.environ.get("WATCHDOG_WAN_BACKUP_MIN", "15"))
+_WAN_INFO_URL    = os.environ.get("WATCHDOG_WAN_INFO_URL", "https://ipinfo.io/json")
+_WAN_SINCE_KEY   = "watchdog:wan:backup_since"
 _BRIDGE_URL   = os.environ.get("WHATSAPP_BRIDGE_URL", "http://whatsapp-bridge-service:3000")
 _PHONE        = (
     os.environ.get("OWNER_PHONE")
@@ -348,6 +362,83 @@ def check_runner_queue(now=None) -> str | None:
     )
 
 
+def _wan_actual() -> tuple[str, str] | None:
+    """(ip, org) de la salida a internet, o None si no se pudo preguntar."""
+    try:
+        import requests
+
+        data = requests.get(_WAN_INFO_URL, timeout=10).json()
+        return data.get("ip", "?"), data.get("org", "")
+    except Exception as exc:
+        logger.warning(f"WAN no evaluable: {exc}")
+        return None
+
+
+def check_wan(r=None, now=None) -> tuple[str | None, str | None]:
+    """
+    ¿El internet está saliendo por la WAN de respaldo? Devuelve
+    (problema, aviso_de_regreso); cualquiera puede ser None.
+
+    El cron corre cada 10 min, así que la primera vez que se ve el respaldo
+    solo se anota la hora en Redis (`watchdog:wan:backup_since`) y se avisa
+    cuando lleva WATCHDOG_WAN_BACKUP_MIN: un parpadeo de 30 s (como al guardar
+    la config de una WAN) no debe sonar. Sin Redis no hay cómo medir la
+    duración y se avisa a la primera (fail-loud, igual que el dedup).
+
+    Sin respuesta de ipinfo se calla: sin internet tampoco saldría el WhatsApp,
+    y que ipinfo no conteste no prueba nada de la WAN.
+    """
+    if not _WAN_PRIMARY_ASN:
+        return None, None
+    actual = _wan_actual()
+    if actual is None:
+        return None, None
+    ip, org = actual
+    from datetime import datetime
+
+    now = now or datetime.now(UTC)
+
+    if org.startswith(_WAN_PRIMARY_ASN):
+        regreso = None
+        if r is not None:
+            try:
+                since = r.get(_WAN_SINCE_KEY)
+                if since is not None:
+                    mins = (now.timestamp() - float(since)) / 60
+                    r.delete(_WAN_SINCE_KEY)
+                    # Solo se anuncia el regreso si antes se avisó la caída.
+                    if mins >= _WAN_BACKUP_MIN:
+                        r.delete("watchdog:alerted:red/wan")
+                        regreso = (
+                            f"✅ *WATCHDOG — internet principal de regreso*\n\n"
+                            f"Ya se sale otra vez por {org} ({ip}) tras ~{mins:.0f} min "
+                            "en el respaldo. Starlink vuelve a quedar de reserva."
+                        )
+            except Exception as exc:
+                logger.warning(f"Redis falló en el chequeo WAN ({exc}).")
+        return None, regreso
+
+    mins = None
+    if r is not None:
+        try:
+            r.set(_WAN_SINCE_KEY, str(now.timestamp()), nx=True)
+            mins = (now.timestamp() - float(r.get(_WAN_SINCE_KEY))) / 60
+        except Exception as exc:
+            logger.warning(f"Redis falló en el chequeo WAN ({exc}) — se avisa sin esperar.")
+            mins = None
+        if mins is not None and mins < _WAN_BACKUP_MIN:
+            logger.warning(f"WAN de respaldo en uso ({org}, {ip}) hace {mins:.0f} min — aún no se avisa.")
+            return None, None
+
+    desde = f" desde hace ~{mins:.0f} min" if mins is not None else ""
+    return (
+        f"`red/wan` el internet sale por el RESPALDO ({org or 'ASN desconocido'}, {ip}){desde}: "
+        f"la WAN principal ({_WAN_PRIMARY_ASN}) está caída y ya no hay segundo internet. "
+        "Revisa el módem Telmex (luz PON/LOS) y repórtalo a Telmex si sigue.",
+        None,
+    )
+
+
 def _redis():
     """Cliente Redis para el dedup, o None si no responde (fail-loud: sin
     Redis se alerta igual)."""
@@ -408,7 +499,14 @@ def send_alert(problems: list[str]) -> bool:
     # (y mandar a mirar pods que están sanos) es exactamente el ruido que hace
     # que un aviso se aprenda a ignorar.
     solo_preventivo = all("expira en" in p for p in problems)
-    if solo_preventivo:
+    # La WAN caída no es un pod caído: mandar a `kubectl get pods` despista.
+    solo_red = all("`red/" in p for p in problems)
+    if solo_red:
+        text = (
+            "🌐 *WATCHDOG — internet en respaldo*\n\n"
+            + "\n".join(f"• {p}" for p in problems)
+        )
+    elif solo_preventivo:
         text = (
             "⚠️ *WATCHDOG — credencial por vencer*\n\n"
             + "\n".join(f"• {p}" for p in problems)
@@ -446,6 +544,13 @@ def send_alert(problems: list[str]) -> bool:
             "y los logs del último fallido; para reintentar, "
             "`kubectl create job <nombre>-manual --from=cronjob/<cronjob> -n amael-ia`."
         )
+    return _post(text)
+
+
+def _post(text: str) -> bool:
+    if not _PHONE:
+        logger.error("OWNER_PHONE/SRE_ALERT_PHONE sin definir — no se puede alertar.")
+        return False
     try:
         import requests
 
@@ -513,6 +618,15 @@ def main() -> int:
             problems.append(backup_problem)
         else:
             logger.info(f"OK — backup {ns}/{name}")
+
+    wan_problem, wan_regreso = check_wan(_redis())
+    if wan_problem:
+        logger.error(wan_problem)
+        problems.append(wan_problem)
+    elif _WAN_PRIMARY_ASN:
+        logger.info("OK — wan (sin alerta)")
+    if wan_regreso:
+        _post(wan_regreso)
 
     if not problems:
         logger.info("Todos los deployments críticos están sanos.")
