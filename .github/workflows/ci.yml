@@ -256,15 +256,25 @@ jobs:
           echo "Versión desplegada: ${{ needs.build.outputs.version }}"
 
       - name: Notificar a Raphael (monitoreo intensificado 10min)
+        # Los valores entran por env, nunca interpolados en el script: un mensaje
+        # de commit con comillas o varias líneas rompía el shell (24-oct-2026,
+        # curl exit 6 con el deploy ya completo) y era inyección de comandos.
+        env:
+          HOOK_SECRET:  ${{ secrets.AMAEL_INTERNAL_SECRET }}
+          HOOK_VERSION: ${{ needs.build.outputs.version }}
+          HOOK_COMMIT:  ${{ github.sha }}
+          HOOK_AUTHOR:  ${{ github.actor }}
+          HOOK_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
+          payload=$(python3 -c 'import json, os; print(json.dumps({
+              "service": "amael-agentic-backend",
+              "version": os.environ["HOOK_VERSION"],
+              "commit":  os.environ["HOOK_COMMIT"],
+              "author":  os.environ["HOOK_AUTHOR"],
+              "message": os.environ.get("HOOK_MESSAGE", "")[:500],
+          }))')
           curl -s -X POST \
             http://raphael-service.amael-ia.svc.cluster.local:8002/api/sre/deploy-hook \
-            -H "Authorization: Bearer ${{ secrets.AMAEL_INTERNAL_SECRET }}" \
+            -H "Authorization: Bearer $HOOK_SECRET" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"service\": \"amael-agentic-backend\",
-              \"version\": \"${{ needs.build.outputs.version }}\",
-              \"commit\":  \"${{ github.sha }}\",
-              \"author\":  \"${{ github.actor }}\",
-              \"message\": \"${{ github.event.head_commit.message }}\"
-            }" || echo "Raphael no disponible — hook omitido"
+            -d "$payload" || echo "Raphael no disponible — hook omitido"
