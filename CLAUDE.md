@@ -247,3 +247,5 @@ Cada una nació de un incidente real (detalle en el historial del vault).
   muerto meses por un `TypeError` silenciado.
 - **`getattr(settings, "x", default)` nunca truena**: verificar el nombre real del campo.
 - **Un lock Redis SET NX** para todo cron dentro del backend (HPA = 2 réplicas).
+- **LangChain 1.2+**: nada de `langchain.agents` (`AgentType`, `initialize_agent` ya no
+  existen). `Tool` sale de `langchain_core.tools`; agentes con `langgraph.prebuilt.create_react_agent`.
