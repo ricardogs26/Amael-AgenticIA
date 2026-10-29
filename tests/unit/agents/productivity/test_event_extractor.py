@@ -113,6 +113,13 @@ class TestFormato:
 
 # ── El agente: credenciales → extracción → creación → confirmación ───────────
 
+class _AhoraFijo(datetime):
+    """El handler toma datetime.now(): fijarlo evita que la prueba caduque."""
+    @classmethod
+    def now(cls, tz=None):
+        return AHORA.astimezone(tz) if tz else AHORA
+
+
 class TestHanielCreateEvent:
     def _agent(self):
         from agents.productivity.agent import HanielAgent
@@ -126,7 +133,8 @@ class TestHanielCreateEvent:
              patch("agents.productivity.event_extractor.extract_event_fields",
                    return_value=DENTALITOS_JSON), \
              patch("agents.productivity.calendar_manager.create_calendar_event",
-                   return_value=creado) as crear:
+                   return_value=creado) as crear, \
+             patch("datetime.datetime", _AhoraFijo):
             res = await agent._handle_create_event("ricardo@x.com", "agéndalo …")
         assert res.success, res.error
         assert res.output["response"].startswith("📅 Agendado: sáb 24-oct")
