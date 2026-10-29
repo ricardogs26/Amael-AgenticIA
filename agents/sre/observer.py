@@ -94,7 +94,7 @@ def _is_reject_reason(reason: str | None) -> bool:
 _OBSERVE_NAMESPACES = [
     ns.strip()
     for ns in os.environ.get(
-        "SRE_OBSERVE_NAMESPACES", "amael-ia,vault,observability,kong"
+        "SRE_OBSERVE_NAMESPACES", "amael-ia,vault,observability,kong,trader"
     ).split(",")
     if ns.strip()
 ]

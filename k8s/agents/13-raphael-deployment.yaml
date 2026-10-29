@@ -104,7 +104,7 @@ data:
 
   # ── SRE loop (verificado contra backend real) ────────────────────────────
   SRE_NAMESPACE:               "amael-ia"
-  SRE_OBSERVE_NAMESPACES:      "amael-ia,vault,observability,kong"
+  SRE_OBSERVE_NAMESPACES:      "amael-ia,vault,observability,kong,trader"
   SRE_PROTECTED_DEPLOYMENTS:   "postgres-deployment,ollama-deployment,vault-0"
   SRE_LOOP_ENABLED:            "true"
   SRE_LOOP_INTERVAL:           "60"
@@ -216,7 +216,7 @@ spec:
 
       containers:
         - name: raphael
-          image: registry.richardx.dev/raphael-service:1.1.42
+          image: registry.richardx.dev/raphael-service:1.1.43
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

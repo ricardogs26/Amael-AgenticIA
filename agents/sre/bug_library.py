@@ -105,7 +105,6 @@ APP_MANIFEST_MAP: dict[str, AppManifest] = {
     # Agentes standalone (Phase 3 agents-split)
     "raphael-service":           AppManifest("amael-agentic-backend", "k8s/agents/13-raphael-deployment.yaml"),
     "camael-service":            AppManifest("amael-agentic-backend", "k8s/agents/15-camael-deployment.yaml"),
-    "trader-service":            AppManifest("amael-agentic-backend", "k8s/agents/16-trader-deployment.yaml"),
 
     # TTS
     "cosyvoice-deployment":      AppManifest("amael-agentic-backend", "k8s/agents/08-cosyvoice-deployment.yaml"),
@@ -113,6 +112,11 @@ APP_MANIFEST_MAP: dict[str, AppManifest] = {
     "piper-deployment":          AppManifest("amael-agentic-backend", "k8s/agents/09-piper-deployment.yaml"),
     "piper-service":             AppManifest("amael-agentic-backend", "k8s/agents/09-piper-deployment.yaml"),
 }
+
+# Servicios que Raphael repara pero Camael NO toca: viven en otro repo y namespace
+# (el trader, desde oct-2026). get_fix devuelve None para ellos antes de consultar
+# ArgoCD o el default, así ningún camino abre un PR contra manifests de este repo.
+_SIN_CAMAEL = ("trader-service",)
 
 # App por defecto si el resource_name no está en el mapa.
 #
@@ -503,6 +507,10 @@ def get_fix(
 
     template = BUG_LIBRARY.get(issue_type)
     if not template:
+        return None
+
+    if resource_name and resource_name.startswith(_SIN_CAMAEL):
+        _log.info(f"[bug_library] '{resource_name}' fuera de Camael — sin fix GitOps.")
         return None
 
     manifest: AppManifest | None = None

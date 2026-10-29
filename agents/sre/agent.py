@@ -300,7 +300,7 @@ def _build_tools() -> list:
     from agents.sre import healer, reporter, scheduler
 
     # Importaciones lazy para los tools del agente conversacional
-    _MONITORED_NAMESPACES = ["amael-ia", "vault", "observability", "kong"]
+    _MONITORED_NAMESPACES = ["amael-ia", "vault", "observability", "kong", "trader"]
 
     def _get_pods(ns: str = "") -> str:
         try:

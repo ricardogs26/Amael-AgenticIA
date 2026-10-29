@@ -98,7 +98,7 @@ data:
   SRE_LOOP_ENABLED:           "true"
   SRE_LOOP_INTERVAL:          "60"
   SRE_NAMESPACE:              "amael-ia"
-  SRE_OBSERVE_NAMESPACES:     "amael-ia,vault,observability,kong"
+  SRE_OBSERVE_NAMESPACES:     "amael-ia,vault,observability,kong,trader"
   SRE_CONFIDENCE_THRESHOLD:   "0.7"
   SRE_MAX_RESTARTS_PER_HOUR:  "3"
   SRE_CB_THRESHOLD:           "5"
