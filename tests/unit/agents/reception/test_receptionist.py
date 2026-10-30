@@ -132,11 +132,18 @@ class TestTrigger:
         "HOLA AMAEL, VENGO DE RICHARDX.DEV",
         "Holá Amaél, vengo de richardx.dev!!",
         "Hola Amael, vengo de richardx.dev — quiero platicar de RAG",
+        "Hola, vengo de pixanlabs.com.mx",
+        "Hola, vengo de pixanlabs.com.mx y quiero saber más",
+        "Hola, vengo de pixanlabs.com.mx y me gustaría platicar",
+        "Hola, quiero que me avisen cuando esté lista la administración para guarderías y escuelas",
     ])
     def test_acepta_variantes_del_enlace(self, txt):
         assert receptionist.is_trigger(txt)
 
-    @pytest.mark.parametrize("txt", ["hola", "Hola Amael", "vengo de richardx.dev", "", "Soy Juan de Acme"])
+    @pytest.mark.parametrize("txt", [
+        "hola", "Hola Amael", "vengo de richardx.dev", "", "Soy Juan de Acme",
+        "pixanlabs.com.mx", "Hola, quiero información de guarderías",
+    ])
     def test_rechaza_lo_demas(self, txt):
         assert not receptionist.is_trigger(txt)
 
@@ -318,3 +325,61 @@ def test_lista_de_pendientes_incluye_privados():
 def test_schema_admite_status_private():
     assert "private" in storage.STATUSES
     assert "'private'" in storage._DDL
+
+
+class TestPrivadoSinPrimerTexto:
+    TEL = "5215550001111"
+
+    def test_evento_sin_texto_no_contesta(self, wired):
+        st, calls = wired
+        assert receptionist.handle_message(self.TEL, "", has_media=True, msg_type="e2e") is None
+        assert st.msgs == [("visitor", "📎 (adjunto: e2e)")]
+        assert "📎 (envió un adjunto: e2e)" in calls["admin"][0]
+
+    def test_saluda_en_el_primer_texto_tras_eventos(self, wired):
+        st, _ = wired
+        receptionist.handle_message(self.TEL, "", has_media=True)
+        receptionist.handle_message(self.TEL, "", has_media=True)
+        assert receptionist.handle_message(self.TEL, "Hola") == prompts.REPLY_PRIVATE
+        assert receptionist.handle_message(self.TEL, "soy Ana") is None
+
+    def test_no_saluda_si_ricardo_ya_contesto(self, wired):
+        st, _ = wired
+        receptionist.handle_message(self.TEL, "", has_media=True)
+        st.msgs.append(("ricardo", "hola"))
+        assert receptionist.handle_message(self.TEL, "Hola") is None
+
+    def test_pie_de_foto_se_guarda(self, wired):
+        st, _ = wired
+        reply = receptionist.handle_message(self.TEL, "mi cotización", has_media=True, msg_type="image")
+        assert reply == prompts.REPLY_PRIVATE
+        assert st.msgs == [("visitor", "mi cotización 📎 (adjunto: image)")]
+
+    def test_saludo_ya_no_dice_uso_privado(self):
+        assert "privado" not in prompts.REPLY_PRIVATE
+
+
+class TestPotencial:
+    @pytest.mark.parametrize("txt", [
+        "Quiero una cotización", "cuánto es el precio", "servicios de Pixan",
+        "info de Kanan", "soy de un consultorio", "SHIKIGAMI",
+    ])
+    def test_marca(self, txt):
+        assert receptionist.is_potential(txt)
+
+    @pytest.mark.parametrize("txt", ["Hola", "", "No gracias", "aprecio tu ayuda"])
+    def test_no_marca(self, txt):
+        assert not receptionist.is_potential(txt)
+
+    def test_aviso_lleva_la_marca_y_no_abre_el_llm(self, wired):
+        _, calls = wired
+        receptionist.handle_message("5215550001111", "me interesa un servicio")
+        assert "🔥 Posible lead" in calls["admin"][0]
+        assert calls["llm"] == 0
+
+
+def test_lead_abierto_guarda_adjuntos(wired):
+    st, _ = wired
+    st.exists = True
+    assert receptionist.handle_message("5215550001111", "", has_media=True) == prompts.REPLY_MEDIA
+    assert st.msgs == [("visitor", "📎 (adjunto)")]

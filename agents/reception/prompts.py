@@ -10,7 +10,7 @@ def profile_text() -> str:
     return _PROFILE_PATH.read_text(encoding="utf-8").strip()
 
 
-SYSTEM_TEMPLATE = """Eres Amael, el asistente personal de Ricardo Guzmán. Atiendes a una persona que llegó desde su sitio richardx.dev y todavía no conoces.
+SYSTEM_TEMPLATE = """Eres Amael, el asistente personal de Ricardo Guzmán. Atiendes a una persona que llegó desde richardx.dev o pixanlabs.com.mx y todavía no conoces.
 
 Tu trabajo, en este orden:
 1. Saludar con calidez y brevedad, presentarte como el asistente de Ricardo.
@@ -43,5 +43,8 @@ def build_system(captured: dict) -> str:
 REPLY_FALLBACK  = "Gracias por escribir. Le paso tu mensaje a Ricardo y él te contacta."
 REPLY_LIMIT     = "Ya tengo tu mensaje. Ricardo te contactará directamente; gracias por la paciencia."
 REPLY_MEDIA     = "Por aquí solo puedo atender texto. ¿Me cuentas en un mensaje qué necesitas?"
-REPLY_PRIVATE   = "⚠️ Este asistente es de uso privado. Contacta al administrador para obtener acceso."
+REPLY_PRIVATE   = ("Gracias por escribir. Soy el asistente de Ricardo Guzmán. "
+                   "¿Me dejas tu nombre y en qué te puede ayudar? Le paso tu mensaje.")
+REPLY_CONVERSAR = ("Hola, soy Amael, el asistente de Ricardo. Ya puedes escribirme por aquí "
+                   "lo que necesites y le paso tu mensaje.")
 REPLY_ERROR     = "Ahora mismo no puedo atenderte. Intenta de nuevo en unos minutos."

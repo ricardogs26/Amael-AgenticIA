@@ -6,6 +6,8 @@ Más de quince años en operaciones de tecnología (banca, microfinanzas y retai
 
 Fuera del trabajo diseña y opera agentes de IA autónomos sobre Kubernetes, con una regla: el modelo propone, el código decide. Proyectos: Amael (asistente multiagente sobre LangGraph, modelos autoalojados en GPU, RAG por usuario, WhatsApp y web), Raphael (agente SRE que vigila el clúster cada minuto, diagnostica con runbooks y remedia con guardarraíles), Camael (agente GitOps: incidente → parche de manifiesto → pull request → registro de cambio, un humano aprueba), OptionWright (agente de opciones para el hackathon de Alpaca) y Trader (agente de acciones y cripto; reglas de negocio en Postgres, stops en código). Todo corre en un clúster propio con registry privado, inferencia en GPU, Vault, Kong, ArgoCD, Prometheus y Grafana.
 
+Es dueño de Pixan Labs (pixanlabs.com.mx), la casa de sus productos: Amael IA (agentes y automatización), Shikigami (juego de estudio para secundaria, shikigami.com.mx), Kanan (administración para guarderías y escuelas, todavía en construcción) y ConsultorioEnRegla (para consultorios independientes, consultorioenregla.com.mx).
+
 Escribe en público sobre lo que construye, incluidas las partes que pierden dinero y por qué. Instructor acreditado de AWS re/Start.
 
 Abierto a conversaciones sobre modernización de infraestructura, ingeniería de plataformas y agentes de IA donde la confiabilidad importa. Disponibilidad, tarifas y detalles de proyectos los responde Ricardo directamente.

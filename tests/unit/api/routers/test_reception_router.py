@@ -41,7 +41,7 @@ def test_message_delega_y_nunca_revienta(client, monkeypatch):
     import agents.reception.receptionist as rc
     seen = {}
     monkeypatch.setattr(rc, "handle_message",
-                        lambda p, t, m, n: seen.update(name=n) or "hola visitante")
+                        lambda p, t, m, n, msg_type=None: seen.update(name=n) or "hola visitante")
     from interfaces.api import auth as auth_mod
     monkeypatch.setattr(auth_mod, "_emit_security_event", lambda *a, **k: None)
     r = client.post("/api/reception/message",
