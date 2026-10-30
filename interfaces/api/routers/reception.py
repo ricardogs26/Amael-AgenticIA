@@ -26,6 +26,8 @@ class MessageIn(BaseModel):
     phone:     str = Field(min_length=6, max_length=32)
     text:      str = Field(default="", max_length=4000)
     has_media: bool = False
+    # message.type de whatsapp-web.js: distingue archivos de eventos de sistema.
+    msg_type:  str | None = Field(default=None, max_length=40)
     # Nombre de perfil de WhatsApp (pushname): solo para el aviso a Ricardo.
     display_name: str | None = Field(default=None, max_length=100)
 
@@ -45,6 +47,7 @@ async def reception_message(body: MessageIn) -> ReplyOut:
     try:
         reply = await asyncio.to_thread(
             handle_message, body.phone, body.text, body.has_media, body.display_name,
+            body.msg_type,
         )
     except Exception as exc:
         logger.error(f"[reception] handle_message reventó: {exc}")

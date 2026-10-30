@@ -22,6 +22,7 @@ class TestParse:
         ("7 ver", ("show", 7, "")),
         ("7 aprobar", ("aprobar", 7, "")),
         ("7 rechazar", ("rechazar", 7, "")),
+        ("7 conversar", ("conversar", 7, "")),
         ("7 responder hola, ¿nos vemos el jueves?", ("responder", 7, "hola, ¿nos vemos el jueves?")),
         ("7 responder", ("responder", 7, "")),
         ("siete aprobar", ("invalid", None, "")),
@@ -73,6 +74,24 @@ class TestDispatch:
         monkeypatch.setattr(rc, "silence", lambda p: silenciados.append(p))
         commands.dispatch("7 rechazar", "ADMIN")
         assert estados == ["rejected"] and silenciados == ["5215550002222"]
+
+    def test_conversar_abre_el_privado_y_guarda_el_saludo(self, admin, monkeypatch):
+        from agents.reception import notify, prompts
+        estados, msgs, enviados = [], [], []
+        monkeypatch.setattr(storage, "get", lambda i: _lead(status="private"))
+        monkeypatch.setattr(storage, "set_status", lambda i, s: estados.append(s))
+        monkeypatch.setattr(storage, "add_message", lambda i, r, c: msgs.append((r, c)))
+        monkeypatch.setattr(notify, "send_to_visitor", lambda p, t: enviados.append(t))
+        assert "ya le contesta" in commands.dispatch("7 conversar", "ADMIN")
+        assert estados == ["open"]
+        assert enviados == [prompts.REPLY_CONVERSAR]
+        assert msgs == [("amael", prompts.REPLY_CONVERSAR)]
+
+    @pytest.mark.parametrize("status", ["open", "approved", "rejected"])
+    def test_conversar_solo_para_privados(self, admin, monkeypatch, status):
+        monkeypatch.setattr(storage, "get", lambda i: _lead(status=status))
+        monkeypatch.setattr(storage, "set_status", lambda i, s: pytest.fail("no debe cambiar"))
+        assert "solo para privados" in commands.dispatch("7 conversar", "ADMIN")
 
     def test_aprobar_da_alta_y_avisa(self, admin, monkeypatch):
         monkeypatch.setattr(storage, "get", lambda i: _lead())

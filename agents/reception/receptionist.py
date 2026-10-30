@@ -26,9 +26,17 @@ FORCED_NOTIFY_AT  = 10     # lead incompleto → aviso igual a los N mensajes
 SILENCE_TTL_S     = 30 * 24 * 3600
 LLM_TIMEOUT_S     = 45
 
+ADJUNTO           = "📎 (adjunto"
+
 _K_RATE_PHONE = "reception:rate:{phone}"
 _K_RATE_DAY   = "reception:rate:global:{day}"
 _K_SILENCED   = "reception:silenced:{phone}"
+
+# Texto de los botones de pixanlabs.com.mx (public/index.html), ya pasado por _fold().
+_PIXAN_TRIGGERS = (
+    "vengo de pixanlabs.com.mx",
+    "quiero que me avisen cuando este lista la administracion para guarderias y escuelas",
+)
 
 
 # ── Funciones puras ───────────────────────────────────────────────────────────
@@ -43,13 +51,30 @@ def _fold(text: str) -> str:
 
 def is_trigger(text: str) -> bool:
     """
-    El enlace del sitio manda «Hola Amael, vengo de richardx.dev». Solo esa
-    frase (mayúsculas/acentos/puntuación aparte) abre una conversación con un
-    número desconocido; cualquier otro mensaje se ignora en silencio. Sin esto
-    el bot quedaba abierto a cualquiera que tuviera el número.
+    Los enlaces de richardx.dev y pixanlabs.com.mx mandan un texto ya escrito.
+    Solo esas frases (mayúsculas/acentos/puntuación aparte) abren una
+    conversación con un número desconocido; cualquier otro mensaje queda como
+    lead private. Sin esto el bot quedaba abierto a cualquiera que tuviera el
+    número.
     """
     f = _fold(text)
-    return "hola amael" in f and "richardx.dev" in f
+    if "hola amael" in f and "richardx.dev" in f:
+        return True
+    return any(frase in f for frase in _PIXAN_TRIGGERS)
+
+
+_POTENCIAL_RE = re.compile(r"\b(pixan|kanan|consultorio|shikigami|servicio|precio|cotiza)")
+
+
+def is_potential(text: str) -> bool:
+    """Solo etiqueta el aviso a Ricardo: nunca abre conversación con el LLM."""
+    return bool(_POTENCIAL_RE.search(_fold(text)))
+
+
+def _adjunto(text: str, msg_type: str | None) -> str:
+    """Lo que se guarda de un mensaje con adjunto; el texto (pie de foto) va primero."""
+    marca = f"{ADJUNTO}: {msg_type})" if msg_type else f"{ADJUNTO})"
+    return f"{text} {marca}" if text else marca
 
 
 def parse_llm_json(raw: str) -> dict:
@@ -198,7 +223,10 @@ def _notify_admin(kind: str, lead: Lead, history: list[tuple[str, str]]) -> None
 
 # ── Entrada principal ─────────────────────────────────────────────────────────
 
-def _notify_private(lead: Lead, text: str, has_media: bool, display_name: str | None) -> None:
+def _notify_private(
+    lead: Lead, text: str, has_media: bool, display_name: str | None,
+    msg_type: str | None = None,
+) -> None:
     """Aviso a Ricardo por cada mensaje de un desconocido sin la frase.
 
     El formato «Desconocido #N» lo reconoce el bridge: si Ricardo contesta
@@ -210,11 +238,13 @@ def _notify_private(lead: Lead, text: str, has_media: bool, display_name: str | 
     quien = f"{display_name} ({lead.phone})" if display_name else lead.phone
     cuerpo = f"«{text[:400]}»" if text else ""
     if has_media:
-        cuerpo = (cuerpo + "\n" if cuerpo else "") + "📎 (envió un adjunto)"
+        tipo = f": {msg_type}" if msg_type else ""
+        cuerpo = (cuerpo + "\n" if cuerpo else "") + f"📎 (envió un adjunto{tipo})"
+    tag = " · 🔥 Posible lead" if is_potential(text) else ""
     txt = (
-        f"📩 *Desconocido #{lead.id}* — {quien}\n{cuerpo}\n\n"
+        f"📩 *Desconocido #{lead.id}* — {quien}{tag}\n{cuerpo}\n\n"
         f"↩️ Responde citando este mensaje para contestarle.\n"
-        f"/lead {lead.id} aprobar · /lead {lead.id} rechazar"
+        f"/lead {lead.id} conversar · /lead {lead.id} aprobar · /lead {lead.id} rechazar"
     )
     try:
         send_to_admin(txt)
@@ -225,12 +255,17 @@ def _notify_private(lead: Lead, text: str, has_media: bool, display_name: str | 
 
 def _handle_private(
     phone: str, text: str, has_media: bool, display_name: str | None, lead: Lead | None,
+    msg_type: str | None = None,
 ) -> str | None:
     """Desconocido sin frase: se guarda, se avisa a Ricardo, Amael no conversa.
 
     6-oct-2026: «Gina L» escribió el 28-sep sin la frase del enlace, recibió el
     aviso de uso privado y no se guardó nada; su chat tenía mensajes temporales
     de 7 días y WhatsApp lo borró en todos los dispositivos. Ricardo la perdió.
+
+    30-oct-2026: los 3 leads privados abrían con dos «adjuntos» casi simultáneos
+    que parecen eventos de WhatsApp y no archivos. Solo se contesta al primer
+    TEXTO, para no escribirle a quien aún no escribió nada.
     """
     from observability.metrics import RECEPTION_MESSAGES_TOTAL
 
@@ -248,16 +283,19 @@ def _handle_private(
         RECEPTION_MESSAGES_TOTAL.labels(result="rate_limited").inc()
         return None
 
-    storage.add_message(lead.id, "visitor", text or "📎 (adjunto)")
+    previos = [] if first else storage.recent_messages(lead.id, CONTEXT_TURNS)
+    saludar = bool(text) and all(r == "visitor" and c.startswith(ADJUNTO) for r, c in previos)
+    storage.add_message(lead.id, "visitor", _adjunto(text, msg_type) if has_media else text)
     lead.message_count = storage.bump_count(lead.id)
     RECEPTION_MESSAGES_TOTAL.labels(result="private").inc()
     logger.info(f"[reception] desconocido #{lead.id} ({phone}) sin frase — guardado y avisado")
-    _notify_private(lead, text, has_media, display_name)
-    return prompts.REPLY_PRIVATE if first else None
+    _notify_private(lead, text, has_media, display_name, msg_type)
+    return prompts.REPLY_PRIVATE if saludar else None
 
 
 def handle_message(
     phone: str, text: str, has_media: bool = False, display_name: str | None = None,
+    msg_type: str | None = None,
 ) -> str | None:
     from observability.metrics import RECEPTION_LEADS_TOTAL, RECEPTION_MESSAGES_TOTAL
 
@@ -271,7 +309,7 @@ def handle_message(
     lead = storage.get_by_phone(phone)
     if lead is None or lead.status == "private":
         if not is_trigger(text):
-            return _handle_private(phone, text, has_media, display_name, lead)
+            return _handle_private(phone, text, has_media, display_name, lead, msg_type)
         if lead is None:
             lead = storage.get_or_create(phone)
         else:  # el desconocido encontró la frase: pasa a conversación normal
@@ -284,6 +322,8 @@ def handle_message(
 
     if has_media and not text:
         RECEPTION_MESSAGES_TOTAL.labels(result="media").inc()
+        storage.add_message(lead.id, "visitor", _adjunto("", msg_type))
+        storage.bump_count(lead.id)
         return prompts.REPLY_MEDIA
     if not text:
         return None

@@ -17,17 +17,18 @@ HELP = (
     "*Leads*\n"
     "/lead — pendientes\n"
     "/lead <n> — ficha e historial\n"
-    "/lead <n> aprobar — dar acceso a Amael\n"
+    "/lead <n> conversar — Amael le contesta como recepcionista (guarda todo en el lead)\n"
+    "/lead <n> aprobar — acceso completo a Amael\n"
     "/lead <n> rechazar — silenciar 30 días\n"
     "/lead <n> responder <texto> — contestarle vía Amael\n"
     "↩️ O responde CITANDO el aviso del contacto."
 )
 
-_CMD_RE = re.compile(r"^(?P<id>\d+)(?:\s+(?P<action>aprobar|rechazar|responder|ver))?(?:\s+(?P<text>.+))?$", re.S)
+_CMD_RE = re.compile(r"^(?P<id>\d+)(?:\s+(?P<action>aprobar|conversar|rechazar|responder|ver))?(?:\s+(?P<text>.+))?$", re.S)
 
 
 def parse(command: str) -> tuple[str, int | None, str]:
-    """→ (action, lead_id, text). action ∈ list|help|show|aprobar|rechazar|responder|invalid."""
+    """→ (action, lead_id, text). action ∈ list|help|show|aprobar|conversar|rechazar|responder|invalid."""
     c = (command or "").strip()
     if not c or c.lower() in ("list", "lista", "pendientes"):
         return ("list", None, "")
@@ -143,6 +144,20 @@ def dispatch(command: str, phone: str) -> str:
         except Exception as exc:
             logger.error(f"[reception] aviso de aprobación falló: {exc}")
         return f"Lead #{lead.id} aprobado: {lead.phone} ya tiene acceso."
+
+    if action == "conversar":
+        from agents.reception import prompts
+        from agents.reception.notify import send_to_visitor
+        if lead.status != "private":
+            return f"Lead #{lead.id} está en {lead.status}; conversar es solo para privados."
+        storage.set_status(lead.id, "open")
+        try:
+            send_to_visitor(lead.phone, prompts.REPLY_CONVERSAR)
+        except Exception as exc:
+            logger.error(f"[reception] aviso de conversar falló: {exc}")
+            return f"Lead #{lead.id} ya conversa con Amael, pero no le llegó el saludo."
+        storage.add_message(lead.id, "amael", prompts.REPLY_CONVERSAR)
+        return f"Lead #{lead.id}: Amael ya le contesta. Todo queda en lead_messages."
 
     if action == "rechazar":
         from agents.reception.receptionist import silence
