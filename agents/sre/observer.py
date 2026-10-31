@@ -173,6 +173,18 @@ def _last_termination(cs):
     return finished
 
 
+def _restart_evidence(cs, new_restarts: int, total_restarts: int) -> dict:
+    """Evidencia del reinicio que ya trae el pod; no consulta nada más."""
+    term = getattr(getattr(cs, "last_state", None), "terminated", None)
+    return {
+        "container": cs.name,
+        "new_restarts": new_restarts,
+        "total_restarts": total_restarts,
+        "last_reason": getattr(term, "reason", None),
+        "last_exit_code": getattr(term, "exit_code", None),
+    }
+
+
 def _detect_restart_burst(v1) -> tuple[int, int] | None:
     """(pods, namespaces) que terminaron en la ventana si hay ráfaga; None si no.
 
@@ -330,6 +342,9 @@ def observe_cluster(namespaces: list[str] | None = None) -> list[Anomaly]:
                             new_restarts = restarts - last_count
                             severity = Severity.MEDIUM if restarts < 10 else Severity.HIGH
                             meta     = dict(_owner_meta)
+                            meta["restart_evidence"] = _restart_evidence(
+                                cs, new_restarts, restarts
+                            )
                             details  = (
                                 f"Pod {pod_name} tuvo {new_restarts} reinicio(s) nuevo(s) "
                                 f"(total acumulado: {restarts})."

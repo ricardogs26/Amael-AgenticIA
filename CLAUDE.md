@@ -169,6 +169,8 @@ si hubo deploy en los últimos 30 min.
   `/sre skill approve|reject <nombre>`.
 - **Runbooks**: 18 `.md` en `runbooks/` + generados (post-incidente, bootstrap) +
   consolidación diaria 03:00 MX que fusiona en vez de reemplazar.
+- **Modo sombra** (`agents/sre/shadow.py`, `SRE_SHADOW_HIGH_RESTARTS`): en HIGH_RESTARTS guarda
+  en `sre_shadow_decisions` qué haría con evidencia del pod. Solo mide: no actúa ni notifica.
 - **Comandos WhatsApp** `/sre <cmd>` → `POST /api/sre/command`: estado, status, incidents,
   postmortems, slo, grafana, maintenance on <min>|off, skills, ayuda. `/estado` es alias.
 - **RBAC**: ClusterRole `sre-agent-observer` (lectura) + Role `sre-agent-healer` (amael-ia).

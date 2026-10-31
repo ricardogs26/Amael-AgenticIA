@@ -113,6 +113,7 @@ data:
   SRE_CB_THRESHOLD:            "5"
   SRE_CB_RESET_SECONDS:        "300"
   SRE_VERIFICATION_DELAY:      "600"
+  SRE_SHADOW_HIGH_RESTARTS:    "true"
   # Umbral de MEMORY_LEAK_PREDICTED (deriv 30m). El default de 1 MiB/s marcaba
   # crecimientos normales de github-runner/tf-serving y saturaba la GPU con
   # diagnósticos LLM continuos.
@@ -216,7 +217,7 @@ spec:
 
       containers:
         - name: raphael
-          image: registry.richardx.dev/raphael-service:1.1.44
+          image: registry.richardx.dev/raphael-service:1.1.46
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

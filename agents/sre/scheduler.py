@@ -312,7 +312,7 @@ def sre_autonomous_loop(
 
     Pipeline: Observe → Detect → Diagnose → Decide → Act → Report
     """
-    from agents.sre import detector, diagnoser, healer, observer, reporter
+    from agents.sre import detector, diagnoser, healer, observer, reporter, shadow
     from observability.metrics import SRE_LOOP_RUNS_TOTAL
 
     # ── Guardrails de ejecución ───────────────────────────────────────────────
@@ -460,6 +460,8 @@ def sre_autonomous_loop(
                 action_result=action_result,
                 notified=action_type == "NOTIFY_HUMAN",
             )
+            # Solo mide: no cambia action_type ni notifica.
+            shadow.record_high_restarts(anomaly, action_type)
 
             # Schedule verification post-acción (solo ROLLOUT_RESTART)
             if action_type == "ROLLOUT_RESTART" and "✅" in action_result:

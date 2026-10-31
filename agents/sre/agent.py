@@ -140,6 +140,26 @@ def init_sre_db() -> None:
                     "CREATE INDEX IF NOT EXISTS idx_sre_issue "
                     "ON sre_incidents(issue_type, namespace);"
                 )
+                # Decisiones del modo sombra (no afectan al loop)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS sre_shadow_decisions (
+                        id             SERIAL PRIMARY KEY,
+                        occurrence_key TEXT UNIQUE,
+                        created_at     TIMESTAMPTZ DEFAULT now(),
+                        namespace      TEXT,
+                        resource_name  TEXT,
+                        owner_name     TEXT,
+                        severity       TEXT,
+                        actual_action  TEXT,
+                        shadow_action  TEXT,
+                        rule           TEXT,
+                        evidence       JSONB
+                    );
+                """)
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_shadow_ts "
+                    "ON sre_shadow_decisions(created_at DESC);"
+                )
                 # Tabla de postmortems (P5-D)
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS sre_postmortems (
