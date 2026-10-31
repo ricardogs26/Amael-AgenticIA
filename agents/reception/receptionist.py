@@ -244,7 +244,7 @@ def _notify_private(
     txt = (
         f"📩 *Desconocido #{lead.id}* — {quien}{tag}\n{cuerpo}\n\n"
         f"↩️ Responde citando este mensaje para contestarle.\n"
-        f"/lead {lead.id} conversar · /lead {lead.id} aprobar · /lead {lead.id} rechazar"
+        f"/lead {lead.id} conversar · /lead {lead.id} rechazar"
     )
     try:
         send_to_admin(txt)
@@ -307,6 +307,11 @@ def handle_message(
         return None
 
     lead = storage.get_by_phone(phone)
+    # `approved` es de cuando /lead aprobar daba de alta. Si llegó aquí no tiene cuenta
+    # activa, así que vuelve a privado en vez de conversar sin frase.
+    if lead is not None and lead.status == "approved":
+        storage.set_status(lead.id, "private")
+        lead.status = "private"
     if lead is None or lead.status == "private":
         if not is_trigger(text):
             return _handle_private(phone, text, has_media, display_name, lead, msg_type)

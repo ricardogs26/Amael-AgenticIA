@@ -20,7 +20,7 @@ class TestParse:
         ("ayuda", ("help", None, "")),
         ("7", ("show", 7, "")),
         ("7 ver", ("show", 7, "")),
-        ("7 aprobar", ("aprobar", 7, "")),
+        ("7 aprobar", ("invalid", None, "")),
         ("7 rechazar", ("rechazar", 7, "")),
         ("7 conversar", ("conversar", 7, "")),
         ("7 responder hola, ¿nos vemos el jueves?", ("responder", 7, "hola, ¿nos vemos el jueves?")),
@@ -39,7 +39,7 @@ def admin(monkeypatch):
 
 class TestDispatch:
     def test_no_admin(self, admin):
-        assert commands.dispatch("7 aprobar", "OTRO") == commands.NOT_AVAILABLE
+        assert commands.dispatch("7 conversar", "OTRO") == commands.NOT_AVAILABLE
 
     def test_lista_vacia(self, admin, monkeypatch):
         monkeypatch.setattr(storage, "list_open", lambda limit=10: [])
@@ -93,16 +93,11 @@ class TestDispatch:
         monkeypatch.setattr(storage, "set_status", lambda i, s: pytest.fail("no debe cambiar"))
         assert "solo para privados" in commands.dispatch("7 conversar", "ADMIN")
 
-    def test_aprobar_da_alta_y_avisa(self, admin, monkeypatch):
-        monkeypatch.setattr(storage, "get", lambda i: _lead())
-        altas = []
-        enviado = []
-        monkeypatch.setattr(commands, "approve_lead", lambda ld: altas.append(ld.phone))
-        import agents.reception.notify as notify
-        monkeypatch.setattr(notify, "send_to_visitor", lambda p, t: enviado.append(p))
+    def test_aprobar_ya_no_existe_y_no_toca_el_lead(self, admin, monkeypatch):
+        monkeypatch.setattr(storage, "get", lambda i: pytest.fail("no debe leer el lead"))
+        monkeypatch.setattr(storage, "set_status", lambda i, s: pytest.fail("no debe cambiar"))
         out = commands.dispatch("7 aprobar", "ADMIN")
-        assert altas == ["5215550002222"] and enviado == ["5215550002222"]
-        assert "aprobado" in out
+        assert "No entendí" in out and "aprobar" not in commands.HELP
 
     def test_show_incluye_historial(self, admin, monkeypatch):
         monkeypatch.setattr(storage, "get", lambda i: _lead())

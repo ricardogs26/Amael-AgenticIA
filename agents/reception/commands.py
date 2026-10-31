@@ -1,6 +1,9 @@
 """
 /lead — comandos de Ricardo por WhatsApp. Solo un número con role=admin.
 Escribir el comando ya es la confirmación; no hay diálogo extra.
+
+Un lead nunca se vuelve usuario desde aquí: el alta es solo por código AMAEL-XXXXXXXX
+(interfaces/api/routers/identity.py) o desde el panel.
 """
 from __future__ import annotations
 
@@ -18,24 +21,23 @@ HELP = (
     "/lead — pendientes\n"
     "/lead <n> — ficha e historial\n"
     "/lead <n> conversar — Amael le contesta como recepcionista (guarda todo en el lead)\n"
-    "/lead <n> aprobar — acceso completo a Amael\n"
     "/lead <n> rechazar — silenciar 30 días\n"
     "/lead <n> responder <texto> — contestarle vía Amael\n"
     "↩️ O responde CITANDO el aviso del contacto."
 )
 
-_CMD_RE = re.compile(r"^(?P<id>\d+)(?:\s+(?P<action>aprobar|conversar|rechazar|responder|ver))?(?:\s+(?P<text>.+))?$", re.S)
+_CMD_RE = re.compile(r"^(?P<id>\d+)(?:\s+(?P<action>conversar|rechazar|responder|ver))?(?:\s+(?P<text>.+))?$", re.S)
 
 
 def parse(command: str) -> tuple[str, int | None, str]:
-    """→ (action, lead_id, text). action ∈ list|help|show|aprobar|conversar|rechazar|responder|invalid."""
+    """→ (action, lead_id, text). action ∈ list|help|show|conversar|rechazar|responder|invalid."""
     c = (command or "").strip()
     if not c or c.lower() in ("list", "lista", "pendientes"):
         return ("list", None, "")
     if c.lower() in ("ayuda", "help", "?"):
         return ("help", None, "")
     m = _CMD_RE.match(c)
-    if not m:
+    if not m or (m.group("text") and not m.group("action")):
         return ("invalid", None, "")
     lead_id = int(m.group("id"))
     action  = (m.group("action") or "show").lower()
@@ -63,33 +65,6 @@ def is_admin_phone(phone: str) -> bool:
                 (phone, phone),
             )
             return cur.fetchone() is not None
-
-
-def approve_lead(lead: Lead) -> None:
-    """Misma alta que redeem_pair_code(): user_profile rol user + identidad whatsapp."""
-    from storage.postgres.client import get_connection
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO user_profile (user_id, display_name, role, status)
-                VALUES (%s, %s, 'user', 'active')
-                ON CONFLICT (user_id) DO UPDATE SET status = 'active'
-                """,
-                (lead.phone, lead.name or f"WhatsApp {lead.phone[-4:]}"),
-            )
-            cur.execute(
-                """
-                INSERT INTO user_identities (canonical_user_id, identity_type, identity_value)
-                SELECT %s, 'whatsapp', %s
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM user_identities
-                    WHERE identity_type = 'whatsapp' AND identity_value = %s
-                )
-                """,
-                (lead.phone, lead.phone, lead.phone),
-            )
-    storage.set_status(lead.id, "approved")
 
 
 def _ficha(lead: Lead) -> str:
@@ -132,18 +107,6 @@ def dispatch(command: str, phone: str) -> str:
         icon = {"visitor": "👤", "amael": "🤖", "ricardo": "🧑‍💻"}
         lines = [f"{icon.get(r, '•')} {c[:300]}" for r, c in hist]
         return _ficha(lead) + "\n\n" + ("\n".join(lines) or "(sin mensajes)")
-
-    if action == "aprobar":
-        from agents.reception.notify import send_to_visitor
-        approve_lead(lead)
-        RECEPTION_LEADS_TOTAL.labels(event="approved").inc()
-        try:
-            send_to_visitor(lead.phone,
-                            "✅ Ricardo te dio acceso a Amael. Escríbeme lo que necesites "
-                            "o manda */ayuda* para ver los comandos.")
-        except Exception as exc:
-            logger.error(f"[reception] aviso de aprobación falló: {exc}")
-        return f"Lead #{lead.id} aprobado: {lead.phone} ya tiene acceso."
 
     if action == "conversar":
         from agents.reception import prompts

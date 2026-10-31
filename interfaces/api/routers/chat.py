@@ -110,7 +110,12 @@ async def chat(
                     if not allowed:
                         # Verificar por identidad (número WhatsApp)
                         cur.execute(
-                            "SELECT 1 FROM user_identities WHERE identity_value = %s",
+                            """
+                            SELECT 1
+                            FROM user_identities ui
+                            JOIN user_profile up ON up.user_id = ui.canonical_user_id
+                            WHERE ui.identity_value = %s AND up.status = 'active'
+                            """,
                             (body.user_id,),
                         )
                         allowed = cur.fetchone() is not None

@@ -288,6 +288,14 @@ class TestPrivate:
         assert len(calls["admin"]) == 2 and "¿sigues ahí?" in calls["admin"][1]
         assert calls["llm"] == 0
 
+    def test_lead_approved_sin_cuenta_vuelve_a_privado(self, wired):
+        st, calls = wired
+        st.exists = True
+        st.lead.status = "approved"
+        receptionist.handle_message("5215550001111", "hola")
+        assert st.lead.status == "private"
+        assert calls["llm"] == 0
+
     def test_privado_que_luego_manda_la_frase_pasa_a_conversacion(self, wired):
         st, calls = wired
         receptionist.handle_message("5215550001111", "hola")
