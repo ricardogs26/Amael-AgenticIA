@@ -618,3 +618,83 @@ def test_alerta_de_wan_no_manda_a_mirar_pods(monkeypatch):
     watchdog.send_alert(["`red/wan` el internet sale por el RESPALDO (AS14593, x)"])
     assert "internet en respaldo" in sent["t"]
     assert "kubectl" not in sent["t"]
+
+
+# ── Correo si WhatsApp falla ──────────────────────────────────────────────────
+class _RedisMarca:
+    def __init__(self):
+        self.valor = None
+
+    def set(self, key, value, nx=False):
+        if not (nx and self.valor is not None):
+            self.valor = value
+
+    def expire(self, key, seconds):
+        pass
+
+    def get(self, key):
+        return self.valor
+
+
+def _canales(monkeypatch, whatsapp, correo=True, smtp=True, r=None):
+    enviados = []
+    monkeypatch.setattr(watchdog, "_PHONE", "5210000000000")
+    monkeypatch.setattr(watchdog, "_post", lambda text: whatsapp)
+    monkeypatch.setattr(
+        watchdog, "_send_email", lambda text: enviados.append(text) or correo
+    )
+    monkeypatch.setattr(watchdog, "_redis", lambda: r)
+    monkeypatch.setattr(watchdog, "_SMTP_USER", "alertas@example.com" if smtp else "")
+    monkeypatch.setattr(watchdog, "_SMTP_PASS", "x" if smtp else "")
+    monkeypatch.setattr(watchdog, "_EMAIL_FROM", "alertas@example.com")
+    monkeypatch.setattr(watchdog, "_EMAIL_TO", "destino@example.com")
+    return enviados
+
+
+PROBLEMA = "`amael-ia/redis` SIN RÉPLICAS DISPONIBLES (0/1)."
+
+
+def test_whatsapp_correcto_no_manda_correo(monkeypatch):
+    enviados = _canales(monkeypatch, whatsapp=True)
+    assert watchdog.send_alert([PROBLEMA]) is True
+    assert enviados == []
+
+
+def test_primer_fallo_de_whatsapp_aun_no_manda_correo(monkeypatch):
+    enviados = _canales(monkeypatch, whatsapp=False, r=_RedisMarca())
+    assert watchdog.send_alert([PROBLEMA]) is False
+    assert enviados == []
+
+
+def test_el_reintento_del_job_no_cuenta_como_segundo_fallo(monkeypatch):
+    r = _RedisMarca()
+    t0 = datetime(2026, 10, 31, 2, 0, tzinfo=UTC)
+    assert watchdog._email_due(r, now=t0) is False
+    assert watchdog._email_due(r, now=t0 + timedelta(seconds=20)) is False
+
+
+def test_segunda_corrida_fallida_manda_correo(monkeypatch):
+    r = _RedisMarca()
+    r.valor = str((datetime.now(UTC) - timedelta(minutes=10)).timestamp())
+    enviados = _canales(monkeypatch, whatsapp=False, r=r)
+    assert watchdog.send_alert([PROBLEMA]) is True
+    assert len(enviados) == 1
+
+
+def test_sin_redis_el_correo_sale_de_inmediato(monkeypatch):
+    enviados = _canales(monkeypatch, whatsapp=False, r=None)
+    assert watchdog.send_alert([PROBLEMA]) is True
+    assert len(enviados) == 1
+
+
+def test_ambos_canales_caidos_no_marca_exito(monkeypatch):
+    r = _RedisMarca()
+    r.valor = str((datetime.now(UTC) - timedelta(minutes=10)).timestamp())
+    _canales(monkeypatch, whatsapp=False, correo=False, r=r)
+    assert watchdog.send_alert([PROBLEMA]) is False
+
+
+def test_sin_secret_sigue_solo_con_whatsapp(monkeypatch):
+    enviados = _canales(monkeypatch, whatsapp=False, smtp=False, r=None)
+    assert watchdog.send_alert([PROBLEMA]) is False
+    assert enviados == []

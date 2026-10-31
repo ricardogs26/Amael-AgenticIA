@@ -51,6 +51,11 @@ sigue andando por Starlink y nadie se entera de que ya no hay respaldo. Se mira
 el ASN de la IP pública de salida (ipinfo.io): si deja de ser el del principal
 por más de WATCHDOG_WAN_BACKUP_MIN, se avisa; al volver, se avisa que regresó.
 
+El correo entró el 31-oct-2026. El 30-oct el bridge perdió la sesión y los avisos
+del watchdog dejaron de salir sin que nadie se enterara: si el canal es lo que se
+cayó, avisar por ese mismo canal no sirve. El SMTP solo se usa si WhatsApp falla
+y su credencial vive en un Secret, no en Vault: Vault sellado es uno de los avisos.
+
 Uso:
     python -m agents.sre.watchdog
 
@@ -67,6 +72,13 @@ Env vars:
     WATCHDOG_BACKUP_MAX_HOURS  antigüedad máxima del último backup exitoso (26)
     WATCHDOG_WAN_PRIMARY_ASN  ASN de la WAN principal (AS8151 = Infinitum; "" desactiva)
     WATCHDOG_WAN_BACKUP_MIN   minutos en el respaldo antes de avisar (15)
+    WATCHDOG_SMTP_USER     usuario SMTP ("" desactiva el correo)
+    WATCHDOG_SMTP_PASSWORD credencial SMTP
+    WATCHDOG_SMTP_HOST     servidor SMTP con STARTTLS (smtp.resend.com)
+    WATCHDOG_SMTP_PORT     puerto SMTP (587)
+    WATCHDOG_EMAIL_FROM    remitente, de un dominio verificado
+    WATCHDOG_EMAIL_TO      destinatario del correo
+    WATCHDOG_EMAIL_AFTER_MIN  minutos de WhatsApp fallando antes del correo (9)
     OWNER_PHONE            teléfono destino
     WHATSAPP_BRIDGE_URL    bridge (default http://whatsapp-bridge-service:3000)
 
@@ -114,6 +126,16 @@ _WAN_BACKUP_MIN  = int(os.environ.get("WATCHDOG_WAN_BACKUP_MIN", "15"))
 _WAN_INFO_URL    = os.environ.get("WATCHDOG_WAN_INFO_URL", "https://ipinfo.io/json")
 _WAN_SINCE_KEY   = "watchdog:wan:backup_since"
 _BRIDGE_URL   = os.environ.get("WHATSAPP_BRIDGE_URL", "http://whatsapp-bridge-service:3000")
+_SMTP_HOST    = os.environ.get("WATCHDOG_SMTP_HOST", "smtp.resend.com")
+_SMTP_PORT    = int(os.environ.get("WATCHDOG_SMTP_PORT", "587"))
+_SMTP_USER    = os.environ.get("WATCHDOG_SMTP_USER", "")
+_SMTP_PASS    = os.environ.get("WATCHDOG_SMTP_PASSWORD", "")
+_EMAIL_FROM   = os.environ.get("WATCHDOG_EMAIL_FROM", "")
+_EMAIL_TO     = os.environ.get("WATCHDOG_EMAIL_TO", "")
+# Dos corridas seguidas. Se mide en minutos porque el reintento del Job llega a
+# los pocos segundos y contaría como segundo fallo.
+_EMAIL_AFTER_MIN = float(os.environ.get("WATCHDOG_EMAIL_AFTER_MIN", "9"))
+_WA_FAILING_KEY  = "watchdog:whatsapp:failing_since"
 _PHONE        = (
     os.environ.get("OWNER_PHONE")
     or os.environ.get("SRE_ALERT_PHONE")
@@ -544,7 +566,62 @@ def send_alert(problems: list[str]) -> bool:
             "y los logs del último fallido; para reintentar, "
             "`kubectl create job <nombre>-manual --from=cronjob/<cronjob> -n amael-ia`."
         )
-    return _post(text)
+    return _post(text) or _email_fallback(text)
+
+
+def _email_due(r, now=None) -> bool:
+    """
+    ¿WhatsApp lleva fallando lo suficiente para mandar el correo?
+
+    Chaos Mesh mata el bridge de noche y vuelve solo: un fallo suelto no debe
+    llegar como correo. La marca caduca a los 15 min para que un fallo viejo no
+    adelante el correo del siguiente. Sin Redis se manda ya (fail-loud).
+    """
+    if r is None:
+        return True
+    from datetime import datetime
+
+    now = now or datetime.now(UTC)
+    try:
+        r.set(_WA_FAILING_KEY, str(now.timestamp()), nx=True)
+        r.expire(_WA_FAILING_KEY, 15 * 60)
+        mins = (now.timestamp() - float(r.get(_WA_FAILING_KEY))) / 60
+    except Exception as exc:
+        logger.warning(f"Redis falló al medir el fallo de WhatsApp ({exc}) — se manda el correo.")
+        return True
+    if mins < _EMAIL_AFTER_MIN:
+        logger.warning(f"WhatsApp falla hace {mins:.0f} min — aún no se manda el correo.")
+        return False
+    return True
+
+
+def _email_fallback(text: str) -> bool:
+    if not (_SMTP_USER and _SMTP_PASS and _EMAIL_FROM and _EMAIL_TO):
+        return False
+    if not _email_due(_redis()):
+        return False
+    return _send_email(text)
+
+
+def _send_email(text: str) -> bool:
+    import smtplib
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg["Subject"] = text.splitlines()[0].replace("*", "").strip()
+    msg["From"] = _EMAIL_FROM
+    msg["To"] = _EMAIL_TO
+    msg.set_content(text.replace("*", ""))
+    try:
+        with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT, timeout=15) as smtp:
+            smtp.starttls()
+            smtp.login(_SMTP_USER, _SMTP_PASS)
+            smtp.send_message(msg)
+        logger.info("Alerta enviada por correo.")
+        return True
+    except Exception as exc:
+        logger.error(f"Fallo enviando el correo: {exc}")
+    return False
 
 
 def _post(text: str) -> bool:

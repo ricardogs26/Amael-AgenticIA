@@ -81,7 +81,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: watchdog
-              image: registry.richardx.dev/raphael-service:1.1.43
+              image: registry.richardx.dev/raphael-service:1.1.44
               imagePullPolicy: IfNotPresent
               command: ["python", "-m", "agents.sre.watchdog"]
               env:
@@ -139,6 +139,25 @@ spec:
                   value: "AS8151"
                 - name: WATCHDOG_WAN_BACKUP_MIN
                   value: "15"
+                # Correo si WhatsApp falla (31-oct-2026). En un Secret y no en Vault
+                # porque Vault sellado es uno de los avisos. `optional`: sin él, el
+                # watchdog sigue solo con WhatsApp.
+                - name: WATCHDOG_SMTP_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: watchdog-smtp
+                      key: user
+                      optional: true
+                - name: WATCHDOG_SMTP_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: watchdog-smtp
+                      key: password
+                      optional: true
+                - name: WATCHDOG_EMAIL_FROM
+                  value: "alertas@richardx.dev"
+                - name: WATCHDOG_EMAIL_TO
+                  value: "ricardogs26@gmail.com"
                 - name: REDIS_HOST
                   value: "redis-service"
                 - name: REDIS_PORT
