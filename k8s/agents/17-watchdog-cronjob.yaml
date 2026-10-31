@@ -100,7 +100,8 @@ spec:
                   value: >-
                     amael-ia/postgres-backup,
                     amael-ia/qdrant-backup,
-                    trader/trader-db-backup
+                    trader/trader-db-backup,
+                    kong/kong-db-backup
                 # Un aviso por recurso cada 60 min — suficiente para no olvidarlo,
                 # poco para no volverse ruido que se aprende a ignorar.
                 - name: WATCHDOG_REALERT_MIN
