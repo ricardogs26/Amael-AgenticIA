@@ -21,7 +21,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 10Gi
+      storage: 5Gi
 
 ---
 apiVersion: apps/v1
@@ -46,9 +46,9 @@ spec:
     spec:
       containers:
       - name: qdrant
-        # La versión viva es 1.18.2. NO aplicar con v1.9.4: downgradear rompe la
+        # La versión viva es 1.20.0. NO aplicar una menor: downgradear rompe la
         # lectura de los datos (mismo patrón que el incidente de minio xl.meta v3).
-        image: qdrant/qdrant:v1.18.2
+        image: qdrant/qdrant:v1.20.0
         ports:
         - containerPort: 6333
           name: http
@@ -60,7 +60,7 @@ spec:
             memory: "512Mi"
           limits:
             cpu: "1000m"
-            memory: "2Gi"
+            memory: "3Gi"
         volumeMounts:
         - name: qdrant-storage
           mountPath: /qdrant/storage
