@@ -698,3 +698,33 @@ def test_sin_secret_sigue_solo_con_whatsapp(monkeypatch):
     enviados = _canales(monkeypatch, whatsapp=False, smtp=False, r=None)
     assert watchdog.send_alert([PROBLEMA]) is False
     assert enviados == []
+
+
+# ── Latido externo ────────────────────────────────────────────────────────────
+def test_latido_desactivado_sin_url(monkeypatch):
+    import requests
+
+    monkeypatch.setattr(watchdog, "_HEARTBEAT_URL", "")
+    monkeypatch.setattr(requests, "post", MagicMock())
+    watchdog.send_heartbeat()
+    requests.post.assert_not_called()
+
+
+def test_latido_lleva_el_token(monkeypatch):
+    import requests
+
+    monkeypatch.setattr(watchdog, "_HEARTBEAT_URL", "https://vigilante.example/latido")
+    monkeypatch.setattr(watchdog, "_HEARTBEAT_TOKEN", "abc")
+    post = MagicMock(return_value=SimpleNamespace(status_code=200))
+    monkeypatch.setattr(requests, "post", post)
+    watchdog.send_heartbeat()
+    assert post.call_args.kwargs["headers"]["Authorization"] == "Bearer abc"
+
+
+def test_latido_fallido_no_rompe_la_corrida(monkeypatch):
+    import requests
+
+    monkeypatch.setattr(watchdog, "_HEARTBEAT_URL", "https://vigilante.example/latido")
+    monkeypatch.setattr(watchdog, "_HEARTBEAT_TOKEN", "abc")
+    monkeypatch.setattr(requests, "post", MagicMock(side_effect=OSError("sin red")))
+    watchdog.send_heartbeat()

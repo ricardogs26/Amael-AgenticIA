@@ -81,7 +81,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: watchdog
-              image: registry.richardx.dev/raphael-service:1.1.44
+              image: registry.richardx.dev/raphael-service:1.1.45
               imagePullPolicy: IfNotPresent
               command: ["python", "-m", "agents.sre.watchdog"]
               env:
@@ -158,6 +158,16 @@ spec:
                   value: "alertas@richardx.dev"
                 - name: WATCHDOG_EMAIL_TO
                   value: "ricardogs26@gmail.com"
+                # Latido al Worker externo (31-oct-2026): avisa si el nodo, el
+                # cluster o el internet dejan de reportarse. `optional` como el correo.
+                - name: WATCHDOG_HEARTBEAT_URL
+                  value: "https://vigilante-lab.ricardogs26.workers.dev/latido"
+                - name: WATCHDOG_HEARTBEAT_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: watchdog-heartbeat
+                      key: token
+                      optional: true
                 - name: REDIS_HOST
                   value: "redis-service"
                 - name: REDIS_PORT

@@ -56,6 +56,10 @@ del watchdog dejaron de salir sin que nadie se enterara: si el canal es lo que s
 cayó, avisar por ese mismo canal no sirve. El SMTP solo se usa si WhatsApp falla
 y su credencial vive en un Secret, no en Vault: Vault sellado es uno de los avisos.
 
+La señal de vida entró el mismo día. Si caen el nodo, el cluster o el internet,
+este módulo tampoco corre: el Worker `vigilante-lab` (GitOps-Infra/vigilante-externo)
+recibe un latido por corrida y avisa cuando deja de llegar.
+
 Uso:
     python -m agents.sre.watchdog
 
@@ -79,6 +83,8 @@ Env vars:
     WATCHDOG_EMAIL_FROM    remitente, de un dominio verificado
     WATCHDOG_EMAIL_TO      destinatario del correo
     WATCHDOG_EMAIL_AFTER_MIN  minutos de WhatsApp fallando antes del correo (9)
+    WATCHDOG_HEARTBEAT_URL   URL del latido externo ("" desactiva)
+    WATCHDOG_HEARTBEAT_TOKEN token del latido
     OWNER_PHONE            teléfono destino
     WHATSAPP_BRIDGE_URL    bridge (default http://whatsapp-bridge-service:3000)
 
@@ -136,6 +142,8 @@ _EMAIL_TO     = os.environ.get("WATCHDOG_EMAIL_TO", "")
 # los pocos segundos y contaría como segundo fallo.
 _EMAIL_AFTER_MIN = float(os.environ.get("WATCHDOG_EMAIL_AFTER_MIN", "9"))
 _WA_FAILING_KEY  = "watchdog:whatsapp:failing_since"
+_HEARTBEAT_URL   = os.environ.get("WATCHDOG_HEARTBEAT_URL", "")
+_HEARTBEAT_TOKEN = os.environ.get("WATCHDOG_HEARTBEAT_TOKEN", "")
 _PHONE        = (
     os.environ.get("OWNER_PHONE")
     or os.environ.get("SRE_ALERT_PHONE")
@@ -645,6 +653,25 @@ def _post(text: str) -> bool:
     return False
 
 
+def send_heartbeat() -> None:
+    """Un latido perdido no es un problema del cluster: el Worker tolera corridas
+    sueltas, así que un fallo aquí solo queda en el log."""
+    if not (_HEARTBEAT_URL and _HEARTBEAT_TOKEN):
+        return
+    try:
+        import requests
+
+        resp = requests.post(
+            _HEARTBEAT_URL,
+            headers={"Authorization": f"Bearer {_HEARTBEAT_TOKEN}"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"Latido rechazado: HTTP {resp.status_code}")
+    except Exception as exc:
+        logger.warning(f"Latido no enviado: {exc}")
+
+
 def main() -> int:
     from kubernetes import client, config
 
@@ -704,6 +731,9 @@ def main() -> int:
         logger.info("OK — wan (sin alerta)")
     if wan_regreso:
         _post(wan_regreso)
+
+    # Antes de notify: late también en una corrida con problemas.
+    send_heartbeat()
 
     if not problems:
         logger.info("Todos los deployments críticos están sanos.")
