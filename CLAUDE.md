@@ -13,9 +13,12 @@ está en `~/k8s-lab/CLAUDE.md`. Historial por versión con el porqué de cada ca
 
 ## Build & Deploy
 
-**El backend, raphael y camael se despliegan por push a `main`** (GitHub Actions en el runner
-self-hosted: scans → tests → build & push → deploy → hook a Raphael). El CI lee la versión
-del manifest: **todo push a main lleva bump** o re-empuja el tag vigente con código nuevo.
+**Solo el backend se despliega por push a `main`** (GitHub Actions en el runner self-hosted:
+scans → tests → build & push → deploy → hook a Raphael). Raphael y camael se construyen y
+aplican a mano. El CI corre si el push toca `*.py`, `requirements*.txt`, `pyproject.toml`,
+`Dockerfile`, `k8s/**` o `.github/workflows/**`; lee la versión del backend en su manifest:
+**un push que lo dispare lleva bump del backend** o re-empuja el tag vigente con código nuevo.
+Si el cambio no toca al backend, usar `[skip ci]`.
 
 A mano (servicios fuera del CI o emergencia):
 
@@ -155,7 +158,7 @@ Loop APScheduler cada 60 s: lease → circuit breaker → ventana de mantenimien
 observar (pods, métricas Prometheus, tendencias, SLO, nodo, PVC, certificados, VRAM) →
 detectar → correlacionar → diagnosticar (LLM + fallback determinista + runbooks/skills de
 Qdrant) → decidir → actuar (`ROLLOUT_RESTART`, `DELETE_STUCK_POD`, `NOTIFY_HUMAN`) →
-guardar incidente → verificar 5 min después (`SRE_VERIFICATION_DELAY`=300) con auto-rollback
+guardar incidente → verificar 10 min después (`SRE_VERIFICATION_DELAY`=600) con auto-rollback
 si hubo deploy en los últimos 30 min.
 
 - **Auto-remedia**: CRASH_LOOP, OOM_KILLED, POD_FAILED, HIGH_RESTARTS, HIGH_MEMORY,
