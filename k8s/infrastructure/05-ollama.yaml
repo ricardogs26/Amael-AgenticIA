@@ -130,7 +130,9 @@ spec:
         - name: OLLAMA_HOST
           value: "0.0.0.0"
         - name: OLLAMA_NUM_PARALLEL
-          value: "2"        # 13-ago-2026: ⚠️ HOY ES INERTE con qwen3.5 — ollama
+          value: "1"        # 1-nov-2026 (D4a): fijado en 1. Con 32k de contexto un segundo
+                            # slot duplicaría la KV (~2.6 GB más) y ya no cabe junto a CosyVoice.
+                            # Historia: 13-ago-2026 estaba en 2 pero INERTE con qwen3.5 — ollama
                             # 0.32.5 loguea "model architecture does not currently
                             # support parallel requests" (arch qwen35) y fuerza
                             # n_seq_max=1: las peticiones SE ENCOLAN igual que con
@@ -142,7 +144,10 @@ spec:
                             # alcanza (9b usa 5.4 GiB + ~2.3 de compute/KV,
                             # quedan ~4.5 GiB medidos con nvidia-smi).
         - name: OLLAMA_CONTEXT_LENGTH
-          value: "16384"    # 1-nov-2026: 8192→16384 para Amael Code (agente de código). KV q8_0 ≈ +0.65 GB. Antes: A2 (7-ago-2026): 8192 posible gracias a KV q8_0.
+          value: "32768"    # 1-nov-2026 (D4a): 16384→32768 para Amael Code (Qwen Code).
+                            # Medido con CosyVoice cargado: 10,110 MiB total a 32k, 79 tok/s.
+                            # 64k daría 10,819 MiB y chocaría con el pico de voz (3.5 GiB).
+                            # Antes: A2 (7-ago-2026): 8192 gracias a KV q8_0; 16384 el mismo 1-nov.
                             # Con f16 el tope era 4096 y el prompt del trader
                             # (4.3k tokens tras 1.0.30/31) se truncaba POR EL
                             # FRENTE: el system prompt moría y el LLM contestaba
