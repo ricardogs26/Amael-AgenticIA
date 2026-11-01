@@ -1,0 +1,42 @@
+# Exclusiones del ingestor del vault (F0-04 del plan de RAG gobernado, 1-nov-2026).
+# Lo lee knowledge/vault_ingest.py (F2). Un fragmento que coincida con un patrón
+# `bloqueante` NO se sube: se descarta completo y se reporta en inbox/ del vault.
+# Las carpetas de `no_indexar` no se recorren. `privado_forzado` ignora el frontmatter.
+
+carpetas:
+  no_indexar: [inbox, scripts, .obsidian, .trash, .git]
+  privado_forzado: [personal, trader]
+  qwen_code: qwen            # notas de trabajo de Qwen Code: siempre privado
+
+audiencias:
+  validas: [privado, sre, publico]
+  por_defecto: privado
+  colecciones:
+    privado: kb_vault_privado
+    sre: kb_vault_sre
+    publico: kb_publico
+
+secretos:
+  bloqueantes:                 # descarta el fragmento entero
+    - { nombre: llave sk-,          regex: '\bsk-[A-Za-z0-9_-]{16,}' }
+    - { nombre: token GitHub,       regex: '\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}' }
+    - { nombre: AWS access key,     regex: '\bAKIA[0-9A-Z]{16}\b' }
+    - { nombre: token Vault,        regex: '\bhvs\.[A-Za-z0-9_-]{20,}' }
+    - { nombre: token Slack,        regex: '\bxox[abpr]-[A-Za-z0-9-]{10,}' }
+    - { nombre: JWT,                regex: '\beyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}' }
+    - { nombre: llave privada PEM,  regex: '-----BEGIN [A-Z ]*PRIVATE KEY-----' }
+    - { nombre: contraseña literal, regex: '(?i)\b(password|passwd|contraseña|clave)\s*[:=]\s*["'']?[^\s"'']{6,}' }
+    - { nombre: llaves de unseal,   regex: '(?i)unseal[_ -]?key[s]?\s*[:=]' }
+  solo_reportar:               # se indexa, pero queda en el informe
+    - { nombre: vault.root,         regex: 'vault\.root' }
+    - { nombre: ruta ~/.secrets,    regex: '~/\.secrets/[\w./-]+' }
+  archivos_vetados:            # nunca, aunque estén en el vault
+    - 'vault.root'
+    - '*.key'
+    - '*.pem'
+    - '*.env'
+
+fragmentos:
+  tokens_objetivo: 800
+  solape_tokens: 100
+  embedder: nomic-embed-text   # ollama-cpu-service:11434, 768 dim, coseno
