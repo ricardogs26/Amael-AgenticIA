@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+
 from core.qdrant_auth import qdrant_api_key
 
 logger = logging.getLogger("agents.sre.consolidator")

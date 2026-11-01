@@ -28,6 +28,7 @@ import os
 import re
 import uuid
 from datetime import UTC, datetime
+
 from core.qdrant_auth import qdrant_headers
 
 logger = logging.getLogger("skills.procedural")

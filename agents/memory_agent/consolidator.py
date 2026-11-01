@@ -28,6 +28,7 @@ import os
 import uuid
 from datetime import UTC, datetime
 from typing import Any
+
 from core.qdrant_auth import qdrant_headers
 
 logger = logging.getLogger("agents.memory.consolidator")

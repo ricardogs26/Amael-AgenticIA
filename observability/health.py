@@ -23,6 +23,7 @@ import urllib.request
 from typing import Any
 
 from pydantic import BaseModel
+
 from core.qdrant_auth import qdrant_headers
 
 logger = logging.getLogger("observability.health")

@@ -31,6 +31,7 @@ import logging
 import os
 import re
 import unicodedata
+
 from core.qdrant_auth import qdrant_headers
 
 logger = logging.getLogger("agents.memory.profile")
