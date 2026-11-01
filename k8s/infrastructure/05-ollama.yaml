@@ -142,7 +142,7 @@ spec:
                             # alcanza (9b usa 5.4 GiB + ~2.3 de compute/KV,
                             # quedan ~4.5 GiB medidos con nvidia-smi).
         - name: OLLAMA_CONTEXT_LENGTH
-          value: "8192"     # A2 (7-ago-2026): posible gracias a KV q8_0.
+          value: "16384"    # 1-nov-2026: 8192→16384 para Amael Code (agente de código). KV q8_0 ≈ +0.65 GB. Antes: A2 (7-ago-2026): 8192 posible gracias a KV q8_0.
                             # Con f16 el tope era 4096 y el prompt del trader
                             # (4.3k tokens tras 1.0.30/31) se truncaba POR EL
                             # FRENTE: el system prompt moría y el LLM contestaba
