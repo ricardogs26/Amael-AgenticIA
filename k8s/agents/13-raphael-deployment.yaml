@@ -217,7 +217,7 @@ spec:
 
       containers:
         - name: raphael
-          image: registry.richardx.dev/raphael-service:1.1.46
+          image: registry.richardx.dev/raphael-service:1.1.47
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -234,6 +234,11 @@ spec:
           #   google-auth-secret  → jwt_secret_key, session_secret_key, internal_api_secret
           # Mismo patrón que `k8s/agents/05-backend-deployment.yaml`.
           env:
+            - name: QDRANT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: qdrant-auth
+                  key: api-key
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:

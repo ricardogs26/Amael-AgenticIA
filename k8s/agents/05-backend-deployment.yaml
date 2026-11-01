@@ -64,7 +64,7 @@ spec:
 
       containers:
       - name: amael-agentic-backend
-        image: registry.richardx.dev/amael-agentic-backend:1.18.29
+        image: registry.richardx.dev/amael-agentic-backend:1.18.30
         imagePullPolicy: Always
         ports:
         - name: http
@@ -76,6 +76,11 @@ spec:
             name: amael-agentic-configmap
 
         env:
+        - name: QDRANT_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: qdrant-auth
+              key: api-key
         # Phase 2.6 canary — AGENTS_MODE=remote delega el SRE loop a raphael-service.
         # El backend ya no corre `agents.sre.start_sre_loop()` al arrancar; los
         # endpoints /api/sre/* en el router ahora hacen HTTP a raphael-service:8002

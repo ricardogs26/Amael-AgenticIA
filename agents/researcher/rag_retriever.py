@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from core.qdrant_auth import qdrant_api_key
 
 logger = logging.getLogger("agents.researcher.rag")
 
@@ -38,7 +39,7 @@ def _get_qdrant_client():
         with _qdrant_lock:
             if _qdrant_client is None:  # double-checked locking
                 from qdrant_client import QdrantClient
-                _qdrant_client = QdrantClient(url=_QDRANT_URL)
+                _qdrant_client = QdrantClient(url=_QDRANT_URL, api_key=qdrant_api_key())
     return _qdrant_client
 
 
@@ -82,6 +83,7 @@ def get_user_vectorstore(user_email: str):
             embedding=embedding,
             collection_name=collection_name,
             url=_QDRANT_URL,
+            api_key=qdrant_api_key(),
         )
         return vectorstore
     except Exception as exc:

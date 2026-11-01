@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from core.qdrant_auth import qdrant_api_key
 
 logger = logging.getLogger("agents.sre.diagnoser")
 
@@ -78,7 +79,7 @@ def search_runbooks(issue_type: str, details: str) -> str:
         if not embedding:
             return ""
 
-        client = QdrantClient(url=_QDRANT_URL)
+        client = QdrantClient(url=_QDRANT_URL, api_key=qdrant_api_key())
 
         try:
             # Qdrant v1.7+ — query_points()
@@ -275,7 +276,7 @@ def maybe_save_runbook_entry(anomaly, root_cause: str, action_taken: str) -> Non
         from qdrant_client import QdrantClient
         from qdrant_client.models import PointStruct
 
-        client = QdrantClient(url=_QDRANT_URL)
+        client = QdrantClient(url=_QDRANT_URL, api_key=qdrant_api_key())
         point = PointStruct(
             id=str(uuid.uuid4()),
             vector=embedding,

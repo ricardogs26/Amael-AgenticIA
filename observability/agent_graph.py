@@ -23,6 +23,7 @@ import os
 import time
 import urllib.request
 from typing import Any
+from core.qdrant_auth import qdrant_headers
 
 logger = logging.getLogger("observability.agent_graph")
 
@@ -176,7 +177,7 @@ def _qdrant(path: str, body: dict | None = None, timeout: float = 12.0) -> dict 
         req = urllib.request.Request(
             f"{_QDRANT_URL}{path}",
             data=json.dumps(body).encode() if body is not None else None,
-            headers={"Content-Type": "application/json"} if body is not None else {},
+            headers=qdrant_headers({"Content-Type": "application/json"} if body is not None else {}),
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.load(resp).get("result")

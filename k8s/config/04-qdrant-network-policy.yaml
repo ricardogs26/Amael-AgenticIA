@@ -1,0 +1,31 @@
+# F1 RAG gobernado (1-nov-2026): quién puede hablar con Qdrant.
+# Antes no había política de ingreso: cualquier pod del cluster (y el host, por ClusterIP)
+# leía o borraba cualquier colección. Ahora solo entran los clientes conocidos. Las sondas
+# del kubelet no pasan por NetworkPolicy. Qwen Code (host) entrará en F3 por un camino
+# propio, no por aquí.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: qdrant-ingress
+  namespace: amael-ia
+spec:
+  podSelector:
+    matchLabels:
+      app: qdrant
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - amael-agentic-backend   # RAG, memoria (Zaphkiel), skills, grafo
+                  - raphael-service         # sre_runbooks, agent_skills
+                  - qdrant-backup           # snapshots nocturnos
+      ports:
+        - port: 6333
+          protocol: TCP
+        - port: 6334
+          protocol: TCP

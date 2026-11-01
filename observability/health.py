@@ -23,6 +23,7 @@ import urllib.request
 from typing import Any
 
 from pydantic import BaseModel
+from core.qdrant_auth import qdrant_headers
 
 logger = logging.getLogger("observability.health")
 
@@ -199,7 +200,8 @@ async def _check_qdrant() -> ComponentHealth:
     url = os.environ.get("QDRANT_URL", "http://qdrant-service:6333")
     try:
         def _ping():
-            urllib.request.urlopen(f"{url}/healthz", timeout=3)
+            req = urllib.request.Request(f"{url}/healthz", headers=qdrant_headers())
+            urllib.request.urlopen(req, timeout=3)
         await asyncio.to_thread(_ping)
         return ComponentHealth(
             name="qdrant",

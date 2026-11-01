@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from core.qdrant_auth import qdrant_api_key
 
 logger = logging.getLogger("agents.sre.consolidator")
 
@@ -76,7 +77,7 @@ def _fetch_auto_runbooks_by_type() -> dict[str, list[dict]]:
         from qdrant_client import QdrantClient
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-        client = QdrantClient(url=_QDRANT_URL)
+        client = QdrantClient(url=_QDRANT_URL, api_key=qdrant_api_key())
         offset = None
 
         while True:
@@ -229,7 +230,7 @@ def _save_consolidated_runbook(issue_type: str, text: str, source_count: int) ->
         if not embedding:
             return False
 
-        client = QdrantClient(url=_QDRANT_URL)
+        client = QdrantClient(url=_QDRANT_URL, api_key=qdrant_api_key())
         point = PointStruct(
             id=str(uuid.uuid4()),
             vector=embedding,
@@ -262,7 +263,7 @@ def _fetch_previous_consolidated(issue_type: str) -> dict | None:
         from qdrant_client import QdrantClient
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-        client = QdrantClient(url=_QDRANT_URL)
+        client = QdrantClient(url=_QDRANT_URL, api_key=qdrant_api_key())
         result, _ = client.scroll(
             collection_name=_SRE_RUNBOOKS_COLLECTION,
             scroll_filter=Filter(must=[
@@ -299,7 +300,7 @@ def _delete_previous_consolidated(issue_type: str) -> int:
         from qdrant_client import QdrantClient
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-        client = QdrantClient(url=_QDRANT_URL)
+        client = QdrantClient(url=_QDRANT_URL, api_key=qdrant_api_key())
         result, _ = client.scroll(
             collection_name=_SRE_RUNBOOKS_COLLECTION,
             scroll_filter=Filter(must=[
@@ -327,7 +328,7 @@ def _delete_runbook_points(point_ids: list) -> None:
         from qdrant_client import QdrantClient
         from qdrant_client.models import PointIdsList
 
-        client = QdrantClient(url=_QDRANT_URL)
+        client = QdrantClient(url=_QDRANT_URL, api_key=qdrant_api_key())
         client.delete(
             collection_name=_SRE_RUNBOOKS_COLLECTION,
             points_selector=PointIdsList(points=point_ids),
@@ -505,7 +506,7 @@ def _consolidated_types_snapshot() -> list[str]:
         from qdrant_client import QdrantClient
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-        client = QdrantClient(url=_QDRANT_URL)
+        client = QdrantClient(url=_QDRANT_URL, api_key=qdrant_api_key())
         result, _ = client.scroll(
             collection_name=_SRE_RUNBOOKS_COLLECTION,
             scroll_filter=Filter(must=[

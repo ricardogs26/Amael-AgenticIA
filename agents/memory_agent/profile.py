@@ -31,6 +31,7 @@ import logging
 import os
 import re
 import unicodedata
+from core.qdrant_auth import qdrant_headers
 
 logger = logging.getLogger("agents.memory.profile")
 
@@ -108,7 +109,7 @@ def _fetch_facts(user_id: str) -> list[dict]:
     req = urllib.request.Request(
         f"{_QDRANT_URL}/collections/{collection_for(user_id)}/points/scroll",
         data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
+        headers=qdrant_headers({"Content-Type": "application/json"}),
     )
     with urllib.request.urlopen(req, timeout=8) as resp:  # nosec B310 — esquema validado arriba
         result = json.load(resp).get("result") or {}

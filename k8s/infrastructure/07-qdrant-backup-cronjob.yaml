@@ -49,6 +49,12 @@ spec:
           containers:
           - name: qdrant-backup
             image: alpine:3.20
+            env:
+            - name: QDRANT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: qdrant-auth
+                  key: api-key
             command:
             - sh
             - -c
@@ -59,6 +65,7 @@ spec:
               TIMESTAMP=$(date +%Y%m%d_%H%M%S)
               BUCKET="amael-backups"
               QDRANT="http://qdrant-service:6333"
+              AUTH="api-key: ${QDRANT_API_KEY}"
               MINIO_URL="http://${MINIO_ENDPOINT}"
               WORKDIR="/tmp/qdrant_${TIMESTAMP}"
               mkdir -p "${WORKDIR}"
@@ -68,19 +75,19 @@ spec:
               mc mb --ignore-existing "minio/${BUCKET}"
 
               # Una snapshot por colección
-              COLLECTIONS=$(curl -sf "${QDRANT}/collections" | jq -r '.result.collections[].name')
+              COLLECTIONS=$(curl -sf -H "${AUTH}" "${QDRANT}/collections" | jq -r '.result.collections[].name')
               echo "[backup] Colecciones: $(echo $COLLECTIONS | tr '\n' ' ')"
 
               for COL in $COLLECTIONS; do
                 echo "[backup] Snapshot de ${COL}..."
-                SNAP=$(curl -sf -X POST "${QDRANT}/collections/${COL}/snapshots" | jq -r '.result.name')
+                SNAP=$(curl -sf -H "${AUTH}" -X POST "${QDRANT}/collections/${COL}/snapshots" | jq -r '.result.name')
                 if [ -z "$SNAP" ] || [ "$SNAP" = "null" ]; then
                   echo "[backup] ERROR: no se pudo crear snapshot de ${COL}"; exit 1
                 fi
-                curl -sf "${QDRANT}/collections/${COL}/snapshots/${SNAP}" -o "${WORKDIR}/${COL}.snapshot"
+                curl -sf -H "${AUTH}" "${QDRANT}/collections/${COL}/snapshots/${SNAP}" -o "${WORKDIR}/${COL}.snapshot"
                 echo "[backup]   ${COL}: $(du -sh ${WORKDIR}/${COL}.snapshot | cut -f1)"
                 # Borrar snapshot del PVC de Qdrant (ya lo tenemos local)
-                curl -sf -X DELETE "${QDRANT}/collections/${COL}/snapshots/${SNAP}" >/dev/null || true
+                curl -sf -H "${AUTH}" -X DELETE "${QDRANT}/collections/${COL}/snapshots/${SNAP}" >/dev/null || true
               done
 
               # Subir todo a MinIO
