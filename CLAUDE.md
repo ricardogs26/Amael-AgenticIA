@@ -254,3 +254,14 @@ Cada una nació de un incidente real (detalle en el historial del vault).
 - **Un lock Redis SET NX** para todo cron dentro del backend (HPA = 2 réplicas).
 - **LangChain 1.2+**: nada de `langchain.agents` (`AgentType`, `initialize_agent` ya no
   existen). `Tool` sale de `langchain_core.tools`; agentes con `langgraph.prebuilt.create_react_agent`.
+
+## Qdrant con API key (desde 1-nov-2026, F1 del RAG gobernado)
+
+Qdrant corre con `QDRANT__SERVICE__API_KEY` + `JWT_RBAC` (Secret `qdrant-auth`, creado fuera de
+git desde `~/.secrets/qdrant-api-key`) y la NetworkPolicy `qdrant-ingress` solo deja entrar
+backend, Raphael y `qdrant-backup`. **Todo cliente nuevo de Qdrant pasa por
+`core/qdrant_auth.py`** (`qdrant_api_key()` para `QdrantClient`/LangChain, `qdrant_headers()`
+para urllib). Un pod nuevo que necesite Qdrant requiere: la variable `QDRANT_API_KEY` desde el
+Secret, la etiqueta `app` en la lista de la NetworkPolicy, y nunca `api_key=None` a mano. Desde
+el host (lab-home) se llega por ClusterIP con la llave: la NetworkPolicy no filtra tráfico del
+nodo. Qwen Code usará un JWT de solo lectura firmado con esa llave (F3).

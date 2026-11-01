@@ -49,12 +49,6 @@ spec:
           containers:
           - name: qdrant-backup
             image: alpine:3.20
-            env:
-            - name: QDRANT_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: qdrant-auth
-                  key: api-key
             command:
             - sh
             - -c
@@ -98,6 +92,11 @@ spec:
               mc rm --recursive --force --older-than 7d "minio/${BUCKET}/qdrant/" 2>/dev/null || true
               echo "[backup] OK — backup Qdrant finalizado"
             env:
+            - name: QDRANT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: qdrant-auth
+                  key: api-key
             - name: MINIO_ENDPOINT
               valueFrom:
                 configMapKeyRef:
