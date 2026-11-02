@@ -8,6 +8,7 @@ class StepType(StrEnum):
     """Tipos de pasos que puede generar el PlannerAgent."""
     K8S_TOOL          = "K8S_TOOL"
     RAG_RETRIEVAL     = "RAG_RETRIEVAL"
+    KNOWLEDGE         = "KNOWLEDGE"
     PRODUCTIVITY_TOOL = "PRODUCTIVITY_TOOL"
     WEB_SEARCH        = "WEB_SEARCH"
     DOCUMENT_TOOL     = "DOCUMENT_TOOL"

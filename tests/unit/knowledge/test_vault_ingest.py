@@ -120,7 +120,7 @@ def test_seccion_grande_no_arrastra_solape_a_la_siguiente():
 def test_buscar_descarta_bajo_el_umbral_y_usa_prefijo_de_consulta(cfg, monkeypatch):
     textos = []
     monkeypatch.setattr(
-        "knowledge.vault_ingest.embeber", lambda t, m: textos.extend(t) or [[0.1]]
+        "knowledge.vault_ingest.embeber", lambda t, m, *_: textos.extend(t) or [[0.1]]
     )
 
     class Falso:
@@ -136,7 +136,7 @@ def test_buscar_descarta_bajo_el_umbral_y_usa_prefijo_de_consulta(cfg, monkeypat
 
 
 def test_coincidencia_de_palabras_sube_el_puntaje(cfg, monkeypatch):
-    monkeypatch.setattr("knowledge.vault_ingest.embeber", lambda t, m: [[0.1]])
+    monkeypatch.setattr("knowledge.vault_ingest.embeber", lambda t, m, *_: [[0.1]])
 
     class Falso:
         def _pedir(self, metodo, ruta, cuerpo):
@@ -178,7 +178,7 @@ def _nota(ruta, coleccion, hash_nota="h2", audiencia="privado"):
 
 @pytest.fixture
 def sin_embeddings(monkeypatch):
-    monkeypatch.setattr("knowledge.vault_ingest.embeber", lambda t, m: [[0.0]] * len(t))
+    monkeypatch.setattr("knowledge.vault_ingest.embeber", lambda t, m, *_: [[0.0]] * len(t))
 
 
 def test_cambio_de_audiencia_borra_antes_de_subir(cfg, sin_embeddings):

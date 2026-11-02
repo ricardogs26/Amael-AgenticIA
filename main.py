@@ -486,6 +486,23 @@ def _ensure_schema() -> None:
                 ON security_audit_log (event_type, created_at DESC)
             """)
 
+            # ── Consultas al conocimiento del vault (RAG gobernado) ────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS knowledge_audit (
+                    id           BIGSERIAL PRIMARY KEY,
+                    user_id      TEXT NOT NULL,
+                    role         TEXT NOT NULL,
+                    collections  TEXT[] NOT NULL,
+                    query_hash   CHAR(64) NOT NULL,
+                    results      INTEGER NOT NULL,
+                    created_at   TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_knowledge_audit_user_time
+                ON knowledge_audit (user_id, created_at DESC)
+            """)
+
             # ── Documentos indexados por usuario (RAG) ─────────────────────
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS user_documents (

@@ -291,10 +291,20 @@ def handle_code_generation(
         return f"Error en CODE_GENERATION: {exc}"
 
 
+def handle_knowledge(query: str, state: dict[str, Any], tools_map: dict[str, Any]) -> str:
+    """Consulta el conocimiento permitido; la identidad ya viene fija en la herramienta."""
+    func = tools_map.get("knowledge")
+    if not func:
+        EXECUTOR_ERRORS_TOTAL.labels(step_type="KNOWLEDGE").inc()
+        return "Error: Herramienta de conocimiento no disponible."
+    return func(query)
+
+
 # Mapa de tipo → handler
 STEP_HANDLERS = {
     "K8S_TOOL":          handle_k8s_tool,
     "RAG_RETRIEVAL":     handle_rag_retrieval,
+    "KNOWLEDGE":         handle_knowledge,
     "PRODUCTIVITY_TOOL": handle_productivity_tool,
     "WEB_SEARCH":        handle_web_search,
     "DOCUMENT_TOOL":     handle_document_tool,

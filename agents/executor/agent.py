@@ -85,7 +85,7 @@ def batch_executor_node(
             result = run_tool_step(batch[0], state, tools_map)
             stype = _step_type(batch[0])
             new_context = state.get("context", "") or ""
-            if stype == "RAG_RETRIEVAL":
+            if stype in ("RAG_RETRIEVAL", "KNOWLEDGE"):
                 combined = (new_context + "\n" + result).strip() if new_context else result
                 new_context = _truncate(combined, MAX_CONTEXT_CHARS, "rag_context")
             new_answer = result

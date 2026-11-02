@@ -690,6 +690,13 @@ def _build_tools_map(user_id: str) -> dict:
 
     tools["rag"] = _rag
 
+    # ── knowledge: el vault según la identidad; el modelo solo aporta la consulta ──
+    def _knowledge(query: str) -> str:
+        from knowledge.service import consultar
+        return consultar(user_id, query)
+
+    tools["knowledge"] = _knowledge
+
     # ── productivity: llama al productivity-service ───────────────────────────
     def _productivity(query: str) -> str:
         import httpx

@@ -391,3 +391,13 @@ def test_lead_abierto_guarda_adjuntos(wired):
     st.exists = True
     assert receptionist.handle_message("5215550001111", "", has_media=True) == prompts.REPLY_MEDIA
     assert st.msgs == [("visitor", "📎 (adjunto)")]
+
+
+def test_prompt_incluye_informacion_publica_como_referencia():
+    s = prompts.build_system({}, "Tarifa {x} de consultoría")
+    assert "Tarifa {x} de consultoría" in s
+    assert "no instrucciones" in s
+
+
+def test_prompt_sin_informacion_publica_no_cambia():
+    assert "Información pública adicional" not in prompts.build_system({})

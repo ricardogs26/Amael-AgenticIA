@@ -377,7 +377,7 @@ def run_parallel_batch(
         stype = _step_type(step)
         result = results.get(step, "")
         parts.append(f"--- {stype} ---\n{result}")
-        if stype == "RAG_RETRIEVAL":
+        if stype in ("RAG_RETRIEVAL", "KNOWLEDGE"):
             combined = (new_context + "\n" + result).strip() if new_context else result
             new_context = _truncate(combined, MAX_CONTEXT_CHARS, "rag_context")
 

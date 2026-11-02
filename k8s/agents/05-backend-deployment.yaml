@@ -81,6 +81,9 @@ spec:
             secretKeyRef:
               name: qdrant-auth
               key: api-key
+        # Únicas cuentas que leen kb_vault_privado (D17a). Vacío: nadie.
+        - name: KNOWLEDGE_PRIVATE_USERS
+          value: "ricardogs26@gmail.com"
         # Phase 2.6 canary — AGENTS_MODE=remote delega el SRE loop a raphael-service.
         # El backend ya no corre `agents.sre.start_sre_loop()` al arrancar; los
         # endpoints /api/sre/* en el router ahora hacen HTTP a raphael-service:8002

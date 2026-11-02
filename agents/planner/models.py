@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, field_validator
 
 StepType = Literal[
-    "K8S_TOOL", "RAG_RETRIEVAL", "PRODUCTIVITY_TOOL",
+    "K8S_TOOL", "RAG_RETRIEVAL", "KNOWLEDGE", "PRODUCTIVITY_TOOL",
     "REASONING", "WEB_SEARCH", "DOCUMENT_TOOL",
 ]
 

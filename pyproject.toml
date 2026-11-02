@@ -20,6 +20,7 @@ dependencies = [
     # HTTP client
     "httpx>=0.27.0",
     "requests>=2.31.0",
+    "pyyaml>=6.0",
 
     # LangChain + LangGraph (Ollama — proveedor único activo)
     "langchain>=0.2.0",

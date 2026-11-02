@@ -177,8 +177,11 @@ def _ask_llm(lead: Lead, history: list[tuple[str, str]], text: str) -> str:
         format="json",
         client_kwargs={"timeout": LLM_TIMEOUT_S},
     )
+    from knowledge.service import consultar_publico
+
     captured = {f: getattr(lead, f) for f in storage.FIELDS}
-    msgs = [SystemMessage(content=prompts.build_system(captured))]
+    publico = consultar_publico(f"lead:{lead.id}", text)
+    msgs = [SystemMessage(content=prompts.build_system(captured, publico))]
     for role, content in history:
         if role == "visitor":
             msgs.append(HumanMessage(content=content))

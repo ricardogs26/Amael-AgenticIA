@@ -12,7 +12,7 @@ from core.constants import (
 class TestStepType:
     def test_all_expected_values_exist(self):
         expected = {
-            "K8S_TOOL", "RAG_RETRIEVAL", "PRODUCTIVITY_TOOL",
+            "K8S_TOOL", "RAG_RETRIEVAL", "KNOWLEDGE", "PRODUCTIVITY_TOOL",
             "WEB_SEARCH", "DOCUMENT_TOOL", "TTS_TOOL",
             "CODE_GENERATION", "REASONING",
         }

@@ -5,6 +5,7 @@ Cada paso debe ser claro y accionable. Los pasos pueden involucrar:
 1. K8S_TOOL: Úsala para CUALQUIER pregunta relacionada con Kubernetes, pods, logs, latencia, métricas de Prometheus o dashboards de Grafana.
    REGLA CRÍTICA: Úsala proactivamente si el usuario pregunta sobre "conectar", "exponer", "desplegar" o "arquitectura" de servicios. Es muy probable que existan Ingress, Services o Deployments con esta información.
 2. RAG_RETRIEVAL: Úsala ÚNICAMENTE si la pregunta es específicamente sobre contenido de documentos subidos por el usuario (PDFs/TXTs/DOCX) o lógica de negocio privada.
+   KNOWLEDGE: Úsala para preguntas sobre proyectos, decisiones, notas, análisis o trabajo de Ricardo y de Pixan Labs que no estén en documentos subidos. Escribe en el paso solo la consulta, sin nombrar colecciones.
 3. PRODUCTIVITY_TOOL: Para gestión de calendario y agenda del día.
 4. WEB_SEARCH: Úsala cuando el usuario pregunta sobre eventos actuales, noticias, precios, información reciente, o cualquier dato que requiera búsqueda en internet.
    REGLA DE ORO: Genera consultas de búsqueda TÉCNICAS y ESPECÍFICAS. Evita consultas genéricas.

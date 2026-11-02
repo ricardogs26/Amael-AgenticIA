@@ -35,7 +35,8 @@ import yaml
 CONFIG = Path(__file__).with_name("exclusiones.yaml")
 VAULT = Path(os.environ.get("VAULT_DIR", "~/obsidian-vault")).expanduser()
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://10.152.183.251:6333")
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://10.152.183.25:11434")
+OLLAMA_URL = (os.environ.get("OLLAMA_EMBED_URL") or os.environ.get("OLLAMA_URL")
+              or "http://10.152.183.25:11434")
 LLAVE_QDRANT = Path(os.environ.get("QDRANT_KEY_FILE", "~/.secrets/qdrant-api-key")).expanduser()
 INFORME = "inbox/ingesta-vault.md"
 DIMENSIONES = 768
@@ -256,8 +257,8 @@ def recorrer_vault(vault: Path, cfg: dict) -> list[Nota]:
 
 
 class Qdrant:
-    def __init__(self, url: str, llave: str):
-        self.url, self.llave = url.rstrip("/"), llave
+    def __init__(self, url: str, llave: str, espera: int = 120):
+        self.url, self.llave, self.espera = url.rstrip("/"), llave, espera
 
     def _pedir(self, metodo: str, ruta: str, cuerpo: dict | None = None) -> dict:
         peticion = urllib.request.Request(
@@ -266,7 +267,7 @@ class Qdrant:
             data=None if cuerpo is None else json.dumps(cuerpo).encode(),
             headers={"api-key": self.llave, "Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(peticion, timeout=120) as r:
+        with urllib.request.urlopen(peticion, timeout=self.espera) as r:
             return json.loads(r.read())
 
     def asegurar_coleccion(self, nombre: str) -> None:
@@ -300,7 +301,7 @@ class Qdrant:
         self._pedir("PUT", f"/collections/{nombre}/points?wait=true", {"points": puntos})
 
 
-def embeber(textos: list[str], modelo: str) -> list[list[float]]:
+def embeber(textos: list[str], modelo: str, espera: int = 600) -> list[list[float]]:
     vectores = []
     for i in range(0, len(textos), LOTE_EMBEDDINGS):
         peticion = urllib.request.Request(
@@ -308,7 +309,7 @@ def embeber(textos: list[str], modelo: str) -> list[list[float]]:
             data=json.dumps({"model": modelo, "input": textos[i:i + LOTE_EMBEDDINGS]}).encode(),
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(peticion, timeout=600) as r:
+        with urllib.request.urlopen(peticion, timeout=espera) as r:
             vectores += json.loads(r.read())["embeddings"]
     return vectores
 
@@ -379,7 +380,7 @@ def cobertura(pregunta: str, payload: dict) -> float:
 
 
 def buscar(pregunta: str, coleccion: str, qdrant: Qdrant, cfg: dict,
-           umbral: float | None = None, limite: int = 5) -> list[dict]:
+           umbral: float | None = None, limite: int = 5, espera: int = 600) -> list[dict]:
     """Fragmentos relevantes por coseno más coincidencia de palabras.
 
     El coseno solo no separa: con nomic en español, lo relevante da 0.62-0.79 y lo que no
@@ -387,7 +388,7 @@ def buscar(pregunta: str, coleccion: str, qdrant: Qdrant, cfg: dict,
     """
     frag = cfg["fragmentos"]
     umbral = frag["umbral_busqueda"] if umbral is None else umbral
-    vector = embeber([frag.get("prefijo_consulta", "") + pregunta], frag["embedder"])[0]
+    vector = embeber([frag.get("prefijo_consulta", "") + pregunta], frag["embedder"], espera)[0]
     r = qdrant._pedir("POST", f"/collections/{coleccion}/points/search",
                       {"vector": vector, "limit": limite * 4, "with_payload": True})["result"]
     puntuados = [
