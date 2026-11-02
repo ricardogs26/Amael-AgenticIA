@@ -255,6 +255,10 @@ Cada una nació de un incidente real (detalle en el historial del vault).
 - **LangChain 1.2+**: nada de `langchain.agents` (`AgentType`, `initialize_agent` ya no
   existen). `Tool` sale de `langchain_core.tools`; agentes con `langgraph.prebuilt.create_react_agent`.
 
+## Ingesta del vault (F2 RAG gobernado)
+
+`knowledge/vault_ingest.py` corre en el host, no en el cluster: indexa `~/obsidian-vault` en `kb_vault_privado`, `kb_vault_sre` y `kb_publico`. El vault es la fuente de verdad. Reglas en `knowledge/exclusiones.yaml`; pruebas en `tests/unit/knowledge/`. Quien consulte debe anteponer `prefijo_consulta` y embeber con `nomic-embed-text`. Cron y hooks: `knowledge/instalar-vault-ingest.sh`.
+
 ## Qdrant con API key (desde 1-nov-2026, F1 del RAG gobernado)
 
 Qdrant corre con `QDRANT__SERVICE__API_KEY` + `JWT_RBAC` (Secret `qdrant-auth`, creado fuera de

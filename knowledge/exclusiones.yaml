@@ -40,3 +40,5 @@ fragmentos:
   tokens_objetivo: 800
   solape_tokens: 100
   embedder: nomic-embed-text   # ollama-cpu-service:11434, 768 dim, coseno
+  prefijo_documento: 'search_document: '   # nomic distingue documento y consulta
+  prefijo_consulta: 'search_query: '       # lo usarán F3 y F4 al buscar
