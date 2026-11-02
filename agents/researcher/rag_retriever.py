@@ -68,10 +68,10 @@ def sanitize_email(email: str) -> str:
 
 def get_user_vectorstore(user_email: str):
     """
-    Carga o crea la colección Qdrant para el usuario dado.
+    Carga la colección Qdrant del usuario, o la crea si de verdad no existe.
 
-    Si la colección tiene un error de dimensiones (mismatch), la elimina y recrea.
-    Migrado desde backend-ia/main.py → get_user_vectorstore()
+    Nunca borra: un timeout o un error de permisos no debe costar los documentos
+    del usuario. Cualquier error se propaga al llamador.
     """
     from langchain_qdrant import QdrantVectorStore
 
@@ -79,24 +79,13 @@ def get_user_vectorstore(user_email: str):
     client    = _get_qdrant_client()
     embedding = _get_embeddings()
 
-    try:
-        vectorstore = QdrantVectorStore.from_existing_collection(
+    if client.collection_exists(collection_name):
+        return QdrantVectorStore.from_existing_collection(
             embedding=embedding,
             collection_name=collection_name,
             url=_QDRANT_URL,
             api_key=qdrant_api_key(),
         )
-        return vectorstore
-    except Exception as exc:
-        logger.warning(
-            f"[rag] Error o dimensiones incorrectas en '{collection_name}': {exc}. "
-            "Recreando colección."
-        )
-
-    # Si existe con error → eliminar y recrear
-    if client.collection_exists(collection_name):
-        logger.info(f"[rag] Borrando colección '{collection_name}' para corregir configuración.")
-        client.delete_collection(collection_name)
 
     client.create_collection(
         collection_name=collection_name,

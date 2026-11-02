@@ -24,7 +24,7 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 
-from interfaces.api.auth import get_current_user
+from interfaces.api.auth import get_current_user, resolver_usuario_bot
 
 logger = logging.getLogger("interfaces.api.routers.ingest")
 
@@ -32,7 +32,6 @@ router = APIRouter(prefix="/api", tags=["ingest"])
 
 # Usuario de servicio (WhatsApp bridge / CronJobs). Puede indexar a nombre del
 # usuario real pasando `user_id` — mismo patrón que chat.py.
-_BOT_USER = "bot-amael@richardx.dev"
 
 # Singleton LLM para resúmenes de documentos
 _ingest_llm = None
@@ -79,8 +78,7 @@ async def ingest_document(
     Returns:
         { doc_id, filename, summary, chunks }
     """
-    if user_id and user == _BOT_USER:
-        user = user_id
+    user = resolver_usuario_bot(user, user_id)
 
     temp_path: str | None = None
     content = await file.read()

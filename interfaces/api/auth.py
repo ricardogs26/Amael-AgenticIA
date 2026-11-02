@@ -82,6 +82,46 @@ def get_current_user(
         )
 
 
+BOT_USER = "bot-amael@richardx.dev"
+
+
+def identidad_activa(user_id: str) -> bool:
+    """True si es usuario activo, por email o identidad alterna. Ante error, False."""
+    try:
+        from storage.postgres.client import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM user_profile WHERE user_id = %s AND status = 'active'",
+                    (user_id,),
+                )
+                if cur.fetchone() is not None:
+                    return True
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM user_identities ui
+                    JOIN user_profile up ON up.user_id = ui.canonical_user_id
+                    WHERE ui.identity_value = %s AND up.status = 'active'
+                    """,
+                    (user_id,),
+                )
+                return cur.fetchone() is not None
+    except Exception as exc:
+        logger.warning(f"[auth] identidad_activa falló: {exc}")
+        return False
+
+
+def resolver_usuario_bot(jwt_user: str, solicitado: str | None) -> str:
+    """Usuario efectivo: el bot actúa solo por identidades activas; los demás, por sí mismos."""
+    if not solicitado or jwt_user != BOT_USER:
+        return jwt_user
+    if not identidad_activa(solicitado):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Usuario no autorizado")
+    return solicitado
+
+
 # ── RBAC — jerarquía de roles ─────────────────────────────────────────────────
 
 # Nivel numérico de cada rol: a mayor número, más privilegios.
