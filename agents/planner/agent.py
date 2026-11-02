@@ -50,6 +50,7 @@ def _get_llm() -> ChatOllama:
             model=settings.llm_model,
             base_url=settings.ollama_base_url,
             client_kwargs={"timeout": 60},
+            reasoning=False,  # Gemma razona por defecto: 10-40 s contra 0.6 s
         )
         logger.info(
             f"[planner] ChatOllama inicializado: "

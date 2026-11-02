@@ -140,3 +140,8 @@ def test_direct_embedding_calls_use_the_helper():
         assert '"prompt":' not in src.split("/api/embeddings")[1][:400], (
             f"{rel}: sigue armando el payload de embeddings a mano"
         )
+
+
+def test_planner_no_razona():
+    """Con Gemma, razonar en el planner lo acerca a su timeout de 60 s."""
+    assert "reasoning=False" in _source("agents/planner/agent.py")
