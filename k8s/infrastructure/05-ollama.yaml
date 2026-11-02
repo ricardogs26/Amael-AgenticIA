@@ -114,7 +114,7 @@ spec:
     spec:
       containers:
       - name: ollama
-        image: ollama/ollama:0.32.5   # NUNCA usar tag mutable — ver Historial
+        image: registry.richardx.dev/ollama-parallel:0.32.5-1   # NUNCA usar tag mutable — ver Historial
         ports:
         - containerPort: 11434
         resources:
@@ -130,7 +130,7 @@ spec:
         - name: OLLAMA_HOST
           value: "0.0.0.0"
         - name: OLLAMA_NUM_PARALLEL
-          value: "1"        # 1-nov-2026 (D4a): fijado en 1. Con 32k de contexto un segundo
+          value: "2"        # 1-nov-2026 (D4a): fijado en 1. Con 32k de contexto un segundo
                             # slot duplicaría la KV (~2.6 GB más) y ya no cabe junto a CosyVoice.
                             # Historia: 13-ago-2026 estaba en 2 pero INERTE con qwen3.5 — ollama
                             # 0.32.5 loguea "model architecture does not currently
@@ -190,7 +190,7 @@ spec:
                   ollama list >/dev/null 2>&1 && break
                   i=$((i+1)); sleep 2
                 done
-                ollama run qwen3.5:9b "" >/dev/null 2>&1 || true
+                ollama run gemma4-uncensored-amael:latest "" >/dev/null 2>&1 || true
         volumeMounts:
         - name: ollama-storage
           mountPath: /root/.ollama

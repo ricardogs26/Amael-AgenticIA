@@ -30,6 +30,8 @@ spec:
             image: registry.richardx.dev/english-coach:1.1.1
             imagePullPolicy: IfNotPresent
             env:
+            - name: COACH_MODEL
+              value: "gemma4-uncensored-amael:latest"
             - name: ADMIN_PHONE
               valueFrom:
                 configMapKeyRef:

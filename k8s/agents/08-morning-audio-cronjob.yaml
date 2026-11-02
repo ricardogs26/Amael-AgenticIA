@@ -52,4 +52,4 @@ spec:
             - name: OLLAMA_URL
               value: "http://ollama-service:11434"
             - name: LLM_MODEL
-              value: "qwen3.5:9b"
+              value: "gemma4-uncensored-amael:latest"
