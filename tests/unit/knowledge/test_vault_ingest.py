@@ -6,7 +6,9 @@ import pytest
 from knowledge.vault_ingest import (
     Fragmento,
     Nota,
+    buscar,
     cargar_config,
+    cobertura,
     debe_indexarse,
     filtrar_secretos,
     fragmentar,
@@ -98,6 +100,58 @@ def test_encabezado_dentro_de_codigo_no_parte_seccion():
 def test_frontmatter_no_se_indexa():
     _, cuerpo, _ = separar_frontmatter("---\naudiencia: sre\n---\ncuerpo\n")
     assert cuerpo == "cuerpo\n"
+
+
+def test_secciones_chicas_se_juntan_y_conservan_su_titulo():
+    cuerpo = "\n\n".join(f"## S{i}\n\n" + "palabra " * 50 for i in range(10))
+    fragmentos = fragmentar(cuerpo, 800, 100)
+    assert len(fragmentos) < 10
+    assert fragmentos[0].encabezado == "S0"
+    assert "## S1" in fragmentos[0].texto
+    assert all(len(f.texto) <= 800 * 4 + 2 for f in fragmentos)
+
+
+def test_seccion_grande_no_arrastra_solape_a_la_siguiente():
+    cuerpo = "## A\n\n" + "alfa " * 500 + "\n\n## B\n\n" + "beta " * 500
+    fragmentos = fragmentar(cuerpo, 800, 100)
+    assert "alfa" not in fragmentos[-1].texto
+
+
+def test_buscar_descarta_bajo_el_umbral_y_usa_prefijo_de_consulta(cfg, monkeypatch):
+    textos = []
+    monkeypatch.setattr(
+        "knowledge.vault_ingest.embeber", lambda t, m: textos.extend(t) or [[0.1]]
+    )
+
+    class Falso:
+        def _pedir(self, metodo, ruta, cuerpo):
+            return {"result": [
+                {"score": 0.9, "payload": {"ruta": "a.md"}},
+                {"score": 0.5, "payload": {"ruta": "b.md"}},
+            ]}
+
+    r = buscar("hola", "kb_vault_sre", Falso(), cfg, umbral=0.7)
+    assert [x["ruta"] for x in r] == ["a.md"]
+    assert textos[0].startswith("search_query: ")
+
+
+def test_coincidencia_de_palabras_sube_el_puntaje(cfg, monkeypatch):
+    monkeypatch.setattr("knowledge.vault_ingest.embeber", lambda t, m: [[0.1]])
+
+    class Falso:
+        def _pedir(self, metodo, ruta, cuerpo):
+            return {"result": [
+                {"score": 0.70, "payload": {"ruta": "a.md", "texto": "otra cosa"}},
+                {"score": 0.65, "payload": {"ruta": "b.md", "texto": "ollama quedó pending"}},
+            ]}
+
+    r = buscar("ollama pending", "kb_vault_sre", Falso(), cfg, limite=1)
+    assert [x["ruta"] for x in r] == ["b.md"]
+
+
+def test_cobertura_ignora_palabras_cortas():
+    assert cobertura("de la", {"texto": "de la"}) == 0.0
+    assert cobertura("vault sellado", {"texto": "el vault"}) == 0.5
 
 
 class QdrantFalso:

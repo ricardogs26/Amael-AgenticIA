@@ -42,3 +42,5 @@ fragmentos:
   embedder: nomic-embed-text   # ollama-cpu-service:11434, 768 dim, coseno
   prefijo_documento: 'search_document: '   # nomic distingue documento y consulta
   prefijo_consulta: 'search_query: '       # lo usarán F3 y F4 al buscar
+  umbral_busqueda: 0.73
+  peso_palabras: 0.25                      # ver buscar(): el coseno solo no separa

@@ -41,6 +41,7 @@ INFORME = "inbox/ingesta-vault.md"
 DIMENSIONES = 768
 CHARS_POR_TOKEN = 4          # aproximación suficiente para español técnico
 LOTE_EMBEDDINGS = 16
+VERSION_FRAGMENTADOR = 2     # subirla obliga a reindexar todo el vault
 ESPACIO_IDS = uuid.UUID("6f2c1a54-7e0b-4a3e-9d55-0a4f8a1c2b77")
 FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 ENCABEZADO = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
@@ -164,7 +165,7 @@ def _cortar_largo(texto: str, maximo: int) -> list[str]:
 def fragmentar(cuerpo: str, tokens: int, solape: int) -> list[Fragmento]:
     maximo, cola = tokens * CHARS_POR_TOKEN, solape * CHARS_POR_TOKEN
     salida: list[Fragmento] = []
-    actual, encabezado, linea = "", "", 1
+    actual, encabezado, seccion, linea = "", "", "", 1
 
     def emitir():
         nonlocal actual
@@ -177,14 +178,20 @@ def fragmentar(cuerpo: str, tokens: int, solape: int) -> list[Fragmento]:
 
     for texto, ruta_enc, num in _bloques(cuerpo):
         for parte in _cortar_largo(texto, maximo):
-            if ruta_enc != encabezado and actual.strip():
+            seccion_nueva = ruta_enc != seccion and actual.strip()
+            if seccion_nueva and len(actual) >= maximo / 2:
                 emitir()
-                actual = ""     # sección nueva: el solape no cruza encabezados
-            if len(actual) + len(parte) + 2 > maximo and actual.strip():
+                actual = ""     # el solape no cruza encabezados
+                seccion_nueva = False
+            # Una sección chica se junta con la anterior; su título viaja en el texto
+            # para que el fragmento no pierda de qué trata.
+            bloque = f"## {ruta_enc}\n{parte}" if seccion_nueva and ruta_enc else parte
+            if len(actual) + len(bloque) + 2 > maximo and actual.strip():
                 emitir()
             if not actual.strip():
                 encabezado, linea = ruta_enc, num
-            actual = f"{actual}\n\n{parte}" if actual.strip() else parte
+            actual = f"{actual}\n\n{bloque}" if actual.strip() else bloque
+            seccion = ruta_enc
     if actual.strip():
         salida.append(Fragmento(actual.strip(), encabezado, linea))
     return salida
@@ -219,7 +226,8 @@ def leer_nota(archivo: Path, ruta: PurePosixPath, cfg: dict) -> Nota:
     limpios, bloqueados, reportados = filtrar_secretos(fragmentos, cfg)
     huella = json.dumps(
         [contenido, audiencia, cfg["fragmentos"]["tokens_objetivo"], cfg["fragmentos"]["solape_tokens"],
-         cfg["fragmentos"]["embedder"], cfg["fragmentos"].get("prefijo_documento", "")],
+         cfg["fragmentos"]["embedder"], cfg["fragmentos"].get("prefijo_documento", ""),
+         VERSION_FRAGMENTADOR],
         ensure_ascii=False,
     )
     return Nota(
@@ -359,6 +367,36 @@ def sincronizar(notas: list[Nota], qdrant: Qdrant, cfg: dict, forzar: bool = Fal
         conteo["subidas"] += 1
         conteo["fragmentos"] += len(puntos)
     return conteo
+
+
+def cobertura(pregunta: str, payload: dict) -> float:
+    """Fracción de palabras de la pregunta que aparecen tal cual en el fragmento."""
+    palabras = {p for p in re.findall(r"\w+", pregunta.lower()) if len(p) > 3}
+    if not palabras:
+        return 0.0
+    texto = " ".join(str(payload.get(k, "")) for k in ("ruta", "titulo", "encabezado", "texto")).lower()
+    return sum(p in texto for p in palabras) / len(palabras)
+
+
+def buscar(pregunta: str, coleccion: str, qdrant: Qdrant, cfg: dict,
+           umbral: float | None = None, limite: int = 5) -> list[dict]:
+    """Fragmentos relevantes por coseno más coincidencia de palabras.
+
+    El coseno solo no separa: con nomic en español, lo relevante da 0.62-0.79 y lo que no
+    tiene relación 0.50-0.67. Por eso se piden candidatos de más y se reordenan.
+    """
+    frag = cfg["fragmentos"]
+    umbral = frag["umbral_busqueda"] if umbral is None else umbral
+    vector = embeber([frag.get("prefijo_consulta", "") + pregunta], frag["embedder"])[0]
+    r = qdrant._pedir("POST", f"/collections/{coleccion}/points/search",
+                      {"vector": vector, "limit": limite * 4, "with_payload": True})["result"]
+    puntuados = [
+        {**p["payload"], "coseno": round(p["score"], 3),
+         "puntaje": round(p["score"] + frag["peso_palabras"] * cobertura(pregunta, p["payload"]), 3)}
+        for p in r
+    ]
+    puntuados.sort(key=lambda x: -x["puntaje"])
+    return [x for x in puntuados if x["puntaje"] >= umbral][:limite]
 
 
 def escribir_informe(vault: Path, notas: list[Nota]) -> Path:

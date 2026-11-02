@@ -257,7 +257,7 @@ Cada una nació de un incidente real (detalle en el historial del vault).
 
 ## Ingesta del vault (F2 RAG gobernado)
 
-`knowledge/vault_ingest.py` corre en el host, no en el cluster: indexa `~/obsidian-vault` en `kb_vault_privado`, `kb_vault_sre` y `kb_publico`. El vault es la fuente de verdad. Reglas en `knowledge/exclusiones.yaml`; pruebas en `tests/unit/knowledge/`. Quien consulte debe anteponer `prefijo_consulta` y embeber con `nomic-embed-text`. Cron y hooks: `knowledge/instalar-vault-ingest.sh`.
+`knowledge/vault_ingest.py` corre en el host, no en el cluster: indexa `~/obsidian-vault` en `kb_vault_privado`, `kb_vault_sre` y `kb_publico`. El vault es la fuente de verdad. Reglas en `knowledge/exclusiones.yaml`; pruebas en `tests/unit/knowledge/`. Quien consulte debe anteponer `prefijo_consulta` y embeber con `nomic-embed-text`. Cron y hooks: `knowledge/instalar-vault-ingest.sh`. `knowledge/mcp_server.py` es el MCP `amael-knowledge`: lo lanza `qwen-local` con un JWT de solo lectura a `kb_*` (`~/.secrets/qdrant-qwen-jwt`, vence a 90 días). Corre en un venv en `~/.local/share/amael-knowledge-mcp` con mcp 2.x (`MCPServer`, no `FastMCP`). No registrarlo en `~/.qwen`: ese perfil tiene Featherless y las notas privadas saldrían a un tercero.
 
 ## Qdrant con API key (desde 1-nov-2026, F1 del RAG gobernado)
 
