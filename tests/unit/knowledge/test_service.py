@@ -125,3 +125,10 @@ def test_paso_knowledge_usa_la_herramienta_ligada_a_la_identidad():
 def test_planner_acepta_el_paso():
     from agents.planner.models import PlanStep
     assert PlanStep(step_type="KNOWLEDGE", description="qué decidimos").step_type == "KNOWLEDGE"
+
+
+def test_metrica_usa_el_nivel_mas_alto():
+    from observability.metrics import KNOWLEDGE_QUERIES_TOTAL as M
+    antes = M.labels(nivel="vault_sre", resultado="sin_resultados")._value.get()
+    service._medir(["kb_publico", "kb_vault_sre"], 0)
+    assert M.labels(nivel="vault_sre", resultado="sin_resultados")._value.get() == antes + 1

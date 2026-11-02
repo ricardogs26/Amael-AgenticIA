@@ -159,6 +159,11 @@ RAG_MISS_TOTAL = Counter(
     "amael_rag_miss_total",
     "Búsquedas RAG que no retornaron resultados útiles",
 )
+KNOWLEDGE_QUERIES_TOTAL = Counter(
+    "amael_knowledge_queries_total",
+    "Consultas al conocimiento del vault",
+    ["nivel", "resultado"],
+)
 RAG_LATENCY_SECONDS = Histogram(
     "amael_rag_latency_seconds",
     "Latencia de búsquedas en Qdrant",

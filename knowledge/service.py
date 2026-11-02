@@ -97,6 +97,17 @@ def auditar(user_id: str, rol: str, colecciones: list[str], pregunta: str, resul
         logger.warning(f"[knowledge] auditoría falló: {exc}")
 
 
+def _medir(colecciones: list[str], resultados: int) -> None:
+    try:
+        from observability.metrics import KNOWLEDGE_QUERIES_TOTAL
+        KNOWLEDGE_QUERIES_TOTAL.labels(
+            nivel=colecciones[-1].removeprefix("kb_"),
+            resultado="con_resultados" if resultados else "sin_resultados",
+        ).inc()
+    except Exception as exc:
+        logger.warning(f"[knowledge] métrica falló: {exc}")
+
+
 def _buscar_en(colecciones: list[str], pregunta: str) -> list[dict]:
     cliente, cfg = _cliente(), _config()
     hallados: list[dict] = []
@@ -116,6 +127,7 @@ def consultar(user_id: str, pregunta: str) -> str:
     hallados = _buscar_en(colecciones, pregunta)
     auditar(cuenta[0] if cuenta else user_id, cuenta[1] if cuenta else "ninguno",
             colecciones, pregunta, len(hallados))
+    _medir(colecciones, len(hallados))
     if not hallados:
         return SIN_RESULTADOS
     bloques = [
@@ -134,4 +146,5 @@ def consultar_publico(quien: str, pregunta: str) -> str:
         logger.warning(f"[knowledge] consulta pública falló: {exc}")
         return ""
     auditar(quien, "publico", [PUBLICO], pregunta, len(hallados))
+    _medir([PUBLICO], len(hallados))
     return "\n\n".join(f["texto"] for f in hallados)

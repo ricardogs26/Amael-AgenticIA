@@ -18,6 +18,7 @@ Migrado desde backend-ia/main.py → ingest_data().
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -178,7 +179,7 @@ async def ingest_document(
         for chunk in chunks:
             chunk.metadata["filename"] = file.filename
         vs = get_user_vectorstore(user)
-        vs.add_documents(chunks)
+        await asyncio.to_thread(vs.add_documents, chunks)
         n_chunks = len(chunks)
         logger.info(f"[ingest] {n_chunks} chunks indexados en Qdrant para '{user}'")
     except Exception as e:
@@ -189,7 +190,9 @@ async def ingest_document(
     summary = ""
     try:
         llm = _get_ingest_llm()
-        _resp = llm.invoke(
+        # En hilo aparte: con un solo worker, esto congelaba /api/identity/check.
+        _resp = await asyncio.to_thread(
+            llm.invoke,
             f"Resume el siguiente documento en 2-3 oraciones en español:\n\n{full_text[:3000]}"
         )
         summary = (_resp.content if hasattr(_resp, "content") else str(_resp)).strip()
