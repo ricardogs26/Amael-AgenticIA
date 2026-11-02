@@ -91,7 +91,7 @@ def _render_tool_output(value: Any) -> str:
 # "memory" salió de aquí (1.14.2): iba al pipeline, que no tiene NINGUNA
 # herramienta de historial — «¿qué te dije del trader?» terminaba en un plan
 # sin forma de consultar las conversaciones. Ahora va directo a Zaphkiel.
-_PIPELINE_INTENTS = {"general", "kubernetes", "monitoring"}
+_PIPELINE_INTENTS = {"general", "kubernetes", "monitoring", "knowledge"}
 
 
 class AgentDispatcher:

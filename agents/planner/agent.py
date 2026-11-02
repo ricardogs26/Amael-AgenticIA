@@ -25,6 +25,7 @@ from agents.planner.models import PlanStep
 from agents.planner.prompts import PLANNER_SYSTEM_PROMPT
 from core.agent_base import AgentResult, BaseAgent
 from core.constants import MAX_PLAN_STEPS
+from knowledge.intencion import es_consulta_de_conocimiento
 from observability.metrics import (
     LLM_TOKENS_TOTAL,
     PLANNER_INVALID_STEPS_TOTAL,
@@ -104,6 +105,10 @@ def _apply_fast_paths(question: str, plan: list[str]) -> list[str]:
             "REASONING: Indicar brevemente al usuario que la captura del "
             "dashboard de recursos del clúster está adjunta como imagen",
         ]
+    if es_consulta_de_conocimiento(question) and not any(
+        p.startswith("KNOWLEDGE:") for p in plan
+    ):
+        return [f"KNOWLEDGE: {question}", *plan]
     return plan
 
 

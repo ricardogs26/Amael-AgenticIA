@@ -14,6 +14,8 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from knowledge.intencion import PATRON as PATRON_CONOCIMIENTO
+
 logger = logging.getLogger("orchestration.router")
 
 _OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama-service:11434")
@@ -33,6 +35,8 @@ class RoutingDecision:
 
 # ── Reglas keyword (orden importa: más específico primero) ────────────────────
 _KEYWORD_RULES = [
+    # Conocimiento del vault: va antes que todo para que «Amael Code» no caiga en dev.
+    (PATRON_CONOCIMIENTO, "knowledge", ["planner", "executor", "supervisor"]),
     # Crear evento de calendario — Haniel `create_event`. Va PRIMERO: «agenda
     # esta cita» no es un pendiente ni una lectura de agenda. Solo se evalúa
     # sobre el ENCABEZADO del mensaje (ver _CALENDAR_HEAD_CHARS en route()):
