@@ -68,6 +68,14 @@ def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token inválido: falta 'sub'",
             )
+        # Solo el token de servicio puede no caducar, hasta rotar JWT_SECRET_KEY.
+        if "exp" not in payload and user_id != BOT_USER:
+            _emit_security_event("jwt_invalid")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Sesión sin caducidad: vuelve a iniciar sesión",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         return user_id
 
     except HTTPException:

@@ -5,13 +5,15 @@ Migrado desde backend-ia/main.py:
   get_user_vectorstore()   — carga o crea la colección Qdrant por usuario
   rag_tool()               — similarity_search k=3 con métricas RAG_HITS/MISS
 
-Cada usuario tiene su propia colección en Qdrant, nombrada con el email sanitizado.
+Cada usuario tiene su propia colección en Qdrant, nombrada por rag_collection().
 El embedding se genera con nomic-embed-text vía OllamaEmbeddings.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import re
 import threading
 
 from core.qdrant_auth import qdrant_api_key
@@ -61,9 +63,11 @@ def _get_embeddings():
     return _embeddings
 
 
-def sanitize_email(email: str) -> str:
-    """Convierte un email en nombre de colección Qdrant válido."""
-    return email.replace("@", "_at_").replace(".", "_dot_")
+def rag_collection(user_id: str) -> str:
+    """Nombre de la colección RAG del usuario: prefijo propio y hash contra colisiones."""
+    limpio = user_id.strip().lower()
+    legible = re.sub(r"[^a-z0-9]+", "_", limpio).strip("_")[:40]
+    return f"rag_{legible}_{hashlib.sha256(limpio.encode()).hexdigest()[:12]}"
 
 
 def get_user_vectorstore(user_email: str):
@@ -75,7 +79,7 @@ def get_user_vectorstore(user_email: str):
     """
     from langchain_qdrant import QdrantVectorStore
 
-    collection_name = sanitize_email(user_email)
+    collection_name = rag_collection(user_email)
     client    = _get_qdrant_client()
     embedding = _get_embeddings()
 
@@ -128,7 +132,7 @@ def _detect_filename_filter(query: str, user_email: str) -> str | None:
     import re
     try:
         client = _get_qdrant_client()
-        collection_name = sanitize_email(user_email)
+        collection_name = rag_collection(user_email)
         if not client.collection_exists(collection_name):
             return None
 
@@ -228,7 +232,7 @@ def retrieve_documents(
             # MatchText requiere índice FTS y es case-sensitive sin él.
             RAG_FILTER_APPLIED_TOTAL.labels(filter_type="filename").inc()
             keyword = effective_filter.lower()
-            collection_name = sanitize_email(user_email)
+            collection_name = rag_collection(user_email)
             client = _get_qdrant_client()
 
             all_points, _ = client.scroll(
@@ -347,7 +351,7 @@ def list_user_documents(user_email: str, limit: int = 20) -> list[dict]:
     """
     try:
         client = _get_qdrant_client()
-        collection_name = sanitize_email(user_email)
+        collection_name = rag_collection(user_email)
         if not client.collection_exists(collection_name):
             return []
         points, _ = client.scroll(
@@ -373,7 +377,7 @@ def delete_user_collection(user_email: str) -> bool:
     """Elimina toda la colección del usuario de Qdrant."""
     try:
         client = _get_qdrant_client()
-        collection_name = sanitize_email(user_email)
+        collection_name = rag_collection(user_email)
         if client.collection_exists(collection_name):
             client.delete_collection(collection_name)
             logger.info(f"[rag] Colección '{collection_name}' eliminada.")

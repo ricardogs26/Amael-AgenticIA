@@ -13,6 +13,7 @@ Flujo Calendar (opcional):
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 import jwt
@@ -65,9 +66,12 @@ _CALENDAR_CALLBACK_URL = f"{_FRONTEND_URL}/api/auth/calendar/callback"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+SESION_DIAS = 7
+
+
 def _create_jwt(email: str) -> str:
     return jwt.encode(
-        {"sub": email},
+        {"sub": email, "exp": datetime.now(UTC) + timedelta(days=SESION_DIAS)},
         settings.jwt_secret_key,
         algorithm=settings.jwt_algorithm,
     )

@@ -2,10 +2,10 @@
 RAGSkill — recuperación y gestión de documentos en Qdrant (per-user).
 
 Capacidades:
-  retrieve(user_email, query, k)        — similarity_search top-k
-  ingest(user_email, chunks, metadata)  — indexa chunks en la colección del usuario
-  list_docs(user_email, limit)          — lista documentos indexados
-  delete_collection(user_email)         — elimina toda la colección del usuario
+  retrieve(query, k)        — similarity_search top-k
+  ingest(chunks, metadata)  — indexa chunks en la colección del usuario
+  list_docs(limit)          — lista documentos indexados
+  delete_collection()         — elimina toda la colección del usuario
 
 Wrapper sobre agents/researcher/rag_retriever.
 """
@@ -22,21 +22,18 @@ logger = logging.getLogger("skill.rag")
 # ── Inputs ────────────────────────────────────────────────────────────────────
 
 class RetrieveInput(SkillInput):
-    user_email: str
     query: str
     k: int = 3
 
 class IngestInput(SkillInput):
-    user_email: str
     chunks: list[str]
     metadata: dict[str, Any] = {}
 
 class ListDocsInput(SkillInput):
-    user_email: str
     limit: int = 20
 
 class DeleteCollectionInput(SkillInput):
-    user_email: str
+    pass
 
 
 # ── Skill ─────────────────────────────────────────────────────────────────────
@@ -51,7 +48,14 @@ class RAGSkill(BaseSkill):
     description = "RAG sobre documentos del usuario: retrieve, ingest, list, delete"
     version     = "1.0.0"
 
+    def __init__(self, user_email: str | None = None) -> None:
+        super().__init__()
+        self.user_email = user_email
+
     async def execute(self, input: SkillInput) -> SkillOutput:
+        # La identidad se fija al crear el skill; nunca viene en la entrada.
+        if not self.user_email:
+            return SkillOutput.fail("RAGSkill sin identidad")
         if isinstance(input, RetrieveInput):
             return await self.retrieve(input)
         if isinstance(input, IngestInput):
@@ -66,17 +70,17 @@ class RAGSkill(BaseSkill):
         """Recupera los documentos más relevantes para el query del usuario."""
         try:
             from agents.researcher.rag_retriever import retrieve_documents
-            content = retrieve_documents(input.user_email, input.query, k=input.k)
+            content = retrieve_documents(self.user_email, input.query, k=input.k)
             if not content:
                 return SkillOutput.ok(
                     data="",
                     hits=0,
-                    user=input.user_email,
+                    user=self.user_email,
                 )
             return SkillOutput.ok(
                 data=content,
                 hits=1,
-                user=input.user_email,
+                user=self.user_email,
                 query=input.query,
             )
         except Exception as exc:
@@ -88,13 +92,13 @@ class RAGSkill(BaseSkill):
         try:
             from agents.researcher.rag_retriever import ingest_document
             count = ingest_document(
-                input.user_email,
+                self.user_email,
                 input.chunks,
                 metadata=input.metadata,
             )
             return SkillOutput.ok(
                 data={"indexed": count},
-                user=input.user_email,
+                user=self.user_email,
                 chunks=count,
             )
         except Exception as exc:
@@ -105,8 +109,8 @@ class RAGSkill(BaseSkill):
         """Lista los documentos indexados del usuario."""
         try:
             from agents.researcher.rag_retriever import list_user_documents
-            docs = list_user_documents(input.user_email, limit=input.limit)
-            return SkillOutput.ok(data=docs, count=len(docs), user=input.user_email)
+            docs = list_user_documents(self.user_email, limit=input.limit)
+            return SkillOutput.ok(data=docs, count=len(docs), user=self.user_email)
         except Exception as exc:
             logger.error(f"[rag_skill] list_docs error: {exc}")
             return SkillOutput.fail(str(exc))
@@ -115,10 +119,10 @@ class RAGSkill(BaseSkill):
         """Elimina toda la colección Qdrant del usuario."""
         try:
             from agents.researcher.rag_retriever import delete_user_collection
-            deleted = delete_user_collection(input.user_email)
+            deleted = delete_user_collection(self.user_email)
             return SkillOutput.ok(
                 data={"deleted": deleted},
-                user=input.user_email,
+                user=self.user_email,
             )
         except Exception as exc:
             logger.error(f"[rag_skill] delete_collection error: {exc}")

@@ -138,13 +138,13 @@ async def ingest_document(
         from agents.researcher.rag_retriever import (
             _get_qdrant_client,
             get_user_vectorstore,
-            sanitize_email,
+            rag_collection,
         )
 
         # P7-003: Document versioning — eliminar chunks previos del mismo filename
         try:
             qdrant_client = _get_qdrant_client()
-            collection_name = sanitize_email(user)
+            collection_name = rag_collection(user)
             if qdrant_client.collection_exists(collection_name):
                 # Scroll + delete por substring en Python (sin FTS index requerido)
                 fname_lower = (file.filename or "").lower()

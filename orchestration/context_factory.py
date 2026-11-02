@@ -70,7 +70,7 @@ class ContextFactory:
         if not request_id:
             request_id = str(uuid.uuid4())
 
-        skills = cls._load_skills(skill_names)
+        skills = cls._load_skills(skill_names, user_id)
         llm    = cls._get_llm()
 
         ctx = AgentContext(
@@ -217,7 +217,9 @@ class ContextFactory:
     # ── Helpers privados ──────────────────────────────────────────────────────
 
     @classmethod
-    def _load_skills(cls, skill_names: list[str] | None) -> dict[str, Any]:
+    def _load_skills(
+        cls, skill_names: list[str] | None, user_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         Instancia y retorna las skills solicitadas desde SkillRegistry.
         Skills no encontradas se omiten con un warning.
@@ -238,6 +240,8 @@ class ContextFactory:
         for name in names:
             skill = SkillRegistry.get_or_none(name)
             if skill is not None:
+                if name == "rag":
+                    skill.user_email = user_id
                 skills[name] = skill
             else:
                 logger.debug(f"[context_factory] Skill '{name}' no registrada. Omitida.")

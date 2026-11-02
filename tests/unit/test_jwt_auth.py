@@ -55,7 +55,7 @@ def test_hs256_token_is_accepted():
 
 
 def test_legacy_email_claim_still_works():
-    token = jwt.encode({"email": "user@example.com"}, _secret(), algorithm="HS256")
+    token = jwt.encode({"email": "user@example.com", "exp": 4102444800}, _secret(), algorithm="HS256")
     assert _user(token) == "user@example.com"
 
 
@@ -86,3 +86,22 @@ def test_python_jose_is_not_imported_anywhere():
         and ("from jose" in p.read_text(errors="ignore") or "import jose" in p.read_text(errors="ignore"))
     ]
     assert offenders == []
+
+
+def test_token_de_login_caduca_en_7_dias():
+    from interfaces.api.routers.auth import _create_jwt
+    payload = jwt.decode(_create_jwt("user@example.com"), _secret(), algorithms=["HS256"])
+    import time
+    assert 6.9 * 86400 < payload["exp"] - time.time() <= 7 * 86400
+
+
+def test_token_de_usuario_sin_caducidad_se_rechaza():
+    token = jwt.encode({"sub": "user@example.com"}, _secret(), algorithm="HS256")
+    with pytest.raises(HTTPException):
+        _user(token)
+
+
+def test_token_vencido_se_rechaza():
+    token = jwt.encode({"sub": "user@example.com", "exp": 1}, _secret(), algorithm="HS256")
+    with pytest.raises(HTTPException):
+        _user(token)
