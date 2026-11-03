@@ -2,41 +2,75 @@
 
 Plataforma multi-agente modular basada en LangGraph, FastAPI y Ollama para automatización inteligente. Corre como `amael-agentic-backend` en Kubernetes (MicroK8s, single-node, GPU RTX 5070), acompañada de los servicios standalone `raphael-service` (SRE) y `camael-service` (GitOps); el trader vive en su propio repo (`trader-service`).
 
-**Versión actual:** `1.15.4` — desplegada por el pipeline de CI (push a `main` = deploy).
+**Versión actual:** `1.20.1` (raphael-service `1.1.51`) — el backend se despliega por el pipeline de CI (push a `main` = deploy).
 
 ---
 
 ## Arquitectura
 
-```
-POST /api/chat  (frontend Next.js · WhatsApp bridge — ambos canales convergen aquí)
-  → JWT auth → rate limit (Redis) → validate_prompt()
-  → perfil del usuario (hechos destilados, inyectados SIEMPRE)
-  → memoria episódica (recuperada por similitud)
-  → AgentRouter.route()  (keywords → LLM fallback)
-  → AgentDispatcher.dispatch()
-       ├─ Ruta rápida (charla) ────────── qwen3:14b sin thinking, ~0.6 s
-       ├─ Directo por intent ──────────── Raphael · Haniel · Sandalphon · Raziel ·
-       │                                  Gabriel · Uriel · Jophiel · Camael* ·
-       │                                  Phanuel (QA) · Cassiel · Zaphkiel
-       └─ Pipeline LangGraph (general/k8s/monitoring):
-            Sariel → Grouper → Batch Executor (loop) → Remiel
-                ↑                                         │
-                └────────── REPLAN (max 1 retry) ─────────┘
+El diagrama une el flujo de una petición con la capa de conocimiento: el vault de
+Obsidian es la única fuente, Qdrant es su índice y cada consumidor lee solo lo que
+su rol permite.
 
-  * Camael corre remoto en camael-service:8003 (CAMAEL_MODE=remote)
+```mermaid
+flowchart TB
+  subgraph canales["Canales"]
+    direction LR
+    FE["Frontend Next.js"]
+    WA["WhatsApp bridge"]
+  end
+  canales --> API["POST /api/chat<br/>JWT con kid · rate limit · validate_prompt"]
+  API --> CTX["Perfil del usuario + memoria episódica"]
+  CTX --> ROUTER["AgentRouter → AgentDispatcher"]
+  ROUTER --> FAST["Ruta rápida (charla)"]
+  ROUTER --> DIRECT["Agentes directos por intent<br/>Haniel · Sandalphon · Raziel · Gabriel · Uriel<br/>Jophiel · Phanuel · Cassiel · Zaphkiel"]
+  ROUTER --> pipeline
+  subgraph pipeline["Pipeline LangGraph"]
+    direction LR
+    SARIEL["Sariel<br/>plan"] --> GROUPER["Grouper"] --> EXEC["Batch Executor"] --> REMIEL["Remiel<br/>calidad"]
+    REMIEL -.->|"REPLAN"| SARIEL
+  end
+  DIRECT -->|"remotos"| REMOTOS["raphael-service :8002<br/>camael-service :8003"]
+
+  subgraph qdrant["Qdrant con https, llave y JWT por cliente"]
+    subgraph kb["Conocimiento del vault"]
+      direction LR
+      KBP[("kb_vault_privado<br/>admin")]
+      KBS[("kb_vault_sre<br/>operadores")]
+      KBPU[("kb_publico<br/>todos")]
+    end
+    subgraph porusuario["Por usuario"]
+      direction LR
+      RAG[("rag_usuario<br/>sus documentos")]
+      MEM[("memory_usuario<br/>su memoria")]
+    end
+    SRE[("sre_runbooks<br/>agent_skills")]
+  end
+
+  EXEC -->|"KNOWLEDGE según el rol"| kb
+  EXEC -->|"RAG_RETRIEVAL"| RAG
+  CTX --> MEM
+  REMOTOS --> SRE
+
+  VAULT["Vault de Obsidian (git)<br/>audiencia: privado · sre · publico"] -->|"cada hora y en cada commit"| INGEST["vault-ingest (host)<br/>exclusiones de secretos · nomic-embed-text"]
+  INGEST --> kb
+  QWEN["Qwen Code: qwen-local<br/>MCP amael-knowledge · Ollama del lab"] -->|"solo lectura"| kb
+  QWEN -->|"guardar_nota_trabajo: commit"| VAULT
 ```
+
+Roles en el paso `KNOWLEDGE`: `user` lee `kb_publico` y lo suyo; `operator` suma
+`kb_vault_sre`; `admin` suma `kb_vault_privado`. El LLM nunca elige la colección.
 
 La topología ya no se documenta a mano: se **deriva del código** y se sirve en
 `GET /api/graph` — visible como grafo interactivo (estilo Obsidian) en
 `/admin/graph`, con el tráfico real medido (`amael_agent_edge_total`) y la capa
 de conocimiento (runbooks por tipo + colecciones Qdrant).
 
-### Tiers de LLM (A2, ago-2026)
+### Tiers de LLM (medido el 3-nov-2026)
 
 | Servidor | Modelos | Rol |
 |---|---|---|
-| `ollama-service` (GPU) | `qwen3:14b` (ctx **8192**, KV `q8_0`, 100 % VRAM, anclado — atiende también la ruta rápida sin thinking) · `qwen2.5vl:3b` (visión) | interactivo — **solo modelos causales** |
+| `ollama-service` (GPU) | `gemma4-uncensored-amael` (causal y visión, ruta normal y rápida; contexto 64K cargado, KV `q8_0`, 100 % GPU) · `qwen3.5:9b` (lo usa `qwen-local`) | interactivo |
 | `ollama-cpu-service` | `qwen3:30b-a3b` (tier profundo) · `nomic-embed-text` (**embeddings de toda la plataforma**, `OLLAMA_EMBED_URL`) | trabajo nocturno + embeddings |
 
 Regla de oro: **ningún cliente manda `num_ctx`** — el contexto efectivo es del
@@ -84,6 +118,61 @@ la activación existe únicamente en el comando humano.
 
 ---
 
+## Conocimiento gobernado (RAG)
+
+El vault de Obsidian se indexa en Qdrant por audiencia y cada consumidor lee solo
+su capa. En producción desde el 1-nov-2026.
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| Audiencia | frontmatter de cada nota | `privado` (por defecto), `sre` o `publico`. `personal/` y `trader/` siempre privadas; `inbox/` no se indexa |
+| Ingesta | `knowledge/vault_ingest.py` en el host | Cron cada hora y hook post-commit. Bloquea el fragmento entero si trae un secreto (`knowledge/exclusiones.yaml`); sube solo lo que cambió y borra huérfanos |
+| Paso `KNOWLEDGE` | planner + executor del backend | Colecciones según el rol; cada consulta queda en `knowledge_audit` |
+| Documentos de usuario | `rag_<usuario>` | Lo que sube un usuario solo lo lee ese usuario; nunca llega a `kb_publico` |
+| Qwen Code | `qwen-local` + `knowledge/mcp_server.py` | Perfil sin proveedores externos; token de solo lectura a `kb_*`; guarda notas en `qwen/<proyecto>/` del vault con commit local |
+
+### Qwen Code (`qwen-local`)
+
+`~/.local/bin/qwen-local` lanza Qwen Code con `QWEN_HOME=~/.qwen-local`: solo
+existe el Ollama del lab, así que una nota privada no puede salir a un tercero. El
+MCP `amael-knowledge` expone dos herramientas:
+
+- `buscar_conocimiento(pregunta, ambito)`: embebe con `nomic-embed-text`, consulta
+  Qdrant por https y reordena por similitud más coincidencia de palabras (umbral
+  0.73). Devuelve `ruta:línea` y el fragmento; Qwen abre la nota con `read_file`.
+- `guardar_nota_trabajo(texto, proyecto, tema)`: escribe la nota con
+  `audiencia: privado`, hace `git pull` y commit local (nunca push). El hook la
+  indexa y la siguiente sesión ya la encuentra.
+
+---
+
+## Seguridad: tokens de servicio y TLS
+
+Los tokens de servicio vencen a los 90 días y se renuevan solos; Qdrant solo acepta
+https. En producción desde el 2-nov-2026.
+
+```mermaid
+flowchart LR
+  CRON["CronJob rotacion-tokens<br/>diario 04:30 MX"] -->|"llave nueva cada 180 días"| KEYS[("Secret amael-jwt-keys<br/>llaves con kid")]
+  KEYS -->|"relee cada 15 s"| BE["Backend"]
+  KEYS --> RA["Raphael"]
+  CRON -->|"token de 90 días, renueva a 14"| ST[("Secrets amael-svc-token-*")]
+  ST -->|"archivo montado, sin reinicio"| BR["whatsapp-bridge"]
+  ST --> PE["whatsapp-personal"]
+  ST --> MA["morning-audio"]
+  CRON -->|"registra el jti"| PG[("Postgres service_tokens")]
+  CRON -->|"estado"| CM[("ConfigMap rotacion-tokens-estado")]
+  CM --> WD["Watchdog: aviso por WhatsApp<br/>a 7 días de vencer"]
+```
+
+- La llave anterior se acepta 8 días más: las sesiones web no se cortan.
+- Antes de emitir, el rotador espera a que cada pod del backend acepte la llave nueva.
+- Revocar o forzar la rotación es un Job manual (comandos en [`CLAUDE.md`](./CLAUDE.md) § Security).
+- TLS: cert-manager emite la CA `amael-ca` (10 años) y el certificado `qdrant-tls`
+  (1 año, renovación automática). Los clientes confían en la CA con `QDRANT_CA_FILE`.
+
+---
+
 ## SRE Agent — Raphael
 
 Loop **Observe → Detect → Diagnose → Decide → Act → Report** cada 60 s, con
@@ -117,7 +206,7 @@ Detalle completo en [`CLAUDE.md`](./CLAUDE.md).
 | Capa | Tecnología |
 |------|-----------|
 | Orquestación | LangGraph StateGraph + AgentRegistry/SkillRegistry/ToolRegistry |
-| LLM | Ollama — `qwen3:14b` (GPU, ctx 8192 + KV q8_0) · `qwen3:30b-a3b` (CPU, profundo) · `nomic-embed-text` (CPU) |
+| LLM | Ollama — `gemma4-uncensored-amael` (GPU, KV q8_0) · `qwen3:30b-a3b` (CPU, profundo) · `nomic-embed-text` (CPU) |
 | API | FastAPI |
 | Storage | PostgreSQL · Redis · Qdrant · MinIO |
 | Infra | MicroK8s · RTX 5070 · MetalLB · NGINX Ingress · cert-manager · Vault |
