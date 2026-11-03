@@ -205,6 +205,55 @@ def get_historical_success_rate(
         return None
 
 
+
+_ACCIONES_SIN_TASA = ("NO_ACTION", "NOTIFY_HUMAN")
+
+
+def get_learning_stats(days: int = 7) -> list[dict]:
+    """
+    Tasa de éxito por (issue_type, acción) en los últimos N días, para el panel.
+
+    Éxito = resultado con ✅ que la verificación no marcó como `unresolved` ni
+    revirtió con `rollback`. NO_ACTION y NOTIFY_HUMAN no son remediaciones.
+    """
+    days = max(1, min(int(days), 90))
+    try:
+        from storage.postgres import get_connection
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT issue_type,
+                           action_taken,
+                           count(*) AS muestras,
+                           count(*) FILTER (
+                               WHERE action_result LIKE '%%✅%%'
+                                 AND action_result NOT LIKE '%%verify:unresolved%%'
+                                 AND action_result NOT LIKE '%%verify:rollback%%'
+                           ) AS exitos
+                    FROM sre_incidents
+                    WHERE created_at >= now() - make_interval(days => %s)
+                      AND action_taken IS NOT NULL
+                      AND action_taken <> ALL(%s)
+                    GROUP BY issue_type, action_taken
+                    ORDER BY muestras DESC;
+                    """,
+                    (days, list(_ACCIONES_SIN_TASA)),
+                )
+                filas = cur.fetchall()
+    except Exception as exc:
+        logger.warning(f"[reporter] get_learning_stats error: {exc}")
+        raise
+    return [
+        {
+            "issue_type": issue,
+            "action": accion,
+            "success_rate": round(exitos / muestras, 3) if muestras else 0.0,
+            "sample_count": muestras,
+        }
+        for issue, accion, muestras, exitos in filas
+    ]
+
 # ── Postmortems ───────────────────────────────────────────────────────────────
 
 def _get_incident_by_key(incident_key: str) -> dict | None:

@@ -191,3 +191,30 @@ def get_slo_status() -> list[dict[str, Any]]:
             "meets_latency": meets_latency,
         })
     return results
+
+
+_ESTADO_PANEL = {"ok": "HEALTHY", "at_risk": "WARNING", "breached": "CRITICAL", "no_data": "NO_DATA"}
+
+
+def get_slo_burn_rates() -> list[dict[str, Any]]:
+    """
+    SLOs en el formato del panel /admin/agents (GET /api/sre/slo/status).
+
+    burn rate = tasa de error real / tasa de error permitida (1 = gasta el
+    presupuesto justo al ritmo de la ventana). Sin datos, la llave se omite:
+    el panel distingue `undefined`, no `null`.
+    """
+    filas = []
+    for slo in get_slo_status():
+        objetivo = slo["target"]["availability"]
+        real = slo["actual"]["availability"]
+        fila = {
+            "handler": slo["handler"],
+            "target_availability": objetivo,
+            "window_hours": slo["target"]["window_hours"],
+            "status": _ESTADO_PANEL.get(slo["status"], slo["status"].upper()),
+        }
+        if real is not None and objetivo < 1:
+            fila["current_burn_rate"] = round((1 - real) / (1 - objetivo), 4)
+        filas.append(fila)
+    return filas

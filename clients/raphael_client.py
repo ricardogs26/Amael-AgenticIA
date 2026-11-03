@@ -95,17 +95,17 @@ def get_recent_postmortems(limit: int = 3) -> list[dict[str, Any]]:
 def get_historical_success_rate(days: int = 7) -> list[dict[str, Any]]:
     """Tasa de éxito por (issue_type, action) en ventana N días."""
     if _is_inprocess():
-        from agents.sre import get_historical_success_rate as _local
+        from agents.sre.reporter import get_learning_stats as _local
         return _local(days=days)
-    # El endpoint devuelve {window_days, rows[]}; normalizamos a rows.
-    data = _get("/api/sre/learning/stats", window_days=days)
+    # Tolerar el formato viejo {window_days, rows[]} además de la lista.
+    data = _get("/api/sre/learning/stats", days=days)
     return data.get("rows", []) if isinstance(data, dict) else data
 
 
 def get_slo_burn_rates() -> list[dict[str, Any]]:
     """SLO targets con burn rates actuales desde Prometheus."""
     if _is_inprocess():
-        from agents.sre.scheduler import get_slo_burn_rates as _local
+        from observability.slo import get_slo_burn_rates as _local
         return _local()
     return _get("/api/sre/slo/status")
 
