@@ -520,7 +520,7 @@ def check_runner_version(core_v1, now=None) -> str | None:
     return (
         f"`github/runner-version` en {v(actual)}; GitHub publicó {v(ultima)} hace "
         f"{dias:.0f} días y {estado}. Subir la base en Amael-IA/github-runner/Dockerfile "
-        "y el tag en k8s/agents/10-github-runner.yaml."
+        "y el tag en Amael-IA/k8s/38.-github-runner.yaml."
     )
 
 

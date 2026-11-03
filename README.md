@@ -235,6 +235,23 @@ nunca `kubectl set image` sin actualizar el manifest primero.
 
 ---
 
+## Qué está en cada repo
+
+Amael vive en dos repos. **Amael-AgenticIA es el cerebro**: el backend, sus agentes y la
+infraestructura que comparten. **Amael-IA son las herramientas que usa el cerebro**: los
+canales por donde habla y los servicios que llama. Cada servicio tiene código y manifest en
+el mismo repo (decisión D28a, 3-nov-2026).
+
+| Repo | Qué tiene |
+|---|---|
+| **Amael-AgenticIA** (este) | Backend (`amael-agentic-backend`), Raphael, Camael, watchdog, rotación de tokens, conocimiento (`knowledge/`, `qwen-local`), day-planner, conversation-pruning; infraestructura compartida (`k8s/infrastructure/`: Postgres, Redis, Qdrant, MinIO, Ollama), ingress y RBAC |
+| **[Amael-IA](https://github.com/ricardogs26/amael-ia)** | Frontend Next.js, whatsapp-bridge, whatsapp-personal, productivity, llm-adapter, piper, cosyvoice, morning-audio, english-coach, telegram-bot, imagen y manifest del github-runner |
+
+Por qué son dos: en mar-2026 el backend se reescribió desde cero en este repo y Amael-IA se
+quedó con los servicios de alrededor (commit `11362ba` de Amael-IA, 16-mar-2026).
+
+---
+
 ## Documentación
 
 - [`CLAUDE.md`](./CLAUDE.md) — arquitectura detallada, gotchas, workflows
