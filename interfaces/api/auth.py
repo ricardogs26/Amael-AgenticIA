@@ -181,6 +181,33 @@ def require_operator(user_id: Annotated[str, Depends(get_current_user)]) -> str:
     return user_id
 
 
+def _es_secreto_interno(token: str | None) -> bool:
+    import hmac
+
+    from config.settings import settings
+
+    return bool(
+        token
+        and settings.internal_api_secret
+        and hmac.compare_digest(token.encode(), settings.internal_api_secret.encode())
+    )
+
+
+def require_operator_o_interno(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> str:
+    """
+    Lecturas del SRE: JWT de operator/admin o el secreto interno.
+
+    El backend (AGENTS_MODE=remote) ya validó al operador y llama a Raphael con
+    INTERNAL_API_SECRET; sin esto Raphael respondía 401 y el backend 500.
+    El secreto ya abre /api/sre/command, que hace más que leer.
+    """
+    if credentials is not None and _es_secreto_interno(credentials.credentials):
+        return "interno"
+    return require_operator(get_current_user(credentials))
+
+
 def require_internal_secret(
     authorization: Annotated[str | None, Header()] = None,
 ) -> None:
