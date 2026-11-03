@@ -64,7 +64,7 @@ spec:
 
       containers:
       - name: amael-agentic-backend
-        image: registry.richardx.dev/amael-agentic-backend:1.19.4
+        image: registry.richardx.dev/amael-agentic-backend:1.20.0
         imagePullPolicy: Always
         ports:
         - name: http
@@ -261,11 +261,19 @@ spec:
         volumeMounts:
         - name: whisper-cache
           mountPath: /app/whisper-cache
+        # Llavero JWT con kid (security/llaves_jwt.py). Lo cambia el CronJob
+        # rotacion-tokens; el backend relee el archivo sin reiniciar.
+        - name: jwt-keys
+          mountPath: /etc/amael/jwt
+          readOnly: true
 
       volumes:
       - name: whisper-cache
         persistentVolumeClaim:
           claimName: whisper-cache-pvc
+      - name: jwt-keys
+        secret:
+          secretName: amael-jwt-keys
 
 ---
 apiVersion: v1

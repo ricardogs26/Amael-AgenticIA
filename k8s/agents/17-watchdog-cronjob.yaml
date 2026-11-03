@@ -81,7 +81,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: watchdog
-              image: registry.richardx.dev/raphael-service:1.1.45
+              image: registry.richardx.dev/raphael-service:1.1.48
               imagePullPolicy: IfNotPresent
               command: ["python", "-m", "agents.sre.watchdog"]
               env:
@@ -169,6 +169,10 @@ spec:
                       name: watchdog-heartbeat
                       key: token
                       optional: true
+                # Rotación de tokens de servicio (nov-2026): avisa si el rotador
+                # no termina bien en 50 h o un token vence en 7 días. Vaciar para desactivar.
+                - name: WATCHDOG_TOKENS_CM
+                  value: "amael-ia/rotacion-tokens-estado"
                 - name: REDIS_HOST
                   value: "redis-service"
                 - name: REDIS_PORT

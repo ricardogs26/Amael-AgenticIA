@@ -131,6 +131,11 @@ _WAN_PRIMARY_ASN = os.environ.get("WATCHDOG_WAN_PRIMARY_ASN", "AS8151")
 _WAN_BACKUP_MIN  = int(os.environ.get("WATCHDOG_WAN_BACKUP_MIN", "15"))
 _WAN_INFO_URL    = os.environ.get("WATCHDOG_WAN_INFO_URL", "https://ipinfo.io/json")
 _WAN_SINCE_KEY   = "watchdog:wan:backup_since"
+# Rotación de tokens de servicio (nov-2026): el rotador deja su estado en este
+# ConfigMap. Vaciar para desactivar.
+_TOKENS_CM      = os.environ.get("WATCHDOG_TOKENS_CM", "")
+_TOKENS_AVISO_D = float(os.environ.get("WATCHDOG_TOKENS_EXPIRY_DAYS", "7"))
+_TOKENS_OK_MAX_H = float(os.environ.get("WATCHDOG_TOKENS_OK_MAX_HOURS", "50"))
 _BRIDGE_URL   = os.environ.get("WHATSAPP_BRIDGE_URL", "http://whatsapp-bridge-service:3000")
 _SMTP_HOST    = os.environ.get("WATCHDOG_SMTP_HOST", "smtp.resend.com")
 _SMTP_PORT    = int(os.environ.get("WATCHDOG_SMTP_PORT", "587"))
@@ -334,6 +339,52 @@ def check_github_token() -> str | None:
         f"`github/pat` expira en {dias:.1f} días ({caduca}). "
         "Al vencer se caen a la vez el github-runner, los PRs de Camael y el "
         "deploy del CI."
+    )
+
+
+def check_tokens_servicio(core_v1, now=None) -> str | None:
+    """
+    ¿La rotación automática de tokens de servicio sigue al día?
+
+    Avisa si el rotador no termina bien hace más de `_TOKENS_OK_MAX_H` horas (corre a
+    diario) o si a algún token le quedan ≤ `_TOKENS_AVISO_D` días: con la rotación
+    sana eso nunca pasa, porque renueva a 14 días.
+    """
+    if not _TOKENS_CM:
+        return None
+    import json
+    from datetime import datetime
+
+    ns, _, nombre = _TOKENS_CM.partition("/")
+    clave = f"`{ns}/{nombre}` (rotación de tokens)"
+    try:
+        cm = core_v1.read_namespaced_config_map(nombre, ns)
+        estado = json.loads((cm.data or {}).get("estado.json") or "{}")
+    except Exception as exc:
+        return f"{clave} no se pudo consultar: {exc}"
+
+    now = now or datetime.now(UTC)
+    problemas = []
+    ultimo = estado.get("ultimo_ok")
+    if not ultimo:
+        problemas.append("el rotador nunca ha terminado bien")
+    else:
+        horas = (now - datetime.fromisoformat(ultimo)).total_seconds() / 3600
+        if horas > _TOKENS_OK_MAX_H:
+            problemas.append(f"el rotador no termina bien hace {horas:.0f} h")
+    for svc, vence in sorted((estado.get("tokens") or {}).items()):
+        if not vence:
+            problemas.append(f"{svc} sin token")
+            continue
+        dias = (datetime.fromisoformat(vence) - now).total_seconds() / 86400
+        if dias <= _TOKENS_AVISO_D:
+            problemas.append(f"token de {svc} vence en {dias:.1f} días")
+    if not problemas:
+        return None
+    return (
+        f"{clave}: " + "; ".join(problemas) + ". Al vencer, ese servicio deja de hablar "
+        "con Amael. Revisar los logs del último Job del CronJob "
+        "rotacion-tokens."
     )
 
 
@@ -681,6 +732,7 @@ def main() -> int:
         config.load_kube_config()
     apps_v1 = client.AppsV1Api()
     batch_v1 = client.BatchV1Api()
+    core_v1 = client.CoreV1Api()
 
     targets = _parse_targets(_TARGETS)
     logger.info(f"Vigilando {len(targets)} deployments críticos.")
@@ -707,6 +759,13 @@ def main() -> int:
         problems.append(gh_problem)
     elif _GH_TOKEN:
         logger.info("OK — github pat (válido)")
+
+    tokens_problem = check_tokens_servicio(core_v1)
+    if tokens_problem:
+        logger.error(tokens_problem)
+        problems.append(tokens_problem)
+    elif _TOKENS_CM:
+        logger.info("OK — tokens de servicio (rotación al día)")
 
     runner_problem = check_runner_queue()
     if runner_problem:

@@ -51,35 +51,18 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    from security.llaves_jwt import TokenRechazado, decodificar
+
     try:
-        import jwt
-
-        from config.settings import settings
-
-        payload = jwt.decode(
-            credentials.credentials,
-            settings.jwt_secret_key,
-            algorithms=[settings.jwt_algorithm],
-        )
-        user_id: str | None = payload.get("sub") or payload.get("email")
-        if not user_id:
-            _emit_security_event("jwt_invalid")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token inválido: falta 'sub'",
-            )
-        # Solo el token de servicio puede no caducar, hasta rotar JWT_SECRET_KEY.
-        if "exp" not in payload and user_id != BOT_USER:
-            _emit_security_event("jwt_invalid")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Sesión sin caducidad: vuelve a iniciar sesión",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return user_id
-
-    except HTTPException:
-        raise
+        payload = decodificar(credentials.credentials)
+    except TokenRechazado as exc:
+        _emit_security_event("jwt_invalid")
+        logger.warning(f"[auth] JWT rechazado: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
     except Exception as exc:
         _emit_security_event("jwt_invalid")
         logger.warning(f"[auth] JWT inválido: {exc}")
@@ -87,7 +70,8 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token inválido o expirado",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from exc
+    return payload.get("sub") or payload.get("email")
 
 
 BOT_USER = "bot-amael@richardx.dev"

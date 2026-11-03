@@ -728,3 +728,39 @@ def test_latido_fallido_no_rompe_la_corrida(monkeypatch):
     monkeypatch.setattr(watchdog, "_HEARTBEAT_TOKEN", "abc")
     monkeypatch.setattr(requests, "post", MagicMock(side_effect=OSError("sin red")))
     watchdog.send_heartbeat()
+
+
+# ── Rotación de tokens de servicio ───────────────────────────────────────────
+
+def _cm_tokens(estado):
+    import json
+    core = MagicMock()
+    core.read_namespaced_config_map.return_value = SimpleNamespace(
+        data={"estado.json": json.dumps(estado)})
+    return core
+
+
+def test_tokens_al_dia_no_reporta(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+    monkeypatch.setattr(watchdog, "_TOKENS_CM", "amael-ia/rotacion-tokens-estado")
+    now = datetime(2026, 11, 2, tzinfo=UTC)
+    core = _cm_tokens({"ultimo_ok": (now - timedelta(hours=3)).isoformat(),
+                       "tokens": {"bridge": (now + timedelta(days=80)).isoformat()}})
+    assert watchdog.check_tokens_servicio(core, now) is None
+
+
+def test_tokens_por_vencer_o_rotador_parado(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+    monkeypatch.setattr(watchdog, "_TOKENS_CM", "amael-ia/rotacion-tokens-estado")
+    now = datetime(2026, 11, 2, tzinfo=UTC)
+    core = _cm_tokens({"ultimo_ok": (now - timedelta(days=3)).isoformat(),
+                       "tokens": {"bridge": (now + timedelta(days=5)).isoformat(),
+                                  "personal": None}})
+    aviso = watchdog.check_tokens_servicio(core, now)
+    assert aviso.startswith("`amael-ia/rotacion-tokens-estado`")
+    assert "hace 72 h" in aviso and "bridge vence en 5.0" in aviso and "personal sin token" in aviso
+
+
+def test_tokens_desactivado_sin_cm(monkeypatch):
+    monkeypatch.setattr(watchdog, "_TOKENS_CM", "")
+    assert watchdog.check_tokens_servicio(MagicMock()) is None

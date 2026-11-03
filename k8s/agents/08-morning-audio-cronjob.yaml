@@ -21,6 +21,10 @@ spec:
             app: morning-audio   # lo deja entrar la NetworkPolicy de raphael (1.0.5)
         spec:
           restartPolicy: OnFailure
+          volumes:
+          - name: svc-token
+            secret:
+              secretName: amael-svc-token-morning-audio
           containers:
           - name: morning-audio
             # Imagen propia: python + ffmpeg + morning_audio.py
@@ -29,8 +33,13 @@ spec:
             #        (validado: ni un número ni un nombre nuevo; si no pasa, frase de código)
             #        -> CosyVoice3 /tts (WAV) -> ffmpeg WAV→OGG/opus
             #        -> bridge /send-audio (nota de voz, ptt)
-            image: registry.richardx.dev/morning-audio:1.2.2
+            image: registry.richardx.dev/morning-audio:1.2.3
             imagePullPolicy: IfNotPresent
+            # Token de servicio con caducidad (CronJob rotacion-tokens); BOT_JWT_TOKEN de respaldo.
+            volumeMounts:
+            - name: svc-token
+              mountPath: /var/run/amael/token
+              readOnly: true
             env:
             - name: BOT_JWT_TOKEN
               valueFrom:

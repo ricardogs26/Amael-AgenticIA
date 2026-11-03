@@ -134,13 +134,25 @@ RAG (`agents/researcher/rag_retriever.py`): filtro por filename con `client.scro
 `security/validator.py` (4000 chars, inyección), `security/sanitizer.py` (redacta `hvs.*`,
 JWTs, `password=`). Endpoints internos: `require_internal_secret()`. El bot
 `bot-amael@richardx.dev` puede mandar `user_id` en el body para actuar como el usuario real.
-JWT con **PyJWT** (python-jose se retiró en 1.18.5). Regenerar el token del bot:
+JWT con **PyJWT** (python-jose se retiró en 1.18.5).
+
+**Llaves y tokens de servicio (1.20.0, nov-2026)**: el backend firma y valida con el llavero
+del Secret `amael-jwt-keys` (montado en `/etc/amael/jwt/llaves.json`, con `kid`; se relee sin
+reiniciar). Cada servicio tiene su token de 90 días (`svc`, `jti` en `service_tokens`) en
+`amael-svc-token-<servicio>`, montado como archivo: bridge, personal, morning-audio. El CronJob
+`rotacion-tokens` (`security/rotacion_tokens.py`, 04:30 MX) renueva a 14 días de vencer y
+cambia la llave cada 180 días (la anterior vale 8 días: no cierra sesiones). El watchdog
+avisa si se atora. **Nunca firmar tokens a mano con `JWT_SECRET_KEY`**: ya no valen.
 
 ```bash
-kubectl exec -it deploy/amael-agentic-deployment -n amael-ia -- python3 -c "
-import os, jwt; print(jwt.encode({'sub':'bot-amael@richardx.dev'}, os.environ['JWT_SECRET_KEY'], algorithm='HS256'))"
-# luego patch de Secret amael-secrets, key jwt-token (base64)
+kubectl create job rotacion-manual --from=cronjob/rotacion-tokens -n amael-ia
+# revocar uno (token nuevo y el viejo muere ya):
+kubectl create job rot-revocar --from=cronjob/rotacion-tokens -n amael-ia --dry-run=client -o json \
+  | jq '.spec.template.spec.containers[0].args=["--revocar","bridge"]' | kubectl apply -f -
 ```
+
+Un servicio nuevo: agregarlo a `SERVICIOS` del rotador y al Role del CronJob, crear su
+Secret vacío y montarlo.
 
 ## Key Env Vars
 

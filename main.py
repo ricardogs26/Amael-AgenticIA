@@ -503,6 +503,23 @@ def _ensure_schema() -> None:
                 ON knowledge_audit (user_id, created_at DESC)
             """)
 
+            # ── Tokens de servicio (rotación automática) ────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS service_tokens (
+                    jti            TEXT PRIMARY KEY,
+                    servicio       TEXT NOT NULL,
+                    kid            TEXT,
+                    emitido        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    vence          TIMESTAMPTZ NOT NULL,
+                    revocar_desde  TIMESTAMPTZ,
+                    motivo         TEXT
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_service_tokens_servicio
+                ON service_tokens (servicio, emitido DESC)
+            """)
+
             # ── Documentos indexados por usuario (RAG) ─────────────────────
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS user_documents (

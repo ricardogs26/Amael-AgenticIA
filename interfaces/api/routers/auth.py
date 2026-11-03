@@ -16,7 +16,6 @@ import logging
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
-import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 
@@ -70,14 +69,18 @@ SESION_DIAS = 7
 
 
 def _create_jwt(email: str) -> str:
-    return jwt.encode(
-        {"sub": email, "exp": datetime.now(UTC) + timedelta(days=SESION_DIAS)},
-        settings.jwt_secret_key,
-        algorithm=settings.jwt_algorithm,
-    )
+    from security.llaves_jwt import firmar
+    return firmar({"sub": email, "exp": datetime.now(UTC) + timedelta(days=SESION_DIAS)})
 
 
 # ── Endpoints principales ──────────────────────────────────────────────────────
+
+@router.get("/llaves")
+async def llaves():
+    """`kid` que acepta este pod (sin secretos). Lo usa el rotador antes de repartir tokens."""
+    from security.llaves_jwt import kids_aceptados
+    return kids_aceptados()
+
 
 @router.get("/login")
 async def login(request: Request):
@@ -147,9 +150,8 @@ async def calendar_auth(request: Request, token: str | None = None):
     if not token:
         raise HTTPException(status_code=401, detail="Token requerido")
     try:
-        payload = jwt.decode(
-            token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
-        )
+        from security.llaves_jwt import decodificar
+        payload = decodificar(token)
         email = payload.get("sub") or payload.get("email")
         if not email or not _is_user_active(email):
             raise HTTPException(status_code=403, detail="Usuario no autorizado")

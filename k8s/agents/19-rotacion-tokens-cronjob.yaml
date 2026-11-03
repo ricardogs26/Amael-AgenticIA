@@ -1,0 +1,133 @@
+# rotacion-tokens — rotación automática de la llave JWT y de los tokens de servicio
+#
+# Origen: A34 del 2-nov-2026. Antes había un solo token de servicio compartido, sin
+# caducidad, y una sola llave de firma: cambiarla cerraba todas las sesiones.
+#
+# Cada día: llave nueva si la activa tiene 180 días (la anterior vale 8 días más),
+# y token nuevo para cada servicio a 14 días de vencer (duran 90). Los servicios
+# leen su token de un archivo montado, sin reiniciar. El watchdog avisa por WhatsApp
+# si esto se atora (ConfigMap rotacion-tokens-estado).
+#
+# Código: security/rotacion_tokens.py. Manual:
+#   kubectl create job rotacion-manual --from=cronjob/rotacion-tokens -n amael-ia
+#
+# Los Secrets amael-jwt-keys y amael-svc-token-* se crean fuera de git (contienen
+# llaves); el rotador solo puede leerlos y parchearlos, nunca crear otros.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rotacion-tokens-sa
+  namespace: amael-ia
+  labels:
+    app: rotacion-tokens
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rotacion-tokens
+  namespace: amael-ia
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - amael-jwt-keys
+      - amael-svc-token-bridge
+      - amael-svc-token-personal
+      - amael-svc-token-morning-audio
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["rotacion-tokens-estado"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    resourceNames: ["amael-agentic-service"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rotacion-tokens
+  namespace: amael-ia
+subjects:
+  - kind: ServiceAccount
+    name: rotacion-tokens-sa
+    namespace: amael-ia
+roleRef:
+  kind: Role
+  name: rotacion-tokens
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Sin `data`: lo escribe el rotador y un `kubectl apply` no lo borra.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rotacion-tokens-estado
+  namespace: amael-ia
+  labels:
+    app: rotacion-tokens
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rotacion-tokens
+  namespace: amael-ia
+  labels:
+    app: rotacion-tokens
+spec:
+  schedule: "30 4 * * *"
+  timeZone: "America/Mexico_City"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      backoffLimit: 2
+      activeDeadlineSeconds: 900
+      template:
+        metadata:
+          labels:
+            app: rotacion-tokens
+        spec:
+          serviceAccountName: rotacion-tokens-sa
+          restartPolicy: Never
+          containers:
+            - name: rotacion
+              image: registry.richardx.dev/amael-agentic-backend:1.20.0
+              imagePullPolicy: IfNotPresent
+              command: ["python", "-m", "security.rotacion_tokens"]
+              env:
+                - name: POSTGRES_HOST
+                  value: "postgres-service"
+                - name: POSTGRES_PORT
+                  value: "5432"
+                - name: POSTGRES_DB
+                  value: "amael_db"
+                - name: POSTGRES_USER
+                  value: "amael_user"
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: amael-secrets
+                      key: POSTGRES_PASSWORD
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
