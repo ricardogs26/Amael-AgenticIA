@@ -37,7 +37,7 @@ Gabriel detecta el modo autónomo automáticamente cuando el prompt contiene fra
 Gabriel, hay un bug visual en el frontend-next. En el componente
 src/components/ChatMessage.tsx, los mensajes muy largos desbordan el contenedor
 lateral y el scroll horizontal aparece en mobile. Aplica el fix con overflow-wrap: break-word
-y max-width: 100% en el elemento del mensaje, y crea un PR en ricardogs26/amael-ia
+y max-width: 100% en el elemento del mensaje, y crea un PR en ricardogs26/amael-services
 con una descripción clara del problema.
 ```
 
@@ -60,7 +60,7 @@ con una descripción clara del problema.
 
 - Rama creada: `fix/gabriel-chat-message-overflow`
 - Commit: hash corto (ej. `a3f1b2c`)
-- PR abierto: `https://github.com/ricardogs26/amael-ia/pull/<N>`
+- PR abierto: `https://github.com/ricardogs26/amael-services/pull/<N>`
 - Notificación WhatsApp: "Gabriel completó tarea autónoma (Xs) • PR #N: <url>"
 
 **Tiempo aproximado:** 30–60 segundos (dependiendo de latencia de Ollama y GitHub API).
@@ -160,7 +160,7 @@ del módulo. Crea un PR descriptivo.
 **Prompt exacto:**
 
 ```
-Gabriel, en el repositorio ricardogs26/amael-ia, crea el archivo
+Gabriel, en el repositorio ricardogs26/amael-services, crea el archivo
 src/components/AgentStatusBadge.tsx. Es un componente React que recibe una prop
 "agent" (string: "gabriel", "raphael", "sandalphon", "haniel") y muestra un badge
 con el nombre del agente y un punto de color (verde si activo, gris si no).
@@ -772,7 +772,7 @@ el runbook más relevante y lo incluye como contexto para que el modelo genere u
 más preciso y accionable.
 
 Los archivos fuente viven en:
-`/home/richardx/k8s-lab/Amael-IA/k8s-agent/runbooks/`
+`/home/richardx/k8s-lab/amael-services/k8s-agent/runbooks/`
 
 ---
 

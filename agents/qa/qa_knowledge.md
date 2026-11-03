@@ -16,8 +16,8 @@ qué comando, y qué correr después de tocar qué. Se carga al arrancar (patró
 |---|---|---|---|---|
 | **amael-agentic-backend** | `ricardogs26/Amael-AgenticIA` | 521 unit + 2 integration + 2 contract | `ci.yml` (workflow_dispatch) | `run tests backend` |
 | **trader-service** | `ricardogs26/trader-service` | 107 unit | `ci.yml` (workflow_dispatch) | `run tests trader` |
-| **frontend-next** | `ricardogs26/amael-ia` | `tsc` + `next build` (sin unit) | — | manual |
-| **whatsapp-bridge** | `ricardogs26/amael-ia` | `node --check` (sintaxis) | — | manual |
+| **frontend-next** | `ricardogs26/amael-services` | `tsc` + `next build` (sin unit) | — | manual |
+| **whatsapp-bridge** | `ricardogs26/amael-services` | `node --check` (sintaxis) | — | manual |
 
 **Raphael y Camael** comparten la suite de `Amael-AgenticIA` (mismo repo): sus
 tests viven en `tests/unit/agents/sre/` y `tests/unit/agents/devops/`.

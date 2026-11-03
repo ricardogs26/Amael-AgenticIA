@@ -447,7 +447,7 @@ def check_runner_queue(now=None) -> str | None:
     return (
         f"`github/runner` no toma jobs: {', '.join(stuck)} en cola. Si el pod está "
         "Running y GitHub lo ve online, revisa sus logs: «Runner update in progress» "
-        "en bucle = imagen vieja → subir la base en Amael-IA/github-runner/Dockerfile."
+        "en bucle = imagen vieja → subir la base en amael-services/github-runner/Dockerfile."
     )
 
 
@@ -519,8 +519,8 @@ def check_runner_version(core_v1, now=None) -> str | None:
               if quedan > 0 else "GitHub ya puede haber dejado de asignarle jobs")
     return (
         f"`github/runner-version` en {v(actual)}; GitHub publicó {v(ultima)} hace "
-        f"{dias:.0f} días y {estado}. Subir la base en Amael-IA/github-runner/Dockerfile "
-        "y el tag en Amael-IA/k8s/38.-github-runner.yaml."
+        f"{dias:.0f} días y {estado}. Subir la base en amael-services/github-runner/Dockerfile "
+        "y el tag en amael-services/k8s/38.-github-runner.yaml."
     )
 
 

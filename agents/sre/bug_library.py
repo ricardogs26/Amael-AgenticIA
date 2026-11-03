@@ -107,10 +107,10 @@ APP_MANIFEST_MAP: dict[str, AppManifest] = {
     "camael-service":            AppManifest("amael-agentic-backend", "k8s/agents/15-camael-deployment.yaml"),
 
     # TTS
-    "cosyvoice-deployment":      AppManifest("amael-ia", "k8s/37.-cosyvoice-deployment.yaml"),
-    "cosyvoice-service":         AppManifest("amael-ia", "k8s/37.-cosyvoice-deployment.yaml"),
-    "piper-deployment":          AppManifest("amael-ia", "k8s/36.-piper-deployment.yaml"),
-    "piper-service":             AppManifest("amael-ia", "k8s/36.-piper-deployment.yaml"),
+    "cosyvoice-deployment":      AppManifest("amael-services", "k8s/37.-cosyvoice-deployment.yaml"),
+    "cosyvoice-service":         AppManifest("amael-services", "k8s/37.-cosyvoice-deployment.yaml"),
+    "piper-deployment":          AppManifest("amael-services", "k8s/36.-piper-deployment.yaml"),
+    "piper-service":             AppManifest("amael-services", "k8s/36.-piper-deployment.yaml"),
 }
 
 # Servicios que Raphael repara pero Camael NO toca: viven en otro repo y namespace

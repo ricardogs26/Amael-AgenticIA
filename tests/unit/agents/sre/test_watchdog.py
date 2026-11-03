@@ -797,7 +797,7 @@ def test_runner_atrasado_avisa_con_dias_restantes(monkeypatch):
     assert problema and "`github/runner-version`" in problema
     assert "2.338.0" in problema and "2.338.2" in problema
     assert "le quedan 22 días" in problema
-    assert "Amael-IA/github-runner/Dockerfile" in problema
+    assert "amael-services/github-runner/Dockerfile" in problema
 
 
 def test_runner_al_dia_no_avisa(monkeypatch):

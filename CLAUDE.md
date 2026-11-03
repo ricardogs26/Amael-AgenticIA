@@ -3,7 +3,7 @@
 Backend de **Amael IA** (`amael-agentic-backend`, namespace `amael-ia`) más los servicios que
 salen de este mismo repo: **Raphael** (SRE autónomo), **Camael** (GitOps), watchdog y rotación
 de tokens. Es el cerebro; las herramientas que usa (canales, TTS, morning-audio, english-coach,
-runner) viven con su manifest en `~/k8s-lab/Amael-IA` (D28a, 3-nov-2026). Pipeline LangGraph Planner → Grouper →
+runner) viven con su manifest en `~/k8s-lab/amael-services` (D28a, 3-nov-2026). Pipeline LangGraph Planner → Grouper →
 Executor → Supervisor con agentes directos (Cassiel, Haniel, Zaphkiel, recepcionista…).
 
 Lo de todo el cluster (nodo, GPU, política de imágenes, versiones vigentes, Vault sellado)
@@ -218,7 +218,7 @@ cierra o revierte. `agents/devops/scm.py` elige proveedor (`SCM_PROVIDER=github`
 exige `sha` al actualizar un archivo y no deja auto-aprobar PRs. El PAT es el del runner
 (`github-runner-secret/ACCESS_TOKEN`).
 
-**Runner** (manifest `Amael-IA/k8s/38.-github-runner.yaml`, Dockerfile en `Amael-IA/github-runner/`):
+**Runner** (manifest `amael-services/k8s/38.-github-runner.yaml`, Dockerfile en `amael-services/github-runner/`):
 `DISABLE_AUTO_UPDATE=true` desde el 3-nov-2026. Con autoactualización, una imagen vieja entra en
 bucle (baja la versión nueva, sale, la imagen la regresa). GitHub deja de asignar jobs 30 días
 después de cada versión nueva: el watchdog (`check_runner_version`) avisa desde el día 7, una vez
@@ -234,7 +234,7 @@ roto en GitHub; `kubectl apply` + borrar pods `demo=true`.
 - **Brief diario** (`07-day-planner-cronjob.yaml`): `POST /api/planner/daily` L–V 7:00
   `America/Mexico_City` (con `timeZone`, el cron va en hora local). Catch-up L–V 7:10–11:59.
 - **conversation-pruning** (`12-conversation-pruning-cronjob.yaml`).
-- morning-audio y english-coach viven, código y manifest, en `Amael-IA`.
+- morning-audio y english-coach viven, código y manifest, en `amael-services`.
 
 ## POC — `https://amael-ia.richardx.dev/poc`
 

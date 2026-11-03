@@ -104,14 +104,14 @@ kubectl get svc -n amael-ia
 - Impacto: usuarios necesitarán esperar 60s para que se resetee el rate limit tras reinicio
 - Para producción crítica: agregar `appendonly yes` y montar un PVC
 
-## Servicios de soporte (en Amael-IA/k8s/)
+## Servicios de soporte (en amael-services/k8s/)
 
 Los siguientes servicios también corren en el namespace `amael-ia` pero sus
-manifiestos viven en el repositorio `Amael-IA`:
+manifiestos viven en el repositorio `amael-services`:
 
 | Servicio | Manifesto origen | Puerto |
 |---------|-----------------|--------|
-| `k8s-agent` | `Amael-IA/k8s/19.-k8s-agent-deployment.yaml` | 8002 |
-| `productivity-service` | `Amael-IA/k8s/20.-productivity-deployment.yaml` | 8001 |
-| `whatsapp-bridge` | `Amael-IA/k8s/08.-whatsapp-deployment.yaml` | 3000 |
-| `frontend-next` | `Amael-IA/k8s/27.-frontend-next-deployment.yaml` | 3000 |
+| `k8s-agent` | `amael-services/k8s/19.-k8s-agent-deployment.yaml` | 8002 |
+| `productivity-service` | `amael-services/k8s/20.-productivity-deployment.yaml` | 8001 |
+| `whatsapp-bridge` | `amael-services/k8s/08.-whatsapp-deployment.yaml` | 3000 |
+| `frontend-next` | `amael-services/k8s/27.-frontend-next-deployment.yaml` | 3000 |
