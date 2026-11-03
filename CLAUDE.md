@@ -217,6 +217,12 @@ cierra o revierte. `agents/devops/scm.py` elige proveedor (`SCM_PROVIDER=github`
 exige `sha` al actualizar un archivo y no deja auto-aprobar PRs. El PAT es el del runner
 (`github-runner-secret/ACCESS_TOKEN`).
 
+**Runner** (`k8s/agents/10-github-runner.yaml`, Dockerfile en `Amael-IA/github-runner/`):
+`DISABLE_AUTO_UPDATE=true` desde el 3-nov-2026. Con autoactualización, una imagen vieja entra en
+bucle (baja la versión nueva, sale, la imagen la regresa). GitHub deja de asignar jobs 30 días
+después de cada versión nueva: el watchdog (`check_runner_version`) avisa desde el día 7, una vez
+al día. Ese aviso = subir `FROM myoung34/github-runner:<versión>` y el tag de la imagen.
+
 Demos (`k8s/agents/06-09-demo-*.yaml`, en GitHub con `replicas: 0`): OOM, CrashLoop,
 HIGH_MEMORY, Degraded. Reset: borrar en Redis `sre:incident:*`, `sre:gitops:*`,
 `sre:restarts:*`, `sre:restart_limit:*`, `bb:pending_pr:*`; volver los manifests a su estado
