@@ -154,6 +154,13 @@ def test_cobertura_ignora_palabras_cortas():
     assert cobertura("vault sellado", {"texto": "el vault"}) == 0.5
 
 
+def test_cobertura_cuenta_siglas_como_palabra_completa():
+    assert cobertura("RAG", {"texto": "el RAG gobernado"}) == 1.0
+    assert cobertura("RAG", {"texto": "cada fragmento"}) == 0.0   # no vale dentro de otra palabra
+    assert cobertura("TLS en Qdrant", {"texto": "qdrant con tls"}) == 1.0
+    assert cobertura("rag", {"texto": "el rag"}) == 0.0           # en minúscula sigue siendo corta
+
+
 class QdrantFalso:
     def __init__(self, indices):
         self.indices = indices

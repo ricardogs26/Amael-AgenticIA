@@ -1,5 +1,6 @@
 """Lecturas del SRE: el backend llama a Raphael con el secreto interno (2-nov-2026)."""
 import os
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -11,17 +12,22 @@ for _k, _v in {"INTERNAL_API_SECRET": "test-secret-" + "x" * 20, "JWT_SECRET_KEY
                "MINIO_ACCESS_KEY": "test-ak", "MINIO_SECRET_KEY": "test-sk"}.items():
     os.environ.setdefault(_k, _v)
 
-from config.settings import settings  # noqa: E402
+import config.settings  # noqa: E402,F401  (carga el módulo)
 from interfaces.api.routers import sre  # noqa: E402
 
 SECRETO = "secreto-de-prueba-interno"
+
+
+def _settings():
+    """El objeto vigente: otros tests recargan config.settings y dejan viejo un import directo."""
+    return sys.modules["config.settings"].settings
 RUTAS = ["/api/sre/incidents", "/api/sre/postmortems", "/api/sre/learning/stats",
          "/api/sre/slo/status", "/api/sre/maintenance"]
 
 
 @pytest.fixture
 def cliente(monkeypatch):
-    monkeypatch.setattr(settings, "internal_api_secret", SECRETO)
+    monkeypatch.setattr(_settings(), "internal_api_secret", SECRETO)
     app = FastAPI()
     app.include_router(sre.router)
     falsos = {
@@ -64,5 +70,5 @@ def test_operator_lee(cliente):
 
 
 def test_secreto_vacio_no_abre(cliente, monkeypatch):
-    monkeypatch.setattr(settings, "internal_api_secret", "")
+    monkeypatch.setattr(_settings(), "internal_api_secret", "")
     assert cliente.get("/api/sre/incidents", headers={"Authorization": "Bearer "}).status_code == 401

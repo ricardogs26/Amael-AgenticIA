@@ -383,12 +383,21 @@ def sincronizar(notas: list[Nota], qdrant: Qdrant, cfg: dict, forzar: bool = Fal
 
 
 def cobertura(pregunta: str, payload: dict) -> float:
-    """Fracción de palabras de la pregunta que aparecen tal cual en el fragmento."""
-    palabras = {p for p in re.findall(r"\w+", pregunta.lower()) if len(p) > 3}
-    if not palabras:
+    """Fracción de palabras de la pregunta que aparecen tal cual en el fragmento.
+
+    Las palabras de 3 letras o menos no cuentan (de, la, que), salvo las siglas en
+    mayúsculas (RAG, SRE, TLS): esas se buscan como palabra completa, porque «rag» como
+    subcadena aparece en «fragmento».
+    """
+    tokens = re.findall(r"\w+", pregunta)
+    palabras = {t.lower() for t in tokens if len(t) > 3}
+    siglas = {t.lower() for t in tokens if 2 <= len(t) <= 3 and t.isupper()}
+    if not palabras and not siglas:
         return 0.0
     texto = " ".join(str(payload.get(k, "")) for k in ("ruta", "titulo", "encabezado", "texto")).lower()
-    return sum(p in texto for p in palabras) / len(palabras)
+    hallados = sum(p in texto for p in palabras)
+    hallados += sum(bool(re.search(rf"\b{re.escape(s)}\b", texto)) for s in siglas)
+    return hallados / (len(palabras) + len(siglas))
 
 
 def buscar(pregunta: str, coleccion: str, qdrant: Qdrant, cfg: dict,

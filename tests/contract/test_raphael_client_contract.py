@@ -116,7 +116,7 @@ class TestRaphaelReadEndpoints:
         result = get_historical_success_rate(days=7)
 
         assert captured[0].url.path == "/api/sre/learning/stats"
-        assert captured[0].url.params["window_days"] == "7"
+        assert captured[0].url.params["days"] == "7"
         assert isinstance(result, list)
         assert result[0]["success_rate"] == 0.9
 

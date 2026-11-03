@@ -79,6 +79,8 @@ def _git(*args: str) -> subprocess.CompletedProcess:
 def buscar_conocimiento(pregunta: str, ambito: str = "todo") -> str:
     """Busca en las notas del vault de Ricardo: decisiones, análisis y runbooks. NO contiene
     código. Devuelve ruta:línea y fragmento; para más detalle lee la nota con read_file.
+    pregunta: la duda en una frase completa con sus términos clave, no una palabra suelta
+    (bien: «cómo está construido el RAG gobernado y qué decidimos»; mal: «RAG»).
     ambito: todo, privado, sre o publico."""
     qdrant = Qdrant(QDRANT_URL, TOKEN.read_text().strip())
     resultados = [
