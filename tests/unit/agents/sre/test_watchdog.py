@@ -764,3 +764,83 @@ def test_tokens_por_vencer_o_rotador_parado(monkeypatch):
 def test_tokens_desactivado_sin_cm(monkeypatch):
     monkeypatch.setattr(watchdog, "_TOKENS_CM", "")
     assert watchdog.check_tokens_servicio(MagicMock()) is None
+
+
+# ── Versión del runner (3-nov-2026): DISABLE_AUTO_UPDATE + aviso antes del corte ──
+
+def _runner(monkeypatch, ultima="v2.338.2", dias=8, log="Current runner version: '2.338.0'\n",
+            fase="Running", status=200, exc=None):
+    from datetime import UTC, datetime, timedelta
+
+    import requests
+
+    publicada = (datetime.now(UTC) - timedelta(days=dias)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _get(url, headers=None, params=None, timeout=None):
+        if exc:
+            raise exc
+        assert url.endswith("/repos/actions/runner/releases/latest")
+        return SimpleNamespace(status_code=status,
+                               json=lambda: {"tag_name": ultima, "published_at": publicada})
+
+    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(watchdog, "_GH_TOKEN", "ghp_falso")
+    core = MagicMock()
+    core.list_namespaced_pod.return_value.items = [
+        SimpleNamespace(status=SimpleNamespace(phase=fase), metadata=SimpleNamespace(name="runner-1"))]
+    core.read_namespaced_pod_log.return_value = log
+    return core
+
+
+def test_runner_atrasado_avisa_con_dias_restantes(monkeypatch):
+    problema = watchdog.check_runner_version(_runner(monkeypatch, dias=8))
+    assert problema and "`github/runner-version`" in problema
+    assert "2.338.0" in problema and "2.338.2" in problema
+    assert "le quedan 22 días" in problema
+    assert "Amael-IA/github-runner/Dockerfile" in problema
+
+
+def test_runner_al_dia_no_avisa(monkeypatch):
+    log = "Current runner version: '2.338.2'\n"
+    assert watchdog.check_runner_version(_runner(monkeypatch, log=log)) is None
+
+
+def test_version_nueva_reciente_no_avisa_aun(monkeypatch):
+    assert watchdog.check_runner_version(_runner(monkeypatch, dias=3)) is None
+
+
+def test_pasado_el_corte_lo_dice(monkeypatch):
+    problema = watchdog.check_runner_version(_runner(monkeypatch, dias=31))
+    assert "ya puede haber dejado de asignarle jobs" in problema
+
+
+def test_toma_la_ultima_version_del_log(monkeypatch):
+    log = "Current runner version: '2.337.0'\nCurrent runner version: '2.338.2'\n"
+    assert watchdog.check_runner_version(_runner(monkeypatch, log=log)) is None
+
+
+def test_sin_pod_running_o_sin_red_calla(monkeypatch):
+    assert watchdog.check_runner_version(_runner(monkeypatch, fase="Pending")) is None
+    assert watchdog.check_runner_version(_runner(monkeypatch, exc=ConnectionError("x"))) is None
+    assert watchdog.check_runner_version(_runner(monkeypatch, status=403)) is None
+
+
+def test_version_del_runner_desactivable_sin_token(monkeypatch):
+    core = _runner(monkeypatch)
+    monkeypatch.setattr(watchdog, "_GH_TOKEN", "")
+    assert watchdog.check_runner_version(core) is None
+
+
+def test_aviso_de_version_se_repite_una_vez_al_dia(monkeypatch):
+    ttl = {}
+
+    class _R(_FakeRedis):
+        def set(self, key, value, ex=None, nx=False):
+            ttl[key] = ex
+            return super().set(key, value, ex=ex, nx=nx)
+
+    monkeypatch.setattr(watchdog, "_redis", lambda: _R())
+    monkeypatch.setattr(watchdog, "send_alert", lambda problems: True)
+    watchdog.notify(["`github/runner-version` en 2.338.0 …", "`amael-ia/postgres` SIN RÉPLICAS"])
+    assert ttl["watchdog:alerted:github/runner-version"] == 24 * 60 * 60
+    assert ttl["watchdog:alerted:amael-ia/postgres"] == watchdog._REALERT_MIN * 60

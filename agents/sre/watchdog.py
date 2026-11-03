@@ -127,6 +127,14 @@ _GH_API       = os.environ.get("WATCHDOG_GITHUB_API", "https://api.github.com")
 _GH_EXPIRY_D  = int(os.environ.get("WATCHDOG_GH_EXPIRY_DAYS", "7"))
 _GH_REPOS     = os.environ.get("WATCHDOG_GH_REPOS", "ricardogs26/Amael-AgenticIA")
 _RUNNER_QUEUE_MIN = int(os.environ.get("WATCHDOG_RUNNER_QUEUE_MIN", "20"))
+_RUNNER_NS       = os.environ.get("WATCHDOG_RUNNER_NS", "amael-ia")
+_RUNNER_SELECTOR = os.environ.get("WATCHDOG_RUNNER_SELECTOR", "app=github-runner")
+# GitHub deja de asignar jobs a un runner con autoactualización apagada 30 días
+# después de cada versión nueva; se avisa a partir de este número de días.
+_RUNNER_LAG_D    = float(os.environ.get("WATCHDOG_RUNNER_LAG_DAYS", "7"))
+_RUNNER_CORTE_D  = 30
+# Avisos que no cambian de una hora a otra: re-aviso por clave, en minutos.
+_REALERT_POR_CLAVE = {"github/runner-version": 24 * 60}
 _WAN_PRIMARY_ASN = os.environ.get("WATCHDOG_WAN_PRIMARY_ASN", "AS8151")
 _WAN_BACKUP_MIN  = int(os.environ.get("WATCHDOG_WAN_BACKUP_MIN", "15"))
 _WAN_INFO_URL    = os.environ.get("WATCHDOG_WAN_INFO_URL", "https://ipinfo.io/json")
@@ -443,6 +451,79 @@ def check_runner_queue(now=None) -> str | None:
     )
 
 
+
+def _version(texto: str) -> tuple[int, ...] | None:
+    import re
+
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", texto or "")
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def _version_runner(core_v1) -> tuple[int, ...] | None:
+    """Versión que reporta el runner al arrancar («Current runner version: 'X'»)."""
+    import re
+
+    pods = core_v1.list_namespaced_pod(_RUNNER_NS, label_selector=_RUNNER_SELECTOR).items
+    for pod in pods:
+        if (pod.status.phase or "") != "Running":
+            continue
+        log = core_v1.read_namespaced_pod_log(pod.metadata.name, _RUNNER_NS, tail_lines=300)
+        hallazgos = re.findall(r"Current runner version: '([\d.]+)'", log or "")
+        if hallazgos:
+            return _version(hallazgos[-1])
+    return None
+
+
+def check_runner_version(core_v1, now=None) -> str | None:
+    """
+    ¿El runner (con DISABLE_AUTO_UPDATE) se está quedando atrás?
+
+    Con la autoactualización encendida, una imagen vieja entra en bucle: baja la
+    versión nueva, sale y reinicia desde la imagen (6-oct y 2-nov-2026, ~17
+    avisos en una noche). Apagada, no hay bucle, pero GitHub deja de asignarle
+    jobs 30 días después de cada versión nueva. Se avisa a los
+    `_RUNNER_LAG_D` días, una vez al día, con los días que quedan.
+    Errores de red o de logs callan: la cola atascada la vigila check_runner_queue.
+    """
+    if not _GH_TOKEN:
+        return None
+    from datetime import datetime
+
+    now = now or datetime.now(UTC)
+    try:
+        import requests
+
+        r = requests.get(
+            f"{_GH_API}/repos/actions/runner/releases/latest",
+            headers={"Authorization": f"Bearer {_GH_TOKEN}",
+                     "Accept": "application/vnd.github+json"},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return None
+        rel = r.json()
+        ultima = _version(rel.get("tag_name", ""))
+        publicada = datetime.strptime(rel["published_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        actual = _version_runner(core_v1)
+    except Exception as exc:
+        logger.warning(f"Versión del runner no evaluable: {exc}")
+        return None
+    if not ultima or not actual or actual >= ultima:
+        return None
+    dias = (now - publicada).total_seconds() / 86400
+    if dias < _RUNNER_LAG_D:
+        return None
+    quedan = _RUNNER_CORTE_D - dias
+    v = lambda t: ".".join(map(str, t))  # noqa: E731
+    estado = (f"le quedan {quedan:.0f} días antes de que GitHub deje de asignarle jobs"
+              if quedan > 0 else "GitHub ya puede haber dejado de asignarle jobs")
+    return (
+        f"`github/runner-version` en {v(actual)}; GitHub publicó {v(ultima)} hace "
+        f"{dias:.0f} días y {estado}. Subir la base en Amael-IA/github-runner/Dockerfile "
+        "y el tag en k8s/agents/10-github-runner.yaml."
+    )
+
+
 def _wan_actual() -> tuple[str, str] | None:
     """(ip, org) de la salida a internet, o None si no se pudo preguntar."""
     try:
@@ -563,7 +644,8 @@ def notify(problems: list[str]) -> None:
     if r is not None:
         try:
             for p in nuevos:
-                r.set(keys[p], "1", ex=_REALERT_MIN * 60)
+                clave = keys[p].removeprefix("watchdog:alerted:")
+                r.set(keys[p], "1", ex=_REALERT_POR_CLAVE.get(clave, _REALERT_MIN) * 60)
         except Exception as exc:
             logger.warning(f"No se pudo marcar el dedup ({exc}).")
 
@@ -773,6 +855,13 @@ def main() -> int:
         problems.append(runner_problem)
     elif _GH_TOKEN:
         logger.info("OK — github runner (sin jobs atorados)")
+
+    version_problem = check_runner_version(core_v1)
+    if version_problem:
+        logger.error(version_problem)
+        problems.append(version_problem)
+    elif _GH_TOKEN:
+        logger.info("OK — github runner (versión al día o dentro del margen)")
 
     for ns, name in _parse_targets(_BACKUPS):
         backup_problem = check_backup(batch_v1, ns, name)

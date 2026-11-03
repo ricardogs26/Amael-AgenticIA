@@ -121,6 +121,12 @@ spec:
             # así que se usa "true" para alinear config con comportamiento real.
             - name: EPHEMERAL
               value: "true"
+            # Sin autoactualización (D27a, 3-nov-2026): con ella, una imagen vieja
+            # entra en bucle (baja la versión nueva, sale y la imagen la regresa).
+            # GitHub deja de asignar jobs 30 días después de cada versión nueva;
+            # el watchdog avisa desde el día 7 (check_runner_version).
+            - name: DISABLE_AUTO_UPDATE
+              value: "true"
 
             # Correr como usuario runner (UID 1001), no root
             - name: RUN_AS_ROOT
