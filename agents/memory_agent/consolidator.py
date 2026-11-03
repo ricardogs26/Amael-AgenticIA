@@ -29,7 +29,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from core.qdrant_auth import qdrant_headers
+from core.qdrant_auth import qdrant_headers, qdrant_urlopen
 
 logger = logging.getLogger("agents.memory.consolidator")
 
@@ -79,7 +79,7 @@ def _qdrant(path: str, body: dict | None = None, timeout: float = 20.0,
         method=method or ("POST" if body is not None else "GET"),
     )
     # nosec B310 — esquema validado arriba: solo http(s) hacia el service interno
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
+    with qdrant_urlopen(req, timeout=timeout) as resp:  # nosec B310
         return json.load(resp).get("result")
 
 

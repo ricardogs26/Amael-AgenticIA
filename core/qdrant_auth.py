@@ -24,3 +24,37 @@ def qdrant_headers(extra: dict | None = None) -> dict:
     if key:
         headers["api-key"] = key
     return headers
+
+
+# ── TLS (desde nov-2026) ──────────────────────────────────────────────────────
+# Qdrant sirve HTTPS con un certificado de la CA interna `amael-ca` (cert-manager).
+# QDRANT_CA_FILE apunta al `ca.crt` montado; sin la variable se usan las CA del
+# sistema (o http en tests y desarrollo).
+
+_ctx_cache: dict[str, object] = {}
+
+
+def qdrant_ssl_context():
+    """SSLContext que confía en la CA interna, o None si no está configurada."""
+    ruta = os.environ.get("QDRANT_CA_FILE", "").strip()
+    if not ruta:
+        return None
+    if ruta not in _ctx_cache:
+        import ssl
+        _ctx_cache[ruta] = ssl.create_default_context(cafile=ruta)
+    return _ctx_cache[ruta]
+
+
+def qdrant_client_kwargs() -> dict:
+    """Argumentos de autenticación y TLS para `QdrantClient(url=..., **qdrant_client_kwargs())`."""
+    kwargs: dict = {"api_key": qdrant_api_key()}
+    ctx = qdrant_ssl_context()
+    if ctx is not None:
+        kwargs["verify"] = ctx
+    return kwargs
+
+
+def qdrant_urlopen(req, timeout: float):
+    """`urllib.request.urlopen` con la CA interna para llamadas crudas a Qdrant."""
+    import urllib.request
+    return urllib.request.urlopen(req, timeout=timeout, context=qdrant_ssl_context())  # nosec B310

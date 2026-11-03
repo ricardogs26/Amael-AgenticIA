@@ -24,7 +24,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from core.qdrant_auth import qdrant_headers
+from core.qdrant_auth import qdrant_headers, qdrant_urlopen
 
 logger = logging.getLogger("observability.health")
 
@@ -202,7 +202,7 @@ async def _check_qdrant() -> ComponentHealth:
     try:
         def _ping():
             req = urllib.request.Request(f"{url}/healthz", headers=qdrant_headers())
-            urllib.request.urlopen(req, timeout=3)
+            qdrant_urlopen(req, timeout=3)
         await asyncio.to_thread(_ping)
         return ComponentHealth(
             name="qdrant",

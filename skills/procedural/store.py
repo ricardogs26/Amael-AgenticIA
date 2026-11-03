@@ -29,7 +29,7 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-from core.qdrant_auth import qdrant_headers
+from core.qdrant_auth import qdrant_headers, qdrant_urlopen
 
 logger = logging.getLogger("skills.procedural")
 
@@ -56,7 +56,7 @@ def _qdrant(path: str, body: dict | None = None, timeout: float = 15.0,
         headers=qdrant_headers({"Content-Type": "application/json"} if body is not None else {}),
         method=method or ("POST" if body is not None else "GET"),
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with qdrant_urlopen(req, timeout=timeout) as resp:
         return json.load(resp).get("result")
 
 

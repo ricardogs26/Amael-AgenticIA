@@ -64,7 +64,7 @@ spec:
 
       containers:
       - name: amael-agentic-backend
-        image: registry.richardx.dev/amael-agentic-backend:1.20.0
+        image: registry.richardx.dev/amael-agentic-backend:1.20.1
         imagePullPolicy: Always
         ports:
         - name: http
@@ -76,6 +76,8 @@ spec:
             name: amael-agentic-configmap
 
         env:
+        - name: QDRANT_CA_FILE
+          value: /etc/amael/ca/ca.crt
         - name: QDRANT_API_KEY
           valueFrom:
             secretKeyRef:
@@ -266,6 +268,10 @@ spec:
         - name: jwt-keys
           mountPath: /etc/amael/jwt
           readOnly: true
+        # CA interna de Qdrant (TLS, 03b-qdrant-tls.yaml).
+        - name: amael-ca
+          mountPath: /etc/amael/ca
+          readOnly: true
 
       volumes:
       - name: whisper-cache
@@ -274,6 +280,9 @@ spec:
       - name: jwt-keys
         secret:
           secretName: amael-jwt-keys
+      - name: amael-ca
+        configMap:
+          name: amael-ca-crt
 
 ---
 apiVersion: v1

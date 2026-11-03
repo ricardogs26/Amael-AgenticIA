@@ -1,0 +1,67 @@
+# TLS de Qdrant (A35, nov-2026): la llave de Qdrant ya no viaja en claro dentro del cluster.
+#
+# CA interna `amael-ca` (10 años) firmada por el selfsigned-issuer del cluster; el
+# Issuer `amael-ca-issuer` firma el certificado de Qdrant (cert-manager lo renueva solo,
+# Qdrant lo relee cada hora con QDRANT__TLS__CERT_TTL).
+#
+# Los clientes confían en la CA por el ConfigMap `amael-ca-crt` (solo el certificado
+# público; la llave de la CA nunca sale del Secret `amael-ca`). Se crea a mano tras emitir
+# la CA:
+#   kubectl get secret amael-ca -n amael-ia -o jsonpath='{.data.ca\.crt}' | base64 -d \
+#     | kubectl create configmap amael-ca-crt -n amael-ia --from-file=ca.crt=/dev/stdin
+# En el host (ingesta del vault, qwen-local): ~/.config/amael/qdrant-ca.crt.
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: amael-ca
+  namespace: amael-ia
+spec:
+  isCA: true
+  commonName: amael-ca
+  secretName: amael-ca
+  duration: 87600h      # 10 años
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: amael-ca-issuer
+  namespace: amael-ia
+spec:
+  ca:
+    secretName: amael-ca
+
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: qdrant-tls
+  namespace: amael-ia
+spec:
+  secretName: qdrant-tls
+  duration: 8760h       # 1 año
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  dnsNames:
+    - qdrant-service
+    - qdrant-service.amael-ia
+    - qdrant-service.amael-ia.svc
+    - qdrant-service.amael-ia.svc.cluster.local
+  # ClusterIP fija: el host (ingesta del vault, qwen-local) entra por IP.
+  ipAddresses:
+    - 10.152.183.251
+  issuerRef:
+    name: amael-ca-issuer
+    kind: Issuer

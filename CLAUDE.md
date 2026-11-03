@@ -276,8 +276,15 @@ Cada una nació de un incidente real (detalle en el historial del vault).
 Qdrant corre con `QDRANT__SERVICE__API_KEY` + `JWT_RBAC` (Secret `qdrant-auth`, creado fuera de
 git desde `~/.secrets/qdrant-api-key`) y la NetworkPolicy `qdrant-ingress` solo deja entrar
 backend, Raphael y `qdrant-backup`. **Todo cliente nuevo de Qdrant pasa por
-`core/qdrant_auth.py`** (`qdrant_api_key()` para `QdrantClient`/LangChain, `qdrant_headers()`
-para urllib). Un pod nuevo que necesite Qdrant requiere: la variable `QDRANT_API_KEY` desde el
+`core/qdrant_auth.py`** (`qdrant_client_kwargs()` para `QdrantClient`, `qdrant_headers()` +
+`qdrant_urlopen()` para urllib). Un pod nuevo que necesite Qdrant requiere: la variable `QDRANT_API_KEY` desde el
 Secret, la etiqueta `app` en la lista de la NetworkPolicy, y nunca `api_key=None` a mano. Desde
 el host (lab-home) se llega por ClusterIP con la llave: la NetworkPolicy no filtra tráfico del
 nodo. Qwen Code usará un JWT de solo lectura firmado con esa llave (F3).
+
+**TLS desde nov-2026 (A35)**: Qdrant solo habla `https` con un certificado de la CA interna
+`amael-ca` (cert-manager, `k8s/infrastructure/03b-qdrant-tls.yaml`; Qdrant lo relee cada hora).
+Los clientes confían en la CA con `QDRANT_CA_FILE` (ConfigMap `amael-ca-crt` montado en
+`/etc/amael/ca`): `QdrantClient(url=..., **qdrant_client_kwargs())` y `qdrant_urlopen()` para
+urllib. En el host la CA está en `~/.config/amael/qdrant-ca.crt` (la usa `vault_ingest.py`).
+Un pod nuevo también monta `amael-ca-crt`.

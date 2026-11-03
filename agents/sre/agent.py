@@ -19,7 +19,7 @@ from typing import Any
 from agents.base.agent_registry import AgentRegistry
 from core.agent_base import AgentResult, BaseAgent
 from core.embedding_opts import embed_payload
-from core.qdrant_auth import qdrant_api_key
+from core.qdrant_auth import qdrant_client_kwargs
 
 logger = logging.getLogger("agents.sre.agent")
 
@@ -202,7 +202,7 @@ def init_runbooks_qdrant() -> None:
         from qdrant_client import QdrantClient
         from qdrant_client.models import Distance, PointStruct, VectorParams
 
-        client = QdrantClient(url=_QDRANT_URL, api_key=qdrant_api_key())
+        client = QdrantClient(url=_QDRANT_URL, **qdrant_client_kwargs())
 
         # Crear colección si no existe
         existing = {c.name for c in client.get_collections().collections}

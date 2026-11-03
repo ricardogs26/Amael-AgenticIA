@@ -23,7 +23,7 @@ def _usar(cliente):
 
 
 def test_error_de_lectura_no_borra(vectorstore):
-    vectorstore.from_existing_collection.side_effect = TimeoutError("qdrant lento")
+    vectorstore.side_effect = TimeoutError("qdrant lento")
     cliente = MagicMock()
     cliente.collection_exists.return_value = True
     a, b = _usar(cliente)

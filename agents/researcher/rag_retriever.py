@@ -16,7 +16,7 @@ import os
 import re
 import threading
 
-from core.qdrant_auth import qdrant_api_key
+from core.qdrant_auth import qdrant_client_kwargs
 
 logger = logging.getLogger("agents.researcher.rag")
 
@@ -42,7 +42,7 @@ def _get_qdrant_client():
         with _qdrant_lock:
             if _qdrant_client is None:  # double-checked locking
                 from qdrant_client import QdrantClient
-                _qdrant_client = QdrantClient(url=_QDRANT_URL, api_key=qdrant_api_key())
+                _qdrant_client = QdrantClient(url=_QDRANT_URL, **qdrant_client_kwargs())
     return _qdrant_client
 
 
@@ -84,11 +84,10 @@ def get_user_vectorstore(user_email: str):
     embedding = _get_embeddings()
 
     if client.collection_exists(collection_name):
-        return QdrantVectorStore.from_existing_collection(
-            embedding=embedding,
+        return QdrantVectorStore(
+            client=client,
             collection_name=collection_name,
-            url=_QDRANT_URL,
-            api_key=qdrant_api_key(),
+            embedding=embedding,
         )
 
     client.create_collection(

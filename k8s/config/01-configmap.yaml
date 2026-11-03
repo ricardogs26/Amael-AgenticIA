@@ -72,7 +72,7 @@ data:
   REDIS_DB:   "0"
 
   # ── Qdrant ────────────────────────────────────────────────────────────────
-  QDRANT_URL: "http://qdrant-service:6333"
+  QDRANT_URL: "https://qdrant-service:6333"   # TLS desde nov-2026 (03b-qdrant-tls.yaml)
 
   # ── MinIO ─────────────────────────────────────────────────────────────────
   MINIO_ENDPOINT: "minio-service:9000"

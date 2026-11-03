@@ -34,7 +34,18 @@ import yaml
 
 CONFIG = Path(__file__).with_name("exclusiones.yaml")
 VAULT = Path(os.environ.get("VAULT_DIR", "~/obsidian-vault")).expanduser()
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://10.152.183.251:6333")
+QDRANT_URL = os.environ.get("QDRANT_URL", "https://10.152.183.251:6333")
+# CA interna de Qdrant (TLS desde nov-2026). En el cluster la monta el pod; en el host
+# vive fuera de git en ~/.config/amael/qdrant-ca.crt.
+QDRANT_CA_FILE = os.environ.get(
+    "QDRANT_CA_FILE", str(Path.home() / ".config/amael/qdrant-ca.crt"))
+
+
+def _contexto_tls():
+    if not QDRANT_CA_FILE or not Path(QDRANT_CA_FILE).is_file():
+        return None
+    import ssl
+    return ssl.create_default_context(cafile=QDRANT_CA_FILE)
 OLLAMA_URL = (os.environ.get("OLLAMA_EMBED_URL") or os.environ.get("OLLAMA_URL")
               or "http://10.152.183.25:11434")
 LLAVE_QDRANT = Path(os.environ.get("QDRANT_KEY_FILE", "~/.secrets/qdrant-api-key")).expanduser()
@@ -259,6 +270,7 @@ def recorrer_vault(vault: Path, cfg: dict) -> list[Nota]:
 class Qdrant:
     def __init__(self, url: str, llave: str, espera: int = 120):
         self.url, self.llave, self.espera = url.rstrip("/"), llave, espera
+        self.tls = _contexto_tls() if self.url.startswith("https") else None
 
     def _pedir(self, metodo: str, ruta: str, cuerpo: dict | None = None) -> dict:
         peticion = urllib.request.Request(
@@ -267,7 +279,7 @@ class Qdrant:
             data=None if cuerpo is None else json.dumps(cuerpo).encode(),
             headers={"api-key": self.llave, "Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(peticion, timeout=self.espera) as r:
+        with urllib.request.urlopen(peticion, timeout=self.espera, context=self.tls) as r:
             return json.loads(r.read())
 
     def asegurar_coleccion(self, nombre: str) -> None:

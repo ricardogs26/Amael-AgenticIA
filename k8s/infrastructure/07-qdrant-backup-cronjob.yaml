@@ -58,7 +58,9 @@ spec:
 
               TIMESTAMP=$(date +%Y%m%d_%H%M%S)
               BUCKET="amael-backups"
-              QDRANT="http://qdrant-service:6333"
+              QDRANT="https://qdrant-service:6333"
+              # TLS con la CA interna (03b-qdrant-tls.yaml).
+              export CURL_CA_BUNDLE=/etc/amael/ca/ca.crt
               AUTH="api-key: ${QDRANT_API_KEY}"
               MINIO_URL="http://${MINIO_ENDPOINT}"
               WORKDIR="/tmp/qdrant_${TIMESTAMP}"
@@ -116,6 +118,9 @@ spec:
             volumeMounts:
             - name: tools
               mountPath: /tools
+            - name: amael-ca
+              mountPath: /etc/amael/ca
+              readOnly: true
             resources:
               requests:
                 cpu: "100m"
@@ -126,3 +131,6 @@ spec:
           volumes:
           - name: tools
             emptyDir: {}
+          - name: amael-ca
+            configMap:
+              name: amael-ca-crt

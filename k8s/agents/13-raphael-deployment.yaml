@@ -85,7 +85,8 @@ data:
   REDIS_DB:   "0"
 
   # ── Qdrant / MinIO ───────────────────────────────────────────────────────
-  QDRANT_URL:     "http://qdrant-service:6333"
+  QDRANT_URL:     "https://qdrant-service:6333"
+  QDRANT_CA_FILE: "/etc/amael/ca/ca.crt"
   MINIO_ENDPOINT: "minio-service:9000"
   MINIO_BUCKET:   "amael-uploads"
   MINIO_SECURE:   "false"
@@ -217,7 +218,7 @@ spec:
 
       containers:
         - name: raphael
-          image: registry.richardx.dev/raphael-service:1.1.47
+          image: registry.richardx.dev/raphael-service:1.1.49
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -280,6 +281,17 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
 
+          # CA interna para hablar con Qdrant por TLS (03b-qdrant-tls.yaml).
+          volumeMounts:
+            - name: amael-ca
+              mountPath: /etc/amael/ca
+              readOnly: true
+            # Llavero JWT (rotacion-tokens): morning-audio llama a Raphael con su
+            # token de servicio y Raphael lo valida igual que el backend.
+            - name: jwt-keys
+              mountPath: /etc/amael/jwt
+              readOnly: true
+
           # ── Recursos ─────────────────────────────────────────────────────
           resources:
             requests:
@@ -319,6 +331,13 @@ spec:
             capabilities:
               drop:
                 - ALL
+      volumes:
+        - name: amael-ca
+          configMap:
+            name: amael-ca-crt
+        - name: jwt-keys
+          secret:
+            secretName: amael-jwt-keys
 
 ---
 # ── Service ─────────────────────────────────────────────────────────────────
