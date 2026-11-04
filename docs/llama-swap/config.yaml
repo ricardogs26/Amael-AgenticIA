@@ -1,0 +1,61 @@
+healthCheckTimeout: 900
+logLevel: info
+startPort: 10001
+models:
+  gemma4-12b-heretic:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -ngl 99 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /ollama/blobs/sha256-6c4067ea0210d2367b2dbdd460d2dd86032a9b6e8dcbe03b83a3ea0a0a16dbee --mmproj /ollama/blobs/sha256-2e269f906eb15169ee9ce880ea649bd6d42d4964c21f8ede10d0d0efc738bcbb
+    ttl: 0
+  gemma4-26b-a4b-auto:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/gemma4-26b-a4b/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf -fit on
+    ttl: 0
+  gemma4-26b-a4b-ncmoe6:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -ngl 99 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/gemma4-26b-a4b/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf --n-cpu-moe 6
+    ttl: 0
+  gemma4-26b-a4b-ncmoe12:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -ngl 99 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/gemma4-26b-a4b/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf --n-cpu-moe 12
+    ttl: 0
+  gemma4-26b-a4b-ncmoe18:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -ngl 99 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/gemma4-26b-a4b/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf --n-cpu-moe 18
+    ttl: 0
+  gemma4-26b-a4b-heretic-auto:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/gemma4-26b-a4b-heretic/gemma-4-26B-A4B-it-uncensored-heretic-Q4_K_M.gguf -fit on
+    ttl: 0
+  gemma4-26b-a4b-heretic-ncmoe6:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -ngl 99 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/gemma4-26b-a4b-heretic/gemma-4-26B-A4B-it-uncensored-heretic-Q4_K_M.gguf --n-cpu-moe 6
+    ttl: 0
+  gemma4-26b-a4b-heretic-ncmoe12:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -ngl 99 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/gemma4-26b-a4b-heretic/gemma-4-26B-A4B-it-uncensored-heretic-Q4_K_M.gguf --n-cpu-moe 12
+    ttl: 0
+  gemma4-26b-a4b-heretic-ncmoe18:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -ngl 99 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/gemma4-26b-a4b-heretic/gemma-4-26B-A4B-it-uncensored-heretic-Q4_K_M.gguf --n-cpu-moe 18
+    ttl: 0
+  qwen36-35b-a3b-auto:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/qwen36-35b-a3b/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf -fit on
+    ttl: 0
+  qwen36-35b-a3b-ncmoe16:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -ngl 99 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/qwen36-35b-a3b/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf --n-cpu-moe 16
+    ttl: 0
+  qwen36-35b-a3b-ncmoe24:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -ngl 99 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/qwen36-35b-a3b/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf --n-cpu-moe 24
+    ttl: 0
+  qwen36-35b-a3b-ncmoe32:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -ngl 99 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/qwen36-35b-a3b/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf --n-cpu-moe 32
+    ttl: 0
+  qwen36-35b-a3b-heretic-auto:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/qwen36-35b-a3b-heretic/Qwen3.6-35B-A3B-uncensored-heretic-Q4_K_M.gguf -fit on
+    ttl: 0
+  qwen36-35b-a3b-heretic-ncmoe16:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -ngl 99 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/qwen36-35b-a3b-heretic/Qwen3.6-35B-A3B-uncensored-heretic-Q4_K_M.gguf --n-cpu-moe 16
+    ttl: 0
+  qwen36-35b-a3b-heretic-ncmoe24:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -ngl 99 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/qwen36-35b-a3b-heretic/Qwen3.6-35B-A3B-uncensored-heretic-Q4_K_M.gguf --n-cpu-moe 24
+    ttl: 0
+  qwen36-35b-a3b-heretic-ncmoe32:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -ngl 99 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/qwen36-35b-a3b-heretic/Qwen3.6-35B-A3B-uncensored-heretic-Q4_K_M.gguf --n-cpu-moe 32
+    ttl: 0
+  qwen38-27b-q4-fit:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/qwen38-27b/Qwen3.8-27B-UD-Q4_K_M.gguf -fit on
+    ttl: 0
+  qwen38-27b-iq3-fit:
+    cmd: /app/llama-server --port ${PORT} --host 127.0.0.1 -c 131072 -np 2 -fa on -ctk q8_0 -ctv q8_0 --jinja --metrics -t 8 --temp 0.25 --top-k 25 --top-p 0.92 --repeat-penalty 1.05 -no-kvu -m /modelos/qwen38-27b/Qwen3.8-27B-UD-IQ3_XXS.gguf -fit on
+    ttl: 0

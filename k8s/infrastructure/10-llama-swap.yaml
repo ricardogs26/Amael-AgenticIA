@@ -1,0 +1,43 @@
+# A45 (3-nov-2026): llama-swap + llama-server para comparar contra Ollama y probar MoE.
+# Queda en replicas: 0. NUNCA junto con ollama-deployment en 1: hay una sola GPU.
+# Encender: escalar ollama-deployment a 0, esperar a que termine, y luego este a 1.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-swap
+  namespace: amael-ia
+  labels: {app: llama-swap}
+spec:
+  replicas: 0
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: llama-swap}}
+  template:
+    metadata: {labels: {app: llama-swap}}
+    spec:
+      containers:
+      - name: llama-swap
+        image: ghcr.io/mostlygeek/llama-swap:v269-cuda13-b12063
+        imagePullPolicy: IfNotPresent
+        args: ["-config", "/config/config.yaml", "-listen", ":8080"]
+        ports: [{containerPort: 8080, name: http}]
+        resources:
+          requests: {cpu: "1", memory: 8Gi, nvidia.com/gpu: "1"}
+          limits: {cpu: "8", memory: 36Gi, nvidia.com/gpu: "1"}
+        volumeMounts:
+        - {name: config, mountPath: /config}
+        - {name: ollama, mountPath: /ollama, subPath: models, readOnly: true}
+        - {name: modelos, mountPath: /modelos, readOnly: true}
+      volumes:
+      - name: config
+        configMap: {name: llama-swap-config}
+      - name: ollama
+        persistentVolumeClaim: {claimName: ollama-pvc, readOnly: true}
+      - name: modelos
+        hostPath: {path: /home/richardx/llm-modelos, type: Directory}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: llama-swap, namespace: amael-ia}
+spec:
+  selector: {app: llama-swap}
+  ports: [{name: http, port: 8080, targetPort: 8080}]
