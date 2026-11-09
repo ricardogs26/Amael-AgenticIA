@@ -1,30 +1,13 @@
-# ── Ollama CPU — tier profundo / batch, sin GPU ───────────────────────────────
-# Creado 5-ago-2026 (plan "C" del análisis de VRAM).
+# ── Ollama CPU — embeddings, sin GPU ─────────────────────────────────────────
+# Creado 5-ago-2026 (plan "C" del análisis de VRAM) como tier profundo con
+# qwen3:30b-a3b en CPU. Ese uso se retiró el 9-nov-2026 (D40 a): el modelo
+# cargaba 18 GiB en RAM cada lunes 08:00 y llevó el nodo al 95 %. El tier
+# profundo de Raphael y Camael ahora cae al alias de Gemma en la GPU, y el
+# 30b se borró del PVC.
 #
-# Propósito: correr modelos MoE grandes 100% en CPU para trabajo asíncrono,
-# SIN tocar la GPU. La instancia con GPU (05-ollama.yaml) queda íntegra para la
-# ruta interactiva (qwen3:1.7b + qwen3:14b a 64 tok/s).
-#
-# Consumidores previstos (todos asíncronos, ninguno sensible a latencia):
-#   - agents/sre/reporter.py             → postmortems tras cada remediación
-#   - agents/sre/runbook_consolidator.py → consolidación diaria 03:00 UTC
-#   - agents/devops/camael_analyzer.py   → análisis de recursos para PRs
-#
-# Hoy esos trabajos usan la GPU y provocan swaps de ~4 s que golpean el tráfico
-# interactivo. Moverlos aquí elimina esa contención.
-#
-# Modelos:
-#   ollama pull qwen3:30b-a3b-instruct-2507-q4_K_M   # 17.3 GB — 30.5B tot / 3.3B act
-#
-# ⛔ nomic-embed-text NO se sirve desde aquí. Se midió (5-ago-2026, 10 cores
-#    dedicados) contra la instancia GPU y pierde por goleada:
-#      batch 1  →  29 ms (GPU) vs  158 ms (CPU)  —  5.4×
-#      batch 8  →  60 ms       vs 1132 ms        —   19×
-#      batch 32 → 176 ms       vs 4439 ms        —   25×
-#    La idea era liberar VRAM para subir OLLAMA_CONTEXT_LENGTH de 4096 a 6144
-#    en la instancia GPU (plan "D"). No compensa: +129 ms en CADA consulta RAG
-#    a cambio de +2048 tokens de contexto. El contexto se queda en 4096.
-#    (La imagen del modelo quedó descargada aquí; es inofensiva, 274 MB.)
+# Hoy solo sirve nomic-embed-text (274 MB): embeddings del backend y de Raphael
+# (OLLAMA_EMBED_URL).
+# Pico medido sin el 30b: 665 MiB de working set y 2.5 cores (7 días al 9-nov).
 #
 # ⚠️  NO pedir nvidia.com/gpu. El device plugin no inyecta /dev/nvidia* en pods
 #     que no soliciten el recurso, pero CUDA_VISIBLE_DEVICES="" lo hace explícito.
@@ -46,7 +29,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 25Gi   # qwen3:30b-a3b ~17.3GB + nomic-embed-text ~274MB + margen
+      storage: 25Gi   # dimensionado para el 30b (retirado); hostpath no permite encoger el PVC
 
 ---
 apiVersion: apps/v1
@@ -77,10 +60,10 @@ spec:
         resources:
           requests:
             cpu: "500m"
-            memory: "8Gi"
+            memory: "1Gi"
           limits:
-            cpu: "10"      # el decode MoE en CPU escala con cores
-            memory: "24Gi" # qwen3:30b-a3b residente ~19GB + KV
+            cpu: "10"      # embeddings por lotes escalan con cores (pico 2.5)
+            memory: "4Gi"  # nomic-embed-text: pico 665 MiB; margen para lotes grandes
         env:
         - name: OLLAMA_HOST
           value: "0.0.0.0"
