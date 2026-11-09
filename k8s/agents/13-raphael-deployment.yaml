@@ -49,14 +49,6 @@ data:
   LLM_VISION_MODEL: "gemma4-uncensored-amael:latest"  # 13-ago: visión en el causal, ver 01-configmap
   LLM_EMBED_MODEL:  "nomic-embed-text"
 
-  # ── Tier profundo (ollama-cpu, sin GPU) ──────────────────────────────────
-  # Trabajo asíncrono que no debe desalojar el modelo interactivo de la VRAM:
-  #   - postmortems      → reporter.py, ~300 s después de cada ROLLOUT_RESTART
-  #   - retrospectiva    → briefing.py, lunes 08:00 hora de México
-  # 16.7 tok/s en CPU + 28.6 s de carga en frío (medido 5-ago-2026).
-  # Borrar ambas claves revierte al comportamiento anterior sin tocar código.
-  OLLAMA_DEEP_URL:  "http://ollama-cpu-service:11434"
-  LLM_DEEP_MODEL:   "qwen3:30b-a3b-instruct-2507-q4_K_M"
 
   # ── Vigilancia de ubicación de modelos (observe_llm_placement) ───────────
   # Ollama decide si un modelo va a VRAM o CPU AL CARGARLO, y no lo revisa
