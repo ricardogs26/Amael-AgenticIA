@@ -1,0 +1,27 @@
+# amael.trinaxis.com: la presentación pública de Amael IA bajo el dominio de la empresa
+# (la misma que amael-ia.richardx.dev/poc). Solo sirve la presentación; la app sigue en
+# amael-ia.richardx.dev.
+#
+# Sin TLS en el ingress: el token de cert-manager solo cubre richardx.dev. El túnel de
+# Cloudflare (lab-microk8s) termina el TLS público y entra por HTTP, por eso aquí no se
+# fuerza la redirección a HTTPS (haría un bucle).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: amael-trinaxis-ingress
+  namespace: amael-ia
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: public
+  rules:
+  - host: amael.trinaxis.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: poc-presentation-service
+            port:
+              number: 80
