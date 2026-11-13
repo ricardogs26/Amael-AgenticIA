@@ -96,7 +96,8 @@ spec:
                     amael-ia/whatsapp-bridge-deployment,
                     trader/trader-service,
                     asistentes/whatsapp-gateway,
-                    asistentes/agente-faq
+                    asistentes/agente-faq,
+                    asistentes/agente-alta
                 # El trader salió de amael-ia (oct-2026); su backup vive en `trader`.
                 - name: WATCHDOG_BACKUPS
                   value: >-
