@@ -81,7 +81,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: watchdog
-              image: registry.richardx.dev/raphael-service:1.1.52
+              image: registry.richardx.dev/raphael-service:1.1.53
               imagePullPolicy: IfNotPresent
               command: ["python", "-m", "agents.sre.watchdog"]
               env:
@@ -144,6 +144,10 @@ spec:
                   value: "AS8151"
                 - name: WATCHDOG_WAN_BACKUP_MIN
                   value: "15"
+                # Salida por VPN del host (AS136787 = NordVPN): aviso «VPN activa»
+                # en lugar de «WAN caída» (17-nov-2026).
+                - name: WATCHDOG_WAN_VPN_ASNS
+                  value: "AS136787"
                 # Correo si WhatsApp falla (31-oct-2026). En un Secret y no en Vault
                 # porque Vault sellado es uno de los avisos. `optional`: sin él, el
                 # watchdog sigue solo con WhatsApp.

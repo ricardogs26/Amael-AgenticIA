@@ -76,6 +76,7 @@ Env vars:
     WATCHDOG_BACKUP_MAX_HOURS  antigüedad máxima del último backup exitoso (26)
     WATCHDOG_WAN_PRIMARY_ASN  ASN de la WAN principal (AS8151 = Infinitum; "" desactiva)
     WATCHDOG_WAN_BACKUP_MIN   minutos en el respaldo antes de avisar (15)
+    WATCHDOG_WAN_VPN_ASNS     ASN de VPN del host, separados por coma (AS136787 = NordVPN)
     WATCHDOG_SMTP_USER     usuario SMTP ("" desactiva el correo)
     WATCHDOG_SMTP_PASSWORD credencial SMTP
     WATCHDOG_SMTP_HOST     servidor SMTP con STARTTLS (smtp.resend.com)
@@ -139,6 +140,13 @@ _WAN_PRIMARY_ASN = os.environ.get("WATCHDOG_WAN_PRIMARY_ASN", "AS8151")
 _WAN_BACKUP_MIN  = int(os.environ.get("WATCHDOG_WAN_BACKUP_MIN", "15"))
 _WAN_INFO_URL    = os.environ.get("WATCHDOG_WAN_INFO_URL", "https://ipinfo.io/json")
 _WAN_SINCE_KEY   = "watchdog:wan:backup_since"
+# Con NordVPN en el host la salida es la del servidor de la VPN (PacketHub):
+# no dice nada de la WAN y el 17-nov-2026 se avisó «WAN caída» durante 8.5 h
+# con Infinitum sano. Además NordVPN apaga IPv6 en `lo` y el apiserver se queda
+# sin ::1: no se crean pods. Ese es el aviso útil.
+_WAN_VPN_ASNS = tuple(
+    a.strip() for a in os.environ.get("WATCHDOG_WAN_VPN_ASNS", "AS136787").split(",") if a.strip()
+)
 # Rotación de tokens de servicio (nov-2026): el rotador deja su estado en este
 # ConfigMap. Vaciar para desactivar.
 _TOKENS_CM      = os.environ.get("WATCHDOG_TOKENS_CM", "")
@@ -580,6 +588,23 @@ def check_wan(r=None, now=None) -> tuple[str | None, str | None]:
                 logger.warning(f"Redis falló en el chequeo WAN ({exc}).")
         return None, regreso
 
+    if _WAN_VPN_ASNS and org.startswith(_WAN_VPN_ASNS):
+        # No se sabe qué WAN está activa; se limpia el reloj del respaldo para
+        # que al desconectar la VPN no se cuente este rato como caída.
+        if r is not None:
+            try:
+                r.delete(_WAN_SINCE_KEY)
+            except Exception as exc:
+                logger.warning(f"Redis falló en el chequeo WAN ({exc}).")
+        return (
+            f"`red/vpn` el host sale a internet por una VPN ({org}, {ip}): no se puede "
+            "saber qué WAN está activa. Con NordVPN conectado se apaga IPv6 en `lo` y el "
+            "cluster no puede crear pods (`dial tcp [::1]:16443`). Desconéctala "
+            "(`nordvpn disconnect`) o reactiva `lo` con "
+            "`sudo sysctl -w net.ipv6.conf.lo.disable_ipv6=0`.",
+            None,
+        )
+
     mins = None
     if r is not None:
         try:
@@ -664,7 +689,12 @@ def send_alert(problems: list[str]) -> bool:
     solo_preventivo = all("expira en" in p for p in problems)
     # La WAN caída no es un pod caído: mandar a `kubectl get pods` despista.
     solo_red = all("`red/" in p for p in problems)
-    if solo_red:
+    if solo_red and all("`red/vpn`" in p for p in problems):
+        text = (
+            "🔒 *WATCHDOG — VPN activa en el host*\n\n"
+            + "\n".join(f"• {p}" for p in problems)
+        )
+    elif solo_red:
         text = (
             "🌐 *WATCHDOG — internet en respaldo*\n\n"
             + "\n".join(f"• {p}" for p in problems)

@@ -611,6 +611,31 @@ def test_wan_sin_respuesta_calla(monkeypatch):
     assert watchdog.check_wan(_WanRedis(), _t(0)) == (None, None)
 
 
+def test_wan_con_vpn_avisa_vpn_y_no_wan_caida(monkeypatch):
+    """17-nov-2026: con NordVPN se avisó «WAN caída» 8.5 h con Infinitum sano."""
+    r = _WanRedis()
+    _wan(monkeypatch, "AS14593 Space Exploration Technologies Corporation")
+    watchdog.check_wan(r, _t(0))
+    _wan(monkeypatch, "AS136787 PacketHub S.A.", "187.14.126.121")
+    problem, regreso = watchdog.check_wan(r, _t(30))
+    assert regreso is None
+    assert problem.startswith("`red/vpn`")
+    assert "RESPALDO" not in problem and "::1" in problem
+    # El rato con VPN no cuenta como respaldo al desconectarla.
+    assert r.get(watchdog._WAN_SINCE_KEY) is None
+    _wan(monkeypatch, "AS8151 Uninet S.A. de C.V.")
+    assert watchdog.check_wan(r, _t(40)) == (None, None)
+
+
+def test_alerta_de_vpn_tiene_su_titulo(monkeypatch):
+    sent = {}
+    monkeypatch.setattr(watchdog, "_PHONE", "521")
+    monkeypatch.setattr(watchdog, "_post", lambda text: sent.setdefault("t", text) or True)
+    watchdog.send_alert(["`red/vpn` el host sale a internet por una VPN (AS136787, x)"])
+    assert "VPN activa" in sent["t"]
+    assert "internet en respaldo" not in sent["t"] and "kubectl get pods" not in sent["t"]
+
+
 def test_alerta_de_wan_no_manda_a_mirar_pods(monkeypatch):
     sent = {}
     monkeypatch.setattr(watchdog, "_PHONE", "521")
