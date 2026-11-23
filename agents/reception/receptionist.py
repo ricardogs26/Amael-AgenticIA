@@ -269,6 +269,9 @@ def _handle_private(
     30-oct-2026: los 3 leads privados abrían con dos «adjuntos» casi simultáneos
     que parecen eventos de WhatsApp y no archivos. Solo se contesta al primer
     TEXTO, para no escribirle a quien aún no escribió nada.
+
+    22-nov-2026: esos eventos también llegan sin adjunto y con texto vacío (se
+    guardan como ""). Contaban como mensaje y el saludo no salió en 3 leads.
     """
     from observability.metrics import RECEPTION_MESSAGES_TOTAL
 
@@ -287,10 +290,17 @@ def _handle_private(
         return None
 
     previos = [] if first else storage.recent_messages(lead.id, CONTEXT_TURNS)
-    saludar = bool(text) and all(r == "visitor" and c.startswith(ADJUNTO) for r, c in previos)
+    saludar = bool(text) and all(
+        r == "visitor" and (not c or c.startswith(ADJUNTO)) for r, c in previos
+    )
     storage.add_message(lead.id, "visitor", _adjunto(text, msg_type) if has_media else text)
     lead.message_count = storage.bump_count(lead.id)
     RECEPTION_MESSAGES_TOTAL.labels(result="private").inc()
+    # Un evento vacío se guarda pero no avisa: el 22-nov llegaron 9 avisos en
+    # blanco por 3 personas. El primer texto o adjunto real sí avisa.
+    if not text and not has_media:
+        logger.info(f"[reception] desconocido #{lead.id} ({phone}) evento vacío — guardado")
+        return None
     logger.info(f"[reception] desconocido #{lead.id} ({phone}) sin frase — guardado y avisado")
     _notify_private(lead, text, has_media, display_name, msg_type)
     return prompts.REPLY_PRIVATE if saludar else None

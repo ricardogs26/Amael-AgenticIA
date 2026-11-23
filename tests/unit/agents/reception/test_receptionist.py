@@ -351,6 +351,23 @@ class TestPrivadoSinPrimerTexto:
         assert receptionist.handle_message(self.TEL, "Hola") == prompts.REPLY_PRIVATE
         assert receptionist.handle_message(self.TEL, "soy Ana") is None
 
+    def test_saluda_tras_eventos_vacios_sin_adjunto(self, wired):
+        # 22-nov-2026: leads 29/31/32 abrieron con eventos vacíos sin has_media.
+        # (el fixture limita a 3 mensajes por número)
+        st, _ = wired
+        for _ in range(2):
+            assert receptionist.handle_message(self.TEL, "") is None
+        assert receptionist.handle_message(self.TEL, "B nochs") == prompts.REPLY_PRIVATE
+        assert st.msgs[-1] == ("visitor", "B nochs")
+
+    def test_evento_vacio_se_guarda_sin_avisar(self, wired):
+        st, calls = wired
+        assert receptionist.handle_message(self.TEL, "") is None
+        assert st.msgs == [("visitor", "")]
+        assert calls["admin"] == []
+        receptionist.handle_message(self.TEL, "Hola")
+        assert len(calls["admin"]) == 1 and "«Hola»" in calls["admin"][0]
+
     def test_no_saluda_si_ricardo_ya_contesto(self, wired):
         st, _ = wired
         receptionist.handle_message(self.TEL, "", has_media=True)
